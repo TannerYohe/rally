@@ -166,7 +166,7 @@ class ReviewSessions extends EventEmitter {
       if (decision.allow) {
         return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } }
       }
-      this.append(sessionId, { kind: 'denied', id: input.tool_use_id, label: decision.reason, at: now() })
+      this.append(sessionId, { kind: 'denied', id: `${input.tool_use_id}:denied`, label: decision.reason, at: now() })
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',

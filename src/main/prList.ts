@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
-import { prKey, type Pr, type PrListState, type SessionStatus } from '@shared/types'
-import { summarizePr, summaryCacheKey } from './claude/summarize'
+import { headKey, prKey, type Pr, type PrListState, type SessionStatus } from '@shared/types'
+import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs } from './github/queries'
 import { buildSearchQueries } from './github/search'
@@ -76,7 +76,7 @@ class PrList extends EventEmitter {
     const now = new Date().toISOString()
     const recorded: Record<string, string> = prune ? {} : { ...seen }
     const result = prs.map((pr) => {
-      const key = `${pr.id}:${pr.headRefOid}`
+      const key = headKey(pr)
       const firstSeen = seen[key] ?? now
       recorded[key] = firstSeen
       const headKnownSince = pr.headKnownSince && pr.headKnownSince < firstSeen ? pr.headKnownSince : firstSeen
@@ -96,19 +96,19 @@ class PrList extends EventEmitter {
 
   private withSummaries(prs: Pr[]): Pr[] {
     const summaries = summariesFile.get()
-    return prs.map((pr) => ({ ...pr, summary: summaries[summaryCacheKey(pr)] ?? null }))
+    return prs.map((pr) => ({ ...pr, summary: summaries[headKey(pr)] ?? null }))
   }
 
   private async fillSummaries(): Promise<void> {
-    const pending = this.state.prs.filter((pr) => !pr.summary && !this.summarizing.has(summaryCacheKey(pr)))
+    const pending = this.state.prs.filter((pr) => !pr.summary && !this.summarizing.has(headKey(pr)))
     const workers = Array.from({ length: SUMMARY_CONCURRENCY }, async () => {
       for (let pr = pending.shift(); pr; pr = pending.shift()) {
-        const key = summaryCacheKey(pr)
+        const key = headKey(pr)
         this.summarizing.add(key)
         try {
           const summary = await summarizePr(pr)
           summariesFile.set({ ...summariesFile.get(), [key]: summary })
-          this.update({ prs: this.state.prs.map((p) => (summaryCacheKey(p) === key ? { ...p, summary } : p)) })
+          this.update({ prs: this.state.prs.map((p) => (headKey(p) === key ? { ...p, summary } : p)) })
         } catch (error) {
           console.error('PR summary failed', { pr: pr.url, error })
         } finally {

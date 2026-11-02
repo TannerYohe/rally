@@ -186,3 +186,7 @@ export interface ReviewSession {
 export function prKey(owner: string, repo: string, number: number): string {
   return `${owner}/${repo}#${number}`
 }
+
+export function headKey(pr: { id: string; headRefOid: string }): string {
+  return `${pr.id}:${pr.headRefOid}`
+}

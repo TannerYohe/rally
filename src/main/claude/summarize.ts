@@ -8,10 +8,6 @@ const SYSTEM_PROMPT =
   'You summarize GitHub pull requests for a reviewer dashboard. Reply with one plain sentence under 20 words ' +
   'describing what the change does. No preamble, no markdown, no PR number.'
 
-export function summaryCacheKey(pr: Pr): string {
-  return `${pr.id}:${pr.headRefOid}`
-}
-
 function summaryPrompt(pr: Pr): string {
   return [
     `Title: ${pr.title}`,

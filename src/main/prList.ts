@@ -4,7 +4,7 @@ import { summarizePr, summaryCacheKey } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs } from './github/queries'
 import { buildSearchQueries } from './github/search'
-import { configFile, prCacheFile, summariesFile } from './store'
+import { configFile, headsSeenFile, prCacheFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
@@ -54,7 +54,7 @@ class PrList extends EventEmitter {
     try {
       const { viewer, prs } = await searchPrs(buildSearchQueries(configFile.get()))
       const refreshedAt = new Date().toISOString()
-      this.update({ prs: this.withReviewStatus(this.withSummaries(prs)), viewer, refreshedAt, refreshing: false })
+      this.update({ prs: this.withReviewStatus(this.withHeadTimes(this.withSummaries(prs), true)), viewer, refreshedAt, refreshing: false })
       prCacheFile.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
     } catch (error) {
@@ -63,12 +63,27 @@ class PrList extends EventEmitter {
   }
 
   async refreshOne(owner: string, repo: string, number: number): Promise<void> {
-    const [fresh] = this.withReviewStatus(this.withSummaries([await fetchPr(owner, repo, number)]))
+    const [fresh] = this.withReviewStatus(this.withHeadTimes(this.withSummaries([await fetchPr(owner, repo, number)]), false))
     const prs = this.state.prs.some((p) => p.id === fresh.id)
       ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p))
       : [...this.state.prs, fresh]
     this.update({ prs })
     prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
+  }
+
+  private withHeadTimes(prs: Pr[], prune: boolean): Pr[] {
+    const seen = headsSeenFile.get()
+    const now = new Date().toISOString()
+    const recorded: Record<string, string> = prune ? {} : { ...seen }
+    const result = prs.map((pr) => {
+      const key = `${pr.id}:${pr.headRefOid}`
+      const firstSeen = seen[key] ?? now
+      recorded[key] = firstSeen
+      const headKnownSince = pr.headKnownSince && pr.headKnownSince < firstSeen ? pr.headKnownSince : firstSeen
+      return { ...pr, headKnownSince }
+    })
+    headsSeenFile.set(recorded)
+    return result
   }
 
   private withReviewStatus(prs: Pr[]): Pr[] {

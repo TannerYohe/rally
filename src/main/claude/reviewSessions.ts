@@ -121,6 +121,13 @@ class ReviewSessions extends EventEmitter {
     else this.pendingFlush ??= setTimeout(() => this.flush(), FLUSH_INTERVAL_MS)
   }
 
+  private updateTimeline(sessionId: string, reduce: (timeline: TimelineEntry[]) => TimelineEntry[]): void {
+    const session = this.find(sessionId)
+    if (!session) return
+    const timeline = reduce(session.timeline)
+    if (timeline !== session.timeline) this.patch(sessionId, () => ({ timeline }))
+  }
+
   private append(sessionId: string, entry: TimelineEntry): void {
     this.patch(sessionId, (s) => ({ timeline: [...s.timeline, entry] }))
   }
@@ -213,7 +220,7 @@ class ReviewSessions extends EventEmitter {
           this.patch(sessionId, () => ({ sdkSessionId: message.session_id }), true)
         }
         if (message.type === 'result') resultOk = message.subtype === 'success' && !message.is_error
-        this.patch(sessionId, (s) => ({ timeline: reduceTimeline(s.timeline, message, now()) }))
+        this.updateTimeline(sessionId, (timeline) => reduceTimeline(timeline, message, now()))
       }
       this.finishTurn(sessionId, mode, resultOk, submitted)
     } catch (error) {

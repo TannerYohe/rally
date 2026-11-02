@@ -1,4 +1,6 @@
-import { tmpdir } from 'node:os'
+import { existsSync, realpathSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
 
@@ -6,6 +8,12 @@ export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
 export interface PolicyContext {
   submitting: boolean
+  cwd: string
+}
+
+interface ShellState {
+  cwd: string | null
+  workTrusted: boolean
 }
 
 const ALWAYS_ALLOWED_TOOLS = new Set([
@@ -28,58 +36,34 @@ const ALWAYS_ALLOWED_TOOLS = new Set([
   'ToolSearch',
   'TodoWrite',
   'WebSearch',
+  'WebFetch',
   'LSP',
 ])
+
+const FILE_EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 
 const READ_ONLY_MCP_VERBS = new Set([
   'get', 'list', 'search', 'read', 'fetch', 'query', 'lookup', 'describe', 'explain', 'analyze', 'analyse', 'aggregate',
   'find', 'inspect', 'view',
 ])
 
-const NETWORK_COMMANDS = new Set([
-  'curl', 'wget', 'nc', 'ncat', 'netcat', 'socat', 'telnet', 'ftp', 'ssh', 'scp', 'sftp', 'rsync', 'dig', 'nslookup',
-  'host', 'ping', 'traceroute', 'open',
-])
+const REMOTE_SHELL_COMMANDS = new Set(['ssh', 'scp', 'sftp'])
 
-const CODE_RUNNERS = new Set([
-  'python', 'python3', 'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'lua', 'osascript', 'bash', 'sh', 'zsh', 'fish',
-  'dash', 'ksh', 'npm', 'npx', 'yarn', 'pnpm', 'bundle', 'bundler', 'rake', 'rails', 'rspec', 'pytest', 'tox', 'pip',
-  'pip3', 'pipx', 'uv', 'poetry', 'make', 'go', 'cargo', 'gradle', 'mvn', 'docker', 'sudo', 'env', 'nohup', 'timeout',
-  'nice', 'time', 'command', 'builtin', 'exec', 'eval', 'source', '.', 'xargs', 'parallel', 'watch', 'trap', 'alias',
-  'function', 'case', 'script', 'expect', 'screen', 'tmux', 'vi', 'vim', 'nvim', 'nano', 'emacs', 'less', 'more', 'man',
-])
+const INFRASTRUCTURE_COMMANDS = new Set(['kubectl', 'helm', 'aws', 'gcloud', 'az', 'terraform'])
 
-const INFRASTRUCTURE_COMMANDS = new Set([
-  'kubectl', 'helm', 'aws', 'gcloud', 'az', 'terraform', 'security', 'launchctl', 'crontab',
-])
+const SYSTEM_COMMANDS = new Set(['sudo', 'security', 'launchctl', 'crontab'])
+
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'])
+
+const WRAPPER_COMMANDS = new Set(['env', 'timeout', 'nice', 'nohup', 'time', 'command', 'exec', 'xargs', 'watch', 'parallel'])
 
 const SHELL_KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', '!', '{', '('])
 
-const DECLARATION_COMMANDS = new Set(['export', 'declare', 'typeset', 'readonly', 'local'])
-
-const PATH_OPERAND_COMMANDS = new Set(['rm', 'mv', 'tee', 'touch', 'truncate'])
-
-const DESTINATION_OPERAND_COMMANDS = new Set(['cp', 'ln', 'install'])
-
-const MODE_OPERAND_COMMANDS = new Set(['chmod', 'chown', 'chgrp'])
-
-const COMMAND_RUNNING_FLAGS = new Map([
-  ['find', ['-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprintf', '-fls']],
-  ['rg', ['--pre']],
-  ['sort', ['--compress-program']],
-  ['split', ['--filter']],
-  ['tar', ['--to-command', '--use-compress-program', '--checkpoint-action', '--info-script', '--new-volume-script', '-I', '-F']],
-  ['zip', ['-TT', '--unzip-command']],
-  ['sed', ['-i', '-I', '--in-place']],
-])
-
-const AWK_COMMANDS = new Set(['awk', 'gawk', 'mawk', 'nawk'])
-
-const EXECUTING_ENV_VAR = /^(PATH|BASH_ENV|ENV|IFS|PROMPT_COMMAND|SHELLOPTS|PAGER|EDITOR|VISUAL|BROWSER|NODE_OPTIONS|LESSOPEN|LESSCLOSE|(LD|DYLD|GIT)_\w*|\w*_(PAGER|EDITOR))$/
-
 const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/
 
-const PLAIN_PROGRAM = /^(?:[A-Za-z0-9_][A-Za-z0-9_.+-]*|\.|\[\[?)$/
+const PLAIN_WORD = /^[\w./-]+$/
+
+const REMOTE_PATH = /^[\w.@-]+:/
 
 const WRITABLE_DEVICES = ['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/fd/']
 
@@ -87,7 +71,21 @@ const READ_ONLY_GH_VERBS = new Set(['view', 'diff', 'list', 'status', 'checks', 
 
 const READ_ONLY_GIT_CONFIG_FLAGS = new Set(['--get', '--get-all', '--get-regexp', '--list', '-l'])
 
-const GIT_COMMAND_RUNNING_FLAGS = ['--upload-pack', '--receive-pack', '--exec', '--extcmd', '--open-files-in-pager']
+const GIT_WORKTREE_COMMANDS = new Set([
+  'add', 'am', 'apply', 'checkout', 'cherry-pick', 'clean', 'commit', 'merge', 'mv', 'pull', 'rebase', 'reset', 'restore',
+  'revert', 'rm', 'stash', 'switch',
+])
+
+const GH_API_METHOD_FLAGS = ['--method', '-X']
+const GH_API_BODY_FLAGS = ['-f', '-F', '--field', '--raw-field', '--input']
+const CURL_METHOD_FLAGS = ['--request', '-X']
+const CURL_BODY_FLAGS = [
+  '-d', '--data', '--data-raw', '--data-binary', '--data-urlencode', '--json', '-F', '--form', '--form-string', '-T',
+  '--upload-file',
+]
+const WGET_METHOD_FLAGS = ['--method']
+const WGET_BODY_FLAGS = ['--post-data', '--post-file', '--body-data', '--body-file']
+const READ_METHODS = new Set(['GET', 'HEAD'])
 
 const SUBMIT_REST_PATHS = [
   /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/,
@@ -104,7 +102,9 @@ const SUBMIT_GRAPHQL_MUTATIONS = [
   'resolveReviewThread',
 ]
 
-const TEMP_ROOTS = [tmpdir(), '/tmp', '/private/tmp', '/var/folders', '/private/var/folders']
+const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map(realPath))]
+
+const WORK_STAND_IN = join(realPath(tmpdir()), 'rally-work')
 
 const deny = (reason: string): ToolDecision => ({ allow: false, reason })
 const ALLOW: ToolDecision = { allow: true }
@@ -116,7 +116,7 @@ export function decideToolUse(toolName: string, input: Record<string, unknown>, 
   if (toolName === 'AskUserQuestion') {
     return deny('AskUserQuestion is unavailable in Rally. Ask the question in plain text and end your turn.')
   }
-  if (toolName === 'Write') return decideWrite(String(input.file_path ?? ''))
+  if (FILE_EDIT_TOOLS.has(toolName)) return decideFileEdit(String(input.file_path ?? input.notebook_path ?? ''), context)
   if (toolName === 'Bash') return decideBash(String(input.command ?? ''), context)
   return deny(`${toolName} is not permitted in Rally review sessions.`)
 }
@@ -130,170 +130,257 @@ function isReadOnlyMcpTool(toolName: string): boolean {
   return READ_ONLY_MCP_VERBS.has(verb)
 }
 
-function decideWrite(path: string): ToolDecision {
-  if (TEMP_ROOTS.some((root) => path.startsWith(root))) return ALLOW
-  return deny('Rally only allows writing files under the temp directory.')
+function decideFileEdit(path: string, context: PolicyContext): ToolDecision {
+  if (isTempPath(path, { cwd: context.cwd, workTrusted: false })) return ALLOW
+  return deny(`Rally only edits files under the temp directory, not \`${path}\`.`)
 }
 
 function decideBash(command: string, context: PolicyContext): ToolDecision {
-  for (const segment of splitShellCommand(command)) {
-    const decision = decideSegment(segment, context)
+  return decideScript(command, { cwd: context.cwd, workTrusted: workIsTemp(command, context) }, context)
+}
+
+function decideScript(script: string, state: ShellState, context: PolicyContext): ToolDecision {
+  for (const segment of splitShellCommand(script)) {
+    const decision = decideSegment(segment, state, context)
     if (!decision.allow) return decision
   }
   return ALLOW
 }
 
-function decideSegment(segment: string, context: PolicyContext): ToolDecision {
+function workIsTemp(command: string, context: PolicyContext): boolean {
+  return [...command.matchAll(/(?:^|[\s;&|(])WORK=(\S*)/g)].every(([, raw]) => {
+    const value = raw.replace(/^["']/, '')
+    if (value.startsWith('$(mktemp') || value.startsWith('`mktemp')) return true
+    return isTempPath(value.replace(/["';)]+$/, ''), { cwd: context.cwd, workTrusted: false })
+  })
+}
+
+function decideSegment(segment: string, state: ShellState, context: PolicyContext): ToolDecision {
   const { words, redirects } = parseShellWords(segment)
-  const unsafeRedirect = redirects.find((r) => r.operator.startsWith('>') && !isWritableTarget(r))
-  if (unsafeRedirect) return deny(`Rally only allows redirecting output to temp paths, not \`${unsafeRedirect.target}\`.`)
-  if (words.some((w) => w.endsWith('()'))) return deny('Shell function definitions are not permitted in Rally.')
+  const unsafeRedirect = redirects.find((r) => r.operator.startsWith('>') && !isWritableTarget(r, state))
+  if (unsafeRedirect) {
+    return deny(`Rally only redirects output into the temp directory, not \`${unsafeRedirect.target}\`.`)
+  }
 
   let start = 0
-  while (start < words.length && SHELL_KEYWORDS.has(words[start])) start++
-  for (; start < words.length && ASSIGNMENT.test(words[start]); start++) {
-    const decision = decideAssignment(words[start])
-    if (!decision.allow) return decision
+  while (
+    start < words.length &&
+    (SHELL_KEYWORDS.has(words[start]) || words[start].endsWith('()') || ASSIGNMENT.test(words[start]))
+  ) {
+    start++
   }
   if (start === words.length) return ALLOW
+  return decideCommand(words.slice(start), segment, state, context)
+}
 
-  const [program, ...args] = words.slice(start)
-  if (!PLAIN_PROGRAM.test(program)) {
-    return deny(`Rally only runs commands by plain name, not \`${program}\`.`)
-  }
-  if (NETWORK_COMMANDS.has(program)) return deny(`\`${program}\` can send data off this machine, so Rally blocks it.`)
-  if (CODE_RUNNERS.has(program)) return deny(`\`${program}\` can run arbitrary code, so Rally blocks it.`)
-  if (INFRASTRUCTURE_COMMANDS.has(program)) return deny(`\`${program}\` acts on live systems, so Rally blocks it.`)
+function decideCommand(words: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
+  const [word, ...args] = words
+  const programPath = /[$`]/.test(word) ? expandPath(word, state) : word
+  if (!programPath) return deny(`Rally needs to see which program \`${word}\` runs. Call it by name or path.`)
+  const program = basename(programPath)
+
+  if (REMOTE_SHELL_COMMANDS.has(program)) return deny(`\`${program}\` reaches other machines, so Rally blocks it.`)
+  if (INFRASTRUCTURE_COMMANDS.has(program)) return deny(`\`${program}\` acts on live infrastructure, so Rally blocks it.`)
+  if (SYSTEM_COMMANDS.has(program)) return deny(`\`${program}\` changes this machine's system settings, so Rally blocks it.`)
+  if (SHELLS.has(program)) return decideShell(args, state, context)
+  if (WRAPPER_COMMANDS.has(program)) return decideWrapped(args, segment, state, context)
 
   const operands = args.filter((a) => !a.startsWith('-'))
-  if (PATH_OPERAND_COMMANDS.has(program) && !operands.every(isTempPath)) {
-    return deny(`Rally only allows \`${program}\` on temp paths.`)
-  }
-  if (DESTINATION_OPERAND_COMMANDS.has(program) && !isTempPath(operands.at(-1) ?? '')) {
-    return deny(`Rally only allows \`${program}\` into temp paths.`)
-  }
-  if (MODE_OPERAND_COMMANDS.has(program) && !operands.slice(1).every(isTempPath)) {
-    return deny(`Rally only allows \`${program}\` on temp paths.`)
-  }
-  const runningFlag = args.find((a) => (COMMAND_RUNNING_FLAGS.get(program) ?? []).some((flag) => matchesFlag(a, flag)))
-  if (runningFlag) return deny(`\`${program} ${runningFlag}\` is not permitted in Rally.`)
-
   switch (program) {
     case 'gh':
-      return decideGh(args, segment, context)
+      return decideGh(args, segment, state, context)
     case 'git':
-      return decideGit(args)
+      return decideGit(args, state)
+    case 'curl':
+      return decideRequest(program, args, CURL_METHOD_FLAGS, CURL_BODY_FLAGS)
+    case 'wget':
+      return decideRequest(program, args, WGET_METHOD_FLAGS, WGET_BODY_FLAGS)
+    case 'eval':
+      return decideScript(args.join(' '), { ...state }, context)
+    case 'cd':
+    case 'pushd':
+      state.cwd = operands.length ? expandPath(operands[0], state) : homedir()
+      return ALLOW
+    case 'rm':
+    case 'rmdir':
+    case 'mv':
+    case 'tee':
+    case 'touch':
+    case 'truncate':
+    case 'unlink':
+      return requireTemp(program, operands, state)
+    case 'cp':
+    case 'ln':
+    case 'install':
+    case 'rsync':
+      return requireTemp(program, operands.slice(-1), state)
+    case 'chmod':
+    case 'chown':
+    case 'chgrp':
+      return requireTemp(program, operands.slice(1), state)
     case 'dd':
-      return args.filter((a) => a.startsWith('of=')).every((a) => isTempPath(a.slice(3)))
-        ? ALLOW
-        : deny('Rally only allows `dd` into temp paths.')
+      return requireTemp(program, args.filter((a) => a.startsWith('of=')).map((a) => a.slice(3)), state)
+    case 'sed':
+      return decideSed(args, state)
+    case 'find':
+      return decideFind(args, segment, state, context)
     default:
-      if (AWK_COMMANDS.has(program)) return decideAwk(args)
-      if (DECLARATION_COMMANDS.has(program)) return decideDeclaration(args)
       return ALLOW
   }
 }
 
-function decideAssignment(word: string): ToolDecision {
-  const name = (word.match(ASSIGNMENT) as RegExpMatchArray)[1]
-  return EXECUTING_ENV_VAR.test(name) ? deny(`Setting \`${name}\` is not permitted in Rally.`) : ALLOW
+function requireTemp(program: string, paths: string[], state: ShellState): ToolDecision {
+  const outside = paths.find((p) => !isTempPath(p, state))
+  return outside === undefined ? ALLOW : deny(`Rally only lets \`${program}\` write under the temp directory, not \`${outside}\`.`)
 }
 
-function decideDeclaration(args: string[]): ToolDecision {
-  for (const arg of args.filter((a) => ASSIGNMENT.test(a))) {
-    const decision = decideAssignment(arg)
+function decideShell(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
+  const flagIndex = args.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a))
+  return flagIndex < 0 ? ALLOW : decideScript(args[flagIndex + 1] ?? '', { ...state }, context)
+}
+
+function decideWrapped(args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
+  for (let i = 0; i < args.length; i++) {
+    if (!PLAIN_WORD.test(args[i])) continue
+    const decision = decideCommand(args.slice(i), segment, { ...state }, context)
     if (!decision.allow) return decision
   }
   return ALLOW
 }
 
-function decideAwk(args: string[]): ToolDecision {
-  if (args.includes('-f')) return deny('Rally does not run awk programs from files.')
-  const runsCommands = args.some((a) => /\bsystem\s*\(|\bgetline\b|(?<!\|)\|(?!\|)\s*\S/.test(a))
-  return runsCommands ? deny('awk programs that run commands are not permitted in Rally.') : ALLOW
+function decideSed(args: string[], state: ShellState): ToolDecision {
+  if (!args.some((a) => ['-i', '-I', '--in-place'].some((flag) => matchesFlag(a, flag)))) return ALLOW
+  const operands: string[] = []
+  let scriptGiven = false
+  for (let i = 0; i < args.length; i++) {
+    if (['-e', '-f', '--expression', '--file'].includes(args[i])) {
+      scriptGiven = true
+      i++
+    } else if (/^(?:-[ef].|--expression=|--file=)/.test(args[i])) {
+      scriptGiven = true
+    } else if (args[i] && !args[i].startsWith('-')) {
+      operands.push(args[i])
+    }
+  }
+  return requireTemp('sed -i', scriptGiven ? operands : operands.slice(1), state)
+}
+
+function decideFind(args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
+  const firstExpression = args.findIndex((a) => a.startsWith('-') || a === '(' || a === '!')
+  const roots = args.slice(0, firstExpression < 0 ? args.length : firstExpression)
+  const searchRoots = roots.length ? roots : ['.']
+  if (args.includes('-delete')) {
+    const decision = requireTemp('find -delete', searchRoots, state)
+    if (!decision.allow) return decision
+  }
+  for (let i = 0; i < args.length; i++) {
+    if (!['-exec', '-execdir', '-ok', '-okdir'].includes(args[i])) continue
+    const end = args.findIndex((a, j) => j > i && (a === ';' || a === '+'))
+    const command = args.slice(i + 1, end < 0 ? args.length : end)
+    for (const root of searchRoots) {
+      const decision = decideCommand(
+        command.map((w) => w.replaceAll('{}', join(root, 'match'))),
+        segment,
+        { ...state },
+        context,
+      )
+      if (!decision.allow) return decision
+    }
+  }
+  return ALLOW
 }
 
 function matchesFlag(arg: string, flag: string): boolean {
   return arg === flag || arg.startsWith(`${flag}=`) || (!flag.startsWith('--') && arg.startsWith(flag))
 }
 
-function isWritableTarget(redirect: Redirect): boolean {
+function requestMethod(args: string[], methodFlags: string[], bodyFlags: string[]): string {
+  for (let i = 0; i < args.length; i++) {
+    const flag = methodFlags.find((f) => matchesFlag(args[i], f))
+    if (!flag) continue
+    const inline = args[i].slice(flag.length).replace(/^=/, '')
+    return (inline || args[i + 1] || '').toUpperCase()
+  }
+  return args.some((a) => bodyFlags.some((flag) => matchesFlag(a, flag))) ? 'POST' : 'GET'
+}
+
+function decideRequest(program: string, args: string[], methodFlags: string[], bodyFlags: string[]): ToolDecision {
+  const method = requestMethod(args, methodFlags, bodyFlags)
+  return READ_METHODS.has(method) ? ALLOW : deny(`Rally only allows \`${program}\` reads, not \`${method}\` requests.`)
+}
+
+function isWritableTarget(redirect: Redirect, state: ShellState): boolean {
   if (redirect.operator.endsWith('&') && /^(?:\d+|-)$/.test(redirect.target)) return true
-  return isTempPath(redirect.target) || WRITABLE_DEVICES.some((device) => redirect.target.startsWith(device))
+  return WRITABLE_DEVICES.some((device) => redirect.target.startsWith(device)) || isTempPath(redirect.target, state)
 }
 
-function isTempPath(path: string): boolean {
-  return path.startsWith('$WORK') || path.startsWith('${WORK}') || TEMP_ROOTS.some((root) => path.startsWith(root))
+function expandPath(word: string, state: ShellState): string | null {
+  if (/^\$(?:\{WORK\}|WORK\b)/.test(word) && !state.workTrusted) return null
+  const expanded = word
+    .replace(/^\$(?:\{WORK\}|WORK\b)/, WORK_STAND_IN)
+    .replace(/^\$(?:\{TMPDIR(?::?-[^}]*)?\}|TMPDIR\b)/, tmpdir())
+    .replace(/^(?:~|\$\{HOME\}|\$HOME\b)(?=\/|$)/, homedir())
+  if (!expanded || /[$`]/.test(expanded) || REMOTE_PATH.test(expanded)) return null
+  if (isAbsolute(expanded)) return resolve(expanded)
+  return state.cwd ? resolve(state.cwd, expanded) : null
 }
 
-function isForeignRemote(arg: string): boolean {
-  if (/^\w+::/.test(arg)) return true
-  const host = arg.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?([^/:]+)/i)?.[1] ?? arg.match(/^[\w.-]+@([\w.-]+):/)?.[1]
-  return host !== undefined && host.toLowerCase() !== 'github.com'
+function realPath(path: string): string {
+  if (existsSync(path)) return realpathSync.native(path)
+  const parent = dirname(path)
+  return parent === path ? path : join(realPath(parent), basename(path))
 }
 
-function decideGit(args: string[]): ToolDecision {
+function isTempPath(word: string, state: ShellState): boolean {
+  const path = expandPath(word, state)
+  if (!path) return false
+  const real = realPath(path)
+  return TEMP_ROOTS.some((root) => real.startsWith(root + sep))
+}
+
+function decideGit(args: string[], state: ShellState): ToolDecision {
+  let repoDir = state.cwd
   let index = 0
   while (index < args.length && args[index].startsWith('-')) {
-    if (args[index].startsWith('-c') || args[index].startsWith('--config-env')) {
-      return deny('`git -c` is not permitted in Rally.')
+    if (args[index] === '-C') {
+      repoDir = expandPath(args[index + 1] ?? '', { ...state, cwd: repoDir })
+      index += 2
+    } else {
+      index++
     }
-    index += args[index] === '-C' ? 2 : 1
   }
   const [subcommand, ...rest] = args.slice(index)
-  const runningFlag = rest.find((a) => GIT_COMMAND_RUNNING_FLAGS.some((flag) => matchesFlag(a, flag)))
-  if (runningFlag) return deny(`\`git ${subcommand} ${runningFlag}\` is not permitted in Rally.`)
-  if (rest.some(isForeignRemote)) return deny('Rally only allows git remotes on github.com.')
-
-  switch (subcommand) {
-    case 'push':
-      return deny('git push is not permitted in Rally.')
-    case 'config':
-      return rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a)) ? ALLOW : deny('Rally only allows reading git config.')
-    case 'difftool':
-    case 'mergetool':
-    case 'filter-branch':
-      return deny(`\`git ${subcommand}\` is not permitted in Rally.`)
-    case 'bisect':
-      return rest[0] === 'run' ? deny('`git bisect run` is not permitted in Rally.') : ALLOW
-    case 'submodule':
-      return rest.includes('foreach') ? deny('`git submodule foreach` is not permitted in Rally.') : ALLOW
-    case 'rebase':
-      return rest.includes('-x') ? deny('`git rebase -x` is not permitted in Rally.') : ALLOW
-    case 'grep':
-      return rest.some((a) => a.startsWith('-O')) ? deny('`git grep -O` is not permitted in Rally.') : ALLOW
-    case 'clone':
-      return rest.includes('-u') ? deny('`git clone -u` is not permitted in Rally.') : ALLOW
-    default:
-      return ALLOW
+  if (subcommand === 'push') return deny('git push is not permitted in Rally.')
+  if (subcommand === 'config' && rest.some((a) => a === '--global' || a === '--system')) {
+    if (!rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return deny('Rally does not change your global git config.')
   }
+  if (GIT_WORKTREE_COMMANDS.has(subcommand) && !(repoDir && isTempPath(repoDir, state))) {
+    return deny(`Rally only runs \`git ${subcommand}\` in repos under the temp directory.`)
+  }
+  return ALLOW
 }
 
-function decideGh(args: string[], segment: string, context: PolicyContext): ToolDecision {
+function decideGh(args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
   if (args[0] === 'api') return decideGhApi(args.slice(1), segment, context)
+  if (args[1] === 'checkout' && !(state.cwd && isTempPath(state.cwd, state))) {
+    return deny('Rally only runs `gh pr checkout` in repos under the temp directory.')
+  }
   if (args[0] === 'search' || READ_ONLY_GH_VERBS.has(args[1])) return ALLOW
   return deny(`\`gh ${args.slice(0, 2).join(' ')}\` is not permitted in Rally. Use \`gh api\` for review posting.`)
-}
-
-function ghApiMethod(args: string[]): string {
-  const methodIndex = args.findIndex((a) => a === '--method' || a === '-X')
-  if (methodIndex >= 0) return (args[methodIndex + 1] ?? '').toUpperCase()
-  const inline = args.find((a) => a.startsWith('--method=') || a.startsWith('-X'))
-  if (inline) return inline.replace(/^--method=|^-X/, '').toUpperCase()
-  const sendsBody = args.some((a) => ['-f', '-F', '--field', '--raw-field', '--input'].includes(a))
-  return sendsBody ? 'POST' : 'GET'
 }
 
 function decideGhApi(args: string[], segment: string, context: PolicyContext): ToolDecision {
   const endpoint = args.find((a) => !a.startsWith('-')) ?? ''
   if (endpoint === 'graphql') {
-    const mutation = /\bmutation\b/.test(segment)
-    if (!mutation) return ALLOW
+    if (!context.submitting && args.some((a) => matchesFlag(a, '--input'))) {
+      return deny('Rally cannot inspect `gh api graphql --input`. Pass the query inline with `-f query=`.')
+    }
+    if (!/\bmutation\b/.test(segment)) return ALLOW
     if (context.submitting && SUBMIT_GRAPHQL_MUTATIONS.some((m) => segment.includes(m))) return ALLOW
     return deny('GitHub mutations are blocked until the user submits the review from Rally.')
   }
 
-  const method = ghApiMethod(args)
+  const method = requestMethod(args, GH_API_METHOD_FLAGS, GH_API_BODY_FLAGS)
   if (method === 'GET') return ALLOW
   if (context.submitting && method === 'POST' && SUBMIT_REST_PATHS.some((p) => p.test(endpoint))) return ALLOW
   return deny(

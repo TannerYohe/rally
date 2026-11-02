@@ -161,8 +161,11 @@ class ReviewSessions extends EventEmitter {
       true,
     )
 
+    const cwd = join(tmpdir(), 'rally', sessionId)
+    mkdirSync(cwd, { recursive: true })
+
     const decide = (toolName: string, input: unknown) =>
-      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { submitting })
+      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { submitting, cwd })
 
     const preToolUse: HookCallback = async (input) => {
       if (input.hook_event_name !== 'PreToolUse') return {}
@@ -192,9 +195,6 @@ class ReviewSessions extends EventEmitter {
         this.patch(sessionId, () => ({ submitted: review }), true)
       },
     })
-
-    const cwd = join(tmpdir(), 'rally', sessionId)
-    mkdirSync(cwd, { recursive: true })
 
     try {
       const stream = query({

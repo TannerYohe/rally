@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { Config, Health } from '@shared/types'
 
 const toLines = (values: string[]) => values.join('\n')
@@ -34,6 +35,12 @@ export function Settings() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
+      <div>
+        <Link to="/" className="text-xs text-zinc-500 hover:text-zinc-300">
+          ← All PRs
+        </Link>
+        <h1 className="mt-2 text-xl font-semibold">Settings</h1>
+      </div>
       <section className="rounded-md border border-zinc-800 p-4 text-sm">
         <h2 className="mb-2 font-semibold">GitHub</h2>
         {health === null ? (

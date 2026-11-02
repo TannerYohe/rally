@@ -1,17 +1,28 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { PHASE_LABELS, PHASE_ORDER, type Phase, type Pr } from '@shared/types'
+import { PHASE_LABELS, PHASE_ORDER, type Phase, type Pr, type SessionStatus } from '@shared/types'
 import { Avatar } from '../components/Avatar'
 import { DiffStat } from '../components/DiffStat'
 import { PhaseBadge } from '../components/PhaseBadge'
 import { RepoChip } from '../components/RepoChip'
 import { age } from '../lib/format'
 import { usePrs } from '../lib/hooks'
+import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
 
 function sortPrs(prs: Pr[]): Pr[] {
   return [...prs].sort(
     (a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.createdAt.localeCompare(b.createdAt),
+  )
+}
+
+function ReviewStatusNote({ status }: { status: SessionStatus }) {
+  const busy = BUSY_STATUSES.includes(status)
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[11px] ${status === 'error' ? 'text-rose-300' : 'text-fuchsia-300/80'}`}>
+      {busy && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-fuchsia-400" />}
+      {SESSION_STATUS_LABELS[status]}
+    </span>
   )
 }
 
@@ -35,7 +46,10 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
               )}
               {pr.title}
             </h3>
-            <PhaseBadge phase={pr.phase} />
+            <div className="flex flex-col items-end gap-1">
+              <PhaseBadge phase={pr.phase} />
+              {pr.phase === 'in_progress' && pr.reviewStatus && <ReviewStatusNote status={pr.reviewStatus} />}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-400">
             <RepoChip repo={pr.repo} number={pr.number} />

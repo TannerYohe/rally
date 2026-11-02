@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { prKey, type ReviewEvent, type ReviewSession, type SessionStatus } from '@shared/types'
+import { prKey, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
 import { Markdown } from '../components/Markdown'
 import { Avatar } from '../components/Avatar'
@@ -12,18 +12,8 @@ import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age } from '../lib/format'
 import { usePrs, useSession } from '../lib/hooks'
+import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
-
-const STATUS_LABELS: Record<SessionStatus, string> = {
-  running: 'Claude is working…',
-  submitting: 'Posting and submitting the review…',
-  awaiting_feedback: 'Waiting for your feedback',
-  submitted: 'Review submitted',
-  error: 'Error',
-  cancelled: 'Cancelled',
-}
-
-const BUSY: SessionStatus[] = ['running', 'submitting']
 
 export function PrDetail() {
   const params = useParams()
@@ -113,7 +103,7 @@ function ReviewPanel({ session, onDiscarded }: { session: ReviewSession; onDisca
   const [edits, setEdits] = useState<DraftEdits>({})
   const [feedback, setFeedback] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
-  const busy = BUSY.includes(session.status)
+  const busy = BUSY_STATUSES.includes(session.status)
   const { drafts } = session
   const message = feedbackMessage(drafts, edits, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
@@ -141,7 +131,7 @@ function ReviewPanel({ session, onDiscarded }: { session: ReviewSession; onDisca
         <h2 className="text-lg font-semibold">Review</h2>
         <span className={`text-sm ${session.status === 'error' ? 'text-rose-300' : 'text-zinc-400'}`}>
           {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />}
-          {STATUS_LABELS[session.status]}
+          {SESSION_STATUS_LABELS[session.status]}
         </span>
         <div className="ml-auto flex gap-2">
           {busy ? (

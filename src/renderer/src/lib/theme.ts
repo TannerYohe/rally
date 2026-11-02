@@ -9,6 +9,13 @@ interface PhaseTheme {
 }
 
 export const PHASE_THEME: Record<Phase, PhaseTheme> = {
+  in_progress: {
+    accent: 'bg-fuchsia-400',
+    badge: 'bg-fuchsia-400/10 text-fuchsia-300 ring-fuchsia-400/30',
+    dot: 'bg-fuchsia-400',
+    ring: 'ring-fuchsia-400/50',
+    chipActive: 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-400/40',
+  },
   awaiting_rereview: {
     accent: 'bg-amber-400',
     badge: 'bg-amber-400/10 text-amber-300 ring-amber-400/30',

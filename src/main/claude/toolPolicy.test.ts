@@ -1,4 +1,4 @@
-import { mkdtempSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -141,9 +141,13 @@ describe('decideToolUse', () => {
     expect(bash('rm -rf "$WORK/.."')).toBe(false)
     expect(bash('rm -rf /tmp')).toBe(false)
     const dir = mkdtempSync(join(tmpdir(), 'rally-policy-'))
-    symlinkSync(homedir(), join(dir, 'home'))
-    expect(bash(`echo x >> ${join(dir, 'home', '.zshrc')}`)).toBe(false)
-    expect(decideToolUse('Write', { file_path: join(dir, 'home', '.zshrc') }, REVIEWING).allow).toBe(false)
+    try {
+      symlinkSync(homedir(), join(dir, 'home'))
+      expect(bash(`echo x >> ${join(dir, 'home', '.zshrc')}`)).toBe(false)
+      expect(decideToolUse('Write', { file_path: join(dir, 'home', '.zshrc') }, REVIEWING).allow).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('stops trusting $WORK once it is pointed outside temp', () => {

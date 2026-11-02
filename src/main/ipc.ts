@@ -40,5 +40,10 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.discardSession, (_event, id: string) => reviewSessions.discard(id))
 
   prList.on('changed', (state) => broadcast(IPC.prsChanged, state))
-  reviewSessions.on('changed', (session) => broadcast(IPC.sessionChanged, session))
+  prList.setReviewStatusLookup((key) => reviewSessions.statusOf(key))
+  reviewSessions.on('changed', (session) => {
+    broadcast(IPC.sessionChanged, session)
+    prList.reapplyReviewStatus()
+  })
+  reviewSessions.on('removed', () => prList.reapplyReviewStatus())
 }

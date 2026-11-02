@@ -1,16 +1,20 @@
 import { EventEmitter } from 'node:events'
-import type { Pr, PrListState } from '@shared/types'
+import { prKey, type Pr, type PrListState, type SessionStatus } from '@shared/types'
 import { summarizePr, summaryCacheKey } from './claude/summarize'
+import { computePhase } from './github/phase'
 import { fetchPr, searchPrs } from './github/queries'
 import { buildSearchQueries } from './github/search'
 import { configFile, prCacheFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
+type ReviewStatusLookup = (key: string) => SessionStatus | null
+
 class PrList extends EventEmitter {
   private state: PrListState
   private timer: NodeJS.Timeout | null = null
   private summarizing = new Set<string>()
+  private reviewStatusOf: ReviewStatusLookup = () => null
 
   constructor() {
     super()
@@ -33,13 +37,24 @@ class PrList extends EventEmitter {
     this.timer = setInterval(() => void this.refresh(), minutes * 60_000)
   }
 
+  setReviewStatusLookup(lookup: ReviewStatusLookup): void {
+    this.reviewStatusOf = lookup
+    this.reapplyReviewStatus()
+  }
+
+  reapplyReviewStatus(): void {
+    const prs = this.withReviewStatus(this.state.prs)
+    const changed = prs.some((pr, i) => pr.phase !== this.state.prs[i].phase || pr.reviewStatus !== this.state.prs[i].reviewStatus)
+    if (changed) this.update({ prs })
+  }
+
   async refresh(): Promise<void> {
     if (this.state.refreshing) return
     this.update({ refreshing: true, error: null })
     try {
       const { viewer, prs } = await searchPrs(buildSearchQueries(configFile.get()))
       const refreshedAt = new Date().toISOString()
-      this.update({ prs: this.withSummaries(prs), viewer, refreshedAt, refreshing: false })
+      this.update({ prs: this.withReviewStatus(this.withSummaries(prs)), viewer, refreshedAt, refreshing: false })
       prCacheFile.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
     } catch (error) {
@@ -48,12 +63,20 @@ class PrList extends EventEmitter {
   }
 
   async refreshOne(owner: string, repo: string, number: number): Promise<void> {
-    const [fresh] = this.withSummaries([await fetchPr(owner, repo, number)])
+    const [fresh] = this.withReviewStatus(this.withSummaries([await fetchPr(owner, repo, number)]))
     const prs = this.state.prs.some((p) => p.id === fresh.id)
       ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p))
       : [...this.state.prs, fresh]
     this.update({ prs })
     prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
+  }
+
+  private withReviewStatus(prs: Pr[]): Pr[] {
+    return prs.map((pr) => {
+      const reviewStatus = this.reviewStatusOf(prKey(pr.owner, pr.repo, pr.number))
+      const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'
+      return { ...pr, reviewStatus, phase: computePhase({ ...pr, reviewInProgress }) }
+    })
   }
 
   private withSummaries(prs: Pr[]): Pr[] {

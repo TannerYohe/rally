@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { prKey, type ReviewEvent, type ReviewSession } from '@shared/types'
+import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
 import { Markdown } from '../components/Markdown'
 import { Avatar } from '../components/Avatar'
@@ -27,6 +27,10 @@ export function PrDetail() {
   const url = pr?.url ?? `https://github.com/${owner}/${repo}/pull/${number}`
 
   const start = async () => setSession(await window.rally.startReview({ owner, repo, number, url }))
+  const startFollowUp = async (previous: ReviewSession) => {
+    await window.rally.discardSession(previous.id)
+    await start()
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -81,7 +85,13 @@ export function PrDetail() {
       )}
 
       {session ? (
-        <ReviewPanel key={session.id} session={session} onDiscarded={() => setSession(null)} />
+        <ReviewPanel
+          key={session.id}
+          session={session}
+          needsRereview={pr?.phase === 'awaiting_rereview'}
+          onDiscarded={() => setSession(null)}
+          onStartFollowUp={() => startFollowUp(session)}
+        />
       ) : (
         <div className="rounded-xl border border-dashed border-violet-500/30 bg-violet-500/5 p-8 text-center">
           <p className="mb-3 text-sm text-zinc-400">
@@ -99,7 +109,14 @@ export function PrDetail() {
   )
 }
 
-function ReviewPanel({ session, onDiscarded }: { session: ReviewSession; onDiscarded(): void }) {
+interface ReviewPanelProps {
+  session: ReviewSession
+  needsRereview: boolean
+  onDiscarded(): void
+  onStartFollowUp(): void
+}
+
+function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: ReviewPanelProps) {
   const [edits, setEdits] = useState<DraftEdits>({})
   const [feedback, setFeedback] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -134,11 +151,12 @@ function ReviewPanel({ session, onDiscarded }: { session: ReviewSession; onDisca
           {SESSION_STATUS_LABELS[session.status]}
         </span>
         <div className="ml-auto flex gap-2">
-          {busy ? (
+          {busy && (
             <button className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700" onClick={() => window.rally.cancelReview(session.id)}>
               Cancel
             </button>
-          ) : (
+          )}
+          {!busy && session.status !== 'submitted' && (
             <button className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700" onClick={startOver}>
               Start over
             </button>
@@ -151,11 +169,20 @@ function ReviewPanel({ session, onDiscarded }: { session: ReviewSession; onDisca
       )}
 
       {session.submitted && (
-        <div className="rounded-md bg-emerald-950 px-3 py-2 text-sm text-emerald-200">
-          Submitted as {session.submitted.event.replace('_', ' ').toLowerCase()}.{' '}
-          <a className="underline" href={session.submitted.url} target="_blank" rel="noreferrer">
-            View on GitHub ↗
-          </a>
+        <div className="flex flex-wrap items-center gap-3 rounded-xl bg-emerald-950/70 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/20">
+          <span>
+            Submitted as {REVIEW_EVENT_LABELS[session.submitted.event].toLowerCase()}.{' '}
+            <a className="underline" href={session.submitted.url} target="_blank" rel="noreferrer">
+              View on GitHub ↗
+            </a>
+          </span>
+          {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
+          <button
+            className="ml-auto rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400"
+            onClick={onStartFollowUp}
+          >
+            Start follow-up review
+          </button>
         </div>
       )}
 

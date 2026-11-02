@@ -8,8 +8,8 @@ function review(state: MyReview['state'], commitOid: string, submittedAt: string
   return { state, commitOid, submittedAt }
 }
 
-function phase(myReviews: MyReview[], reviewRequestedFromMe = false) {
-  return computePhase({ headRefOid: HEAD, reviewRequestedFromMe, myReviews })
+function phase(myReviews: MyReview[], reviewRequestedFromMe = false, reviewInProgress = false) {
+  return computePhase({ headRefOid: HEAD, reviewRequestedFromMe, myReviews, reviewInProgress })
 }
 
 describe('computePhase', () => {
@@ -47,6 +47,11 @@ describe('computePhase', () => {
 
   it('is awaiting re-review when commits landed after my comment review', () => {
     expect(phase([review('COMMENTED', 'old-sha')])).toBe('awaiting_rereview')
+  })
+
+  it('is in progress while I have an unsubmitted Rally review, whatever GitHub says', () => {
+    expect(phase([], false, true)).toBe('in_progress')
+    expect(phase([review('APPROVED', 'old-sha')], true, true)).toBe('in_progress')
   })
 
   it('uses my most recent submitted review', () => {

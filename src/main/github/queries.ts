@@ -90,9 +90,10 @@ function toPr(raw: RawPr, viewer: string): Pr {
     files: raw.files?.nodes.map((f) => f.path) ?? [],
     reviewRequestedFromMe,
     myReviews,
+    reviewStatus: null,
     summary: null,
   }
-  return { ...base, phase: computePhase(base) }
+  return { ...base, phase: computePhase({ ...base, reviewInProgress: false }) }
 }
 
 export async function searchPrs(queries: string[]): Promise<{ viewer: string; prs: Pr[] }> {

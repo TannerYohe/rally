@@ -3,6 +3,7 @@ import type { MyReview, Phase } from '@shared/types'
 const COUNTED_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'])
 
 interface PhaseInput {
+  reviewInProgress: boolean
   headRefOid: string
   reviewRequestedFromMe: boolean
   myReviews: MyReview[]
@@ -15,6 +16,7 @@ export function latestSubmittedReview(reviews: MyReview[]): MyReview | null {
 }
 
 export function computePhase(pr: PhaseInput): Phase {
+  if (pr.reviewInProgress) return 'in_progress'
   const last = latestSubmittedReview(pr.myReviews)
   if (!last) return 'unreviewed'
   if (pr.reviewRequestedFromMe || last.commitOid !== pr.headRefOid) return 'awaiting_rereview'

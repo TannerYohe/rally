@@ -4,14 +4,16 @@ import { PrDetail } from './pages/PrDetail'
 import { Settings } from './pages/Settings'
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded px-2 py-1 text-sm ${isActive ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`
+  `rounded-md px-2.5 py-1 text-sm transition ${isActive ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-zinc-200'}`
 
 export function App() {
   return (
     <HashRouter>
       <div className="flex h-full flex-col">
-        <header className="flex items-center gap-4 border-b border-zinc-800 px-6 py-2">
-          <span className="font-semibold tracking-tight">Rally</span>
+        <header className="flex items-center gap-4 border-b border-white/5 bg-zinc-950/70 px-6 py-2.5 backdrop-blur">
+          <span className="bg-gradient-to-r from-sky-400 via-violet-400 to-fuchsia-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
+            Rally
+          </span>
           <NavLink to="/" end className={navClass}>
             PRs
           </NavLink>

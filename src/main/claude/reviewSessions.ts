@@ -14,8 +14,9 @@ import {
   type TimelineEntry,
 } from '@shared/types'
 import { prList } from '../prList'
-import { sessionsFile } from '../store'
+import { configFile, sessionsFile } from '../store'
 import { APP_PROTOCOL, reviewPrompt, submitPrompt } from './prompts'
+import { reviewModelOptions } from './modelOptions'
 import { createRallyServer } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
 import { decideToolUse } from './toolPolicy'
@@ -203,6 +204,7 @@ class ReviewSessions extends EventEmitter {
           mcpServers: { rally: rallyServer },
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
           canUseTool,
+          ...reviewModelOptions(configFile.get(), process.env),
         },
       })
       for await (const message of stream) {

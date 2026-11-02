@@ -189,6 +189,10 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('git config --global core.pager less')).toBe(false)
     expect(bash('git config --global --get user.name')).toBe(true)
     expect(bash('git -c core.pager=cat log')).toBe(true)
+    expect(bash('git -c advice.detachedHead=false -C ~/src/rally checkout main')).toBe(false)
+    expect(bash('git -c x=y push origin HEAD')).toBe(false)
+    expect(bash('git --work-tree ~/src/rally checkout main')).toBe(false)
+    expect(bash(`git --git-dir=${WORK}/repo/.git log`)).toBe(true)
   })
 
   it('restricts Write and Edit to temp directories', () => {

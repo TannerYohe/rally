@@ -71,6 +71,10 @@ const READ_ONLY_GH_VERBS = new Set(['view', 'diff', 'list', 'status', 'checks', 
 
 const READ_ONLY_GIT_CONFIG_FLAGS = new Set(['--get', '--get-all', '--get-regexp', '--list', '-l'])
 
+const GIT_REPO_FLAGS = new Set(['-C', '--git-dir', '--work-tree'])
+
+const GIT_VALUE_FLAGS = new Set(['-c', '--config-env', '--namespace', '--super-prefix'])
+
 const GIT_WORKTREE_COMMANDS = new Set([
   'add', 'am', 'apply', 'checkout', 'cherry-pick', 'clean', 'commit', 'merge', 'mv', 'pull', 'rebase', 'reset', 'restore',
   'revert', 'rm', 'stash', 'switch',
@@ -347,12 +351,11 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
   let repoDir = state.cwd
   let index = 0
   while (index < args.length && args[index].startsWith('-')) {
-    if (args[index] === '-C') {
-      repoDir = expandPath(args[index + 1] ?? '', { ...state, cwd: repoDir })
-      index += 2
-    } else {
-      index++
+    const [flag, inline] = args[index].split(/=(.*)/s)
+    if (GIT_REPO_FLAGS.has(flag)) {
+      repoDir = expandPath(inline ?? args[index + 1] ?? '', { ...state, cwd: repoDir })
     }
+    index += inline === undefined && (GIT_REPO_FLAGS.has(flag) || GIT_VALUE_FLAGS.has(flag)) ? 2 : 1
   }
   const [subcommand, ...rest] = args.slice(index)
   if (subcommand === 'push') return deny('git push is not permitted in Rally.')

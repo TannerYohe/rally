@@ -17,7 +17,7 @@ function createWindow(): BrowserWindow {
   })
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (URL.parse(url)?.protocol === 'https:') shell.openExternal(url)
     return { action: 'deny' }
   })
 

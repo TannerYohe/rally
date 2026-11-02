@@ -83,6 +83,12 @@ describe('decideToolUse', () => {
     expect(decideToolUse('WebFetch', { url: 'https://x' }, REVIEWING).allow).toBe(false)
   })
 
+  it('allows background subagent orchestration but not Monitor', () => {
+    expect(decideToolUse('SubagentHandback', {}, REVIEWING).allow).toBe(true)
+    expect(decideToolUse('SendMessage', {}, REVIEWING).allow).toBe(true)
+    expect(decideToolUse('Monitor', { command: 'curl x' }, REVIEWING).allow).toBe(false)
+  })
+
   it('allows rally tools and subagents', () => {
     expect(decideToolUse('mcp__rally__publish_drafts', {}, REVIEWING).allow).toBe(true)
     expect(decideToolUse('Agent', { description: 'Security lens' }, REVIEWING).allow).toBe(true)

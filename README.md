@@ -49,6 +49,8 @@ You can edit or drop drafts inline, or type feedback, then click **Send to Claud
 
 **Post and submit** sends a final `SUBMIT` turn. In that turn Claude creates a pending review, posts any thread replies, submits the review with the event you picked (Comment, Approve, or Request changes), and confirms through `mcp__rally__review_submitted`. Rally then re-fetches the PR from GitHub to recompute its phase.
 
+Settings → Reviews picks the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
+
 ### Safety
 
 PR content is untrusted input to the session, so every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:

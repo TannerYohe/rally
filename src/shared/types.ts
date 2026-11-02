@@ -45,11 +45,35 @@ export interface Pr {
   summary: string | null
 }
 
+export type ModelChoice = 'opus' | 'opus[1m]' | 'sonnet' | 'sonnet[1m]' | 'haiku'
+
+export const MODEL_LABELS: Record<ModelChoice, string> = {
+  opus: 'Opus',
+  'opus[1m]': 'Opus (1M context)',
+  sonnet: 'Sonnet',
+  'sonnet[1m]': 'Sonnet (1M context)',
+  haiku: 'Haiku',
+}
+
+export type EffortChoice = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export const EFFORT_LABELS: Record<EffortChoice, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+}
+
 export interface Config {
   authors: string[]
   repos: string[]
   includeReviewRequests: boolean
   pollIntervalMinutes: number
+  reviewModel: ModelChoice | null
+  reviewEffort: EffortChoice | null
+  subagentModel: ModelChoice | null
+  subagentEffort: EffortChoice | null
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -57,6 +81,10 @@ export const DEFAULT_CONFIG: Config = {
   repos: [],
   includeReviewRequests: true,
   pollIntervalMinutes: 5,
+  reviewModel: null,
+  reviewEffort: null,
+  subagentModel: null,
+  subagentEffort: null,
 }
 
 export interface PrListState {
@@ -67,9 +95,15 @@ export interface PrListState {
   error: string | null
 }
 
+export interface ClaudeDefaults {
+  model: string | null
+  effort: string | null
+}
+
 export interface Health {
   githubLogin: string | null
   githubError: string | null
+  claudeDefaults: ClaudeDefaults
 }
 
 export type ReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'

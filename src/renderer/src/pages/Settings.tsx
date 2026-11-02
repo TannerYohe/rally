@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Config, Health } from '@shared/types'
+import {
+  EFFORT_LABELS,
+  MODEL_LABELS,
+  type Config,
+  type EffortChoice,
+  type Health,
+  type ModelChoice,
+} from '@shared/types'
 
 const toLines = (values: string[]) => values.join('\n')
 const fromLines = (text: string) =>
@@ -65,6 +72,43 @@ export function Settings() {
         </label>
       </section>
 
+      <section className="space-y-3 rounded-md border border-zinc-800 p-4 text-sm">
+        <div>
+          <h2 className="font-semibold">Reviews</h2>
+          <p className="text-xs text-zinc-500">Changes apply to the next Claude turn, including turns in reviews already in progress.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <ChoiceSelect
+            label="Review model"
+            labels={MODEL_LABELS}
+            value={config.reviewModel}
+            defaultLabel={systemDefault(health?.claudeDefaults.model)}
+            onChange={(reviewModel) => setConfig({ ...config, reviewModel })}
+          />
+          <ChoiceSelect
+            label="Review effort"
+            labels={EFFORT_LABELS}
+            value={config.reviewEffort}
+            defaultLabel={systemDefault(health?.claudeDefaults.effort)}
+            onChange={(reviewEffort) => setConfig({ ...config, reviewEffort })}
+          />
+          <ChoiceSelect
+            label="Subagent model"
+            labels={MODEL_LABELS}
+            value={config.subagentModel}
+            defaultLabel="System default (inherits)"
+            onChange={(subagentModel) => setConfig({ ...config, subagentModel })}
+          />
+          <ChoiceSelect
+            label="Subagent effort"
+            labels={EFFORT_LABELS}
+            value={config.subagentEffort}
+            defaultLabel="System default"
+            onChange={(subagentEffort) => setConfig({ ...config, subagentEffort })}
+          />
+        </div>
+      </section>
+
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
@@ -93,5 +137,37 @@ export function Settings() {
         {saved && <span className="text-sm text-emerald-300">Saved. Refreshing PRs…</span>}
       </div>
     </div>
+  )
+}
+
+function systemDefault(value: string | null | undefined): string {
+  return value ? `System default (${value})` : 'System default'
+}
+
+interface ChoiceSelectProps<T extends ModelChoice | EffortChoice> {
+  label: string
+  labels: Record<T, string>
+  value: T | null
+  defaultLabel: string
+  onChange(value: T | null): void
+}
+
+function ChoiceSelect<T extends ModelChoice | EffortChoice>({ label, labels, value, defaultLabel, onChange }: ChoiceSelectProps<T>) {
+  return (
+    <label className="space-y-1">
+      <span className="block text-xs font-medium text-zinc-400">{label}</span>
+      <select
+        className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5"
+        value={value ?? ''}
+        onChange={(e) => onChange((e.target.value || null) as T | null)}
+      >
+        <option value="">{defaultLabel}</option>
+        {(Object.keys(labels) as T[]).map((choice) => (
+          <option key={choice} value={choice}>
+            {labels[choice]}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }

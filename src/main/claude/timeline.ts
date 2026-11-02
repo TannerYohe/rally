@@ -24,6 +24,10 @@ const TOOL_LABELS: Record<string, string> = {
   mcp__rally__publish_drafts: 'Publishing drafts to Rally',
   mcp__rally__review_submitted: 'Confirming submission',
   mcp__claude_ai_Atlassian__getJiraIssue: 'Fetching Jira ticket',
+  mcp__claude_ai_Slack__slack_search_public_and_private: 'Searching Slack',
+  mcp__claude_ai_Slack__slack_read_thread: 'Reading Slack thread',
+  mcp__slack__slack_search_public_and_private: 'Searching Slack',
+  mcp__slack__slack_read_thread: 'Reading Slack thread',
 }
 
 interface ToolUseBlock {

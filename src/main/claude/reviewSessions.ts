@@ -65,7 +65,7 @@ class ReviewSessions extends EventEmitter {
     }
     this.sessions.set(key, session)
     void this.runTurn(session.id, reviewPrompt(pr), 'review')
-    return session
+    return this.sessions.get(key)!
   }
 
   async feedback(sessionId: string, message: string): Promise<void> {

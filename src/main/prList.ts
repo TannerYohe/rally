@@ -71,8 +71,8 @@ class PrList extends EventEmitter {
     prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
-  private decorate(prs: GithubPr[], pruneHeads: boolean): Pr[] {
-    return this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, pruneHeads)))
+  private decorate(prs: GithubPr[], prune: boolean): Pr[] {
+    return this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, prune), prune))
   }
 
   private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {
@@ -98,8 +98,12 @@ class PrList extends EventEmitter {
     })
   }
 
-  private withSummaries<T extends GithubPr>(prs: T[]): (T & { summary: string | null })[] {
+  private withSummaries<T extends GithubPr>(prs: T[], prune: boolean): (T & { summary: string | null })[] {
     const summaries = summariesFile.get()
+    if (prune) {
+      const current = new Set(prs.map(headKey))
+      summariesFile.set(Object.fromEntries(Object.entries(summaries).filter(([key]) => current.has(key))))
+    }
     return prs.map((pr) => ({ ...pr, summary: summaries[headKey(pr)] ?? null }))
   }
 

@@ -115,7 +115,7 @@ export function Settings() {
           checked={config.includeReviewRequests}
           onChange={(e) => setConfig({ ...config, includeReviewRequests: e.target.checked })}
         />
-        Also include any PR where my review is requested directly (not via a team)
+        Also include any PR where my review is requested directly (not via a team) or that I have reviewed
       </label>
 
       <label className="flex items-center gap-2 text-sm">

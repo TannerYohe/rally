@@ -205,12 +205,3 @@ export function parseShellWords(segment: string): ShellWords {
   endWord()
   return { words, redirects }
 }
-export function tokenize(segment: string): string[] {
-  const tokens = segment.match(/'[^']*'|"[^"]*"|\S+/g) ?? []
-  const withoutAssignments = tokens.slice(tokens.findIndex((t) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)))
-  return tokens.every((t) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) ? [] : withoutAssignments
-}
-
-export function unquote(token: string): string {
-  return token.replace(/^['"]|['"]$/g, '')
-}

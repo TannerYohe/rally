@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { Config, Health, PrRef, ReviewEvent } from '@shared/types'
+import { readClaudeDefaults } from './claude/claudeDefaults'
 import { reviewSessions } from './claude/reviewSessions'
 import { github, resetGithubClient } from './github/client'
 import { prList } from './prList'
@@ -14,9 +15,10 @@ async function health(): Promise<Health> {
   try {
     resetGithubClient()
     const gh = await github()
-    return { githubLogin: gh.login, githubError: null }
+    return { githubLogin: gh.login, githubError: null, claudeDefaults: readClaudeDefaults() }
   } catch (error) {
-    return { githubLogin: null, githubError: error instanceof Error ? error.message : String(error) }
+    const githubError = error instanceof Error ? error.message : String(error)
+    return { githubLogin: null, githubError, claudeDefaults: readClaudeDefaults() }
   }
 }
 

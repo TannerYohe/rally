@@ -148,7 +148,8 @@ function decideScript(script: string, state: ShellState, context: PolicyContext)
 }
 
 function workIsTemp(command: string, context: PolicyContext): boolean {
-  return [...command.matchAll(/(?:^|[\s;&|(])WORK=(\S*)/g)].every(([, raw]) => {
+  const assignments = [...command.matchAll(/(?:^|[\s;&|(])WORK=(\S*)/g)]
+  return assignments.length > 0 && assignments.every(([, raw]) => {
     const value = raw.replace(/^["']/, '')
     if (value.startsWith('$(mktemp') || value.startsWith('`mktemp')) return true
     return isTempPath(value.replace(/["';)]+$/, ''), { cwd: context.cwd, workTrusted: false })

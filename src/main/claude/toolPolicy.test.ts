@@ -8,17 +8,24 @@ const SESSION_CWD = join(tmpdir(), 'rally', 'test-session')
 const REVIEWING = { submitting: false, cwd: SESSION_CWD }
 const SUBMITTING = { submitting: true, cwd: SESSION_CWD }
 
+const WORK = '/tmp/review-pr-api-12-abcd'
+const SET_WORK = 'WORK=$(mktemp -d "${TMPDIR:-/tmp}/review-pr-api-12-XXXX"); '
+
 const bash = (command: string, context = REVIEWING) => decideToolUse('Bash', { command }, context).allow
 
 describe('decideToolUse', () => {
   it('allows the review-pr skill read commands', () => {
     expect(bash('gh pr view 12 -R acme/api --json title,body,author')).toBe(true)
-    expect(bash('WORK=$(mktemp -d "${TMPDIR:-/tmp}/review-pr-api-12-XXXX")')).toBe(true)
-    expect(bash('gh repo clone acme/api "$WORK/repo" -- --filter=blob:none --quiet')).toBe(true)
-    expect(bash('(cd "$WORK/repo" && gh pr checkout 12 --force)')).toBe(true)
-    expect(bash('git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"')).toBe(true)
+    const setup = `WORK=$(mktemp -d "\${TMPDIR:-/tmp}/review-pr-api-12-XXXX")
+gh repo clone acme/api "$WORK/repo" -- --filter=blob:none --quiet
+git -C "$WORK/repo" fetch origin main --quiet
+(cd "$WORK/repo" && gh pr checkout 12 --force)
+git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
+    expect(bash(setup)).toBe(true)
+    expect(bash(`git -C "${WORK}/repo" fetch origin 4f1c2d9 --quiet`)).toBe(true)
+    expect(bash(`git -C "$WORK/repo" fetch origin 4f1c2d9 --quiet`)).toBe(true)
     expect(bash('gh api repos/acme/api/pulls/12/comments --paginate')).toBe(true)
-    expect(bash('rm -rf "$WORK"')).toBe(true)
+    expect(bash(`rm -rf "${WORK}"`)).toBe(true)
   })
 
   it('allows the multi-line review threads graphql query', () => {
@@ -104,25 +111,25 @@ describe('decideToolUse', () => {
     expect(bash('# list changed files\ngit diff --name-only')).toBe(true)
     expect(bash('comm -23 <(git diff --name-only | sort) <(ls | sort)')).toBe(true)
     expect(bash('for f in $(git diff --name-only); do wc -l "$f"; done')).toBe(true)
-    expect(bash('while read -r f; do echo "$f"; done < "$WORK/files.txt"')).toBe(true)
+    expect(bash(`while read -r f; do echo "$f"; done < "${WORK}/files.txt"`)).toBe(true)
     expect(bash('if [ -f package.json ]; then jq .scripts package.json; else echo none; fi')).toBe(true)
     expect(bash('set -euo pipefail; git log --oneline -5 2>/dev/null')).toBe(true)
-    expect(bash(`cat > "$WORK/notes.md" <<'EOF'\n# Heading\ncurl -d x is mentioned\nEOF`)).toBe(true)
+    expect(bash(`cat > "${WORK}/notes.md" <<'EOF'\n# Heading\ncurl -d x is mentioned\nEOF`)).toBe(true)
     expect(bash('gh issue view 3 -R acme/api; gh run list -R acme/api; gh search prs --author me')).toBe(true)
   })
 
   it('limits file writes to the temp directory', () => {
     expect(bash('echo hi > ~/.zshrc')).toBe(false)
-    expect(bash('echo hi >> "$WORK/log.txt" 2>&1')).toBe(true)
-    expect(bash('cp "$WORK/x" ~/bin/x')).toBe(false)
-    expect(bash('cp ~/src/rally/README.md "$WORK/"')).toBe(true)
-    expect(bash('mv ~/src/a "$WORK/a"')).toBe(false)
-    expect(bash('chmod +x "$WORK/x"')).toBe(true)
+    expect(bash(`echo hi >> "${WORK}/log.txt" 2>&1`)).toBe(true)
+    expect(bash(`cp "${WORK}/x" ~/bin/x`)).toBe(false)
+    expect(bash(`cp ~/src/rally/README.md "${WORK}/"`)).toBe(true)
+    expect(bash(`mv ~/src/a "${WORK}/a"`)).toBe(false)
+    expect(bash(`chmod +x "${WORK}/x"`)).toBe(true)
     expect(bash('tee ~/.ssh/config')).toBe(false)
-    expect(bash('rm -rf "$WORK/repo" 2>/dev/null')).toBe(true)
-    expect(bash('rsync -a "$WORK/x" host:/srv/x')).toBe(false)
+    expect(bash(`rm -rf "${WORK}/repo" 2>/dev/null`)).toBe(true)
+    expect(bash(`rsync -a "${WORK}/x" host:/srv/x`)).toBe(false)
     expect(bash('find ~/src -name "*.orig" -delete')).toBe(false)
-    expect(bash('find "$WORK" -name "*.orig" -delete')).toBe(true)
+    expect(bash(`find "${WORK}" -name "*.orig" -delete`)).toBe(true)
     expect(bash('find ~/src -name "*.orig" -exec rm {} \\;')).toBe(false)
   })
 
@@ -130,7 +137,7 @@ describe('decideToolUse', () => {
     expect(bash('echo hi > notes.txt')).toBe(true)
     expect(bash('rm -rf build')).toBe(true)
     expect(bash('cd ~/src/rally && rm -rf build')).toBe(false)
-    expect(bash('cd "$WORK/repo" && sed -i "" s/a/b/ src/file.ts')).toBe(true)
+    expect(bash(`cd "${WORK}/repo" && sed -i "" s/a/b/ src/file.ts`)).toBe(true)
     expect(bash('cd ~/src/rally && sed -i s/a/b/ src/file.ts')).toBe(false)
     expect(bash('sed -i -e s/a/b/ ~/.zshrc')).toBe(false)
     expect(bash('sed -n 1,5p ~/.zshrc')).toBe(true)
@@ -138,7 +145,7 @@ describe('decideToolUse', () => {
 
   it('resolves .. and symlinks before checking temp paths', () => {
     expect(bash('echo x >> /tmp/../Users/me/.zshrc')).toBe(false)
-    expect(bash('rm -rf "$WORK/.."')).toBe(false)
+    expect(bash(`${SET_WORK}rm -rf "$WORK/.."`)).toBe(false)
     expect(bash('rm -rf /tmp')).toBe(false)
     const dir = mkdtempSync(join(tmpdir(), 'rally-policy-'))
     try {
@@ -150,7 +157,10 @@ describe('decideToolUse', () => {
     }
   })
 
-  it('stops trusting $WORK once it is pointed outside temp', () => {
+  it('only trusts $WORK when the same command assigns it to a temp path', () => {
+    expect(bash('rm -rf "$WORK"/*')).toBe(false)
+    expect(bash('echo hi > "$WORK/notes.md"')).toBe(false)
+    expect(bash(`${SET_WORK}rm -rf "$WORK"/*`)).toBe(true)
     expect(bash('WORK=$HOME; echo x >> $WORK/.zshrc')).toBe(false)
     expect(bash('export WORK=~/src; rm -rf "$WORK/rally"')).toBe(false)
     expect(bash('WORK=/tmp/review-pr-x; rm -rf "$WORK/repo"')).toBe(true)
@@ -160,7 +170,8 @@ describe('decideToolUse', () => {
     expect(bash('git -C ~/src/rally checkout main')).toBe(false)
     expect(bash('cd ~/src/rally && git reset --hard')).toBe(false)
     expect(bash('cd ~/src/rally && gh pr checkout 12')).toBe(false)
-    expect(bash('git -C "$WORK/repo" checkout -b review')).toBe(true)
+    expect(bash(`git -C "${WORK}/repo" checkout -b review`)).toBe(true)
+    expect(bash('git -C "$WORK/repo" checkout -b review')).toBe(false)
     expect(bash('git -C ~/src/rally log --oneline -5')).toBe(true)
     expect(bash('git config --global core.pager less')).toBe(false)
     expect(bash('git config --global --get user.name')).toBe(true)

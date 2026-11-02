@@ -28,6 +28,8 @@ const ACTIVE_STATUSES = new Set(['running', 'submitting'])
 
 const now = () => new Date().toISOString()
 
+const sessionDir = (sessionId: string) => join(tmpdir(), 'rally', sessionId)
+
 class ReviewSessions extends EventEmitter {
   private sessions: Map<string, ReviewSession>
   private controllers = new Map<string, AbortController>()
@@ -81,7 +83,7 @@ class ReviewSessions extends EventEmitter {
 
   async submit(sessionId: string, event: ReviewEvent, notes: string): Promise<void> {
     this.assertIdle(sessionId)
-    void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
+    void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes, sessionDir(sessionId)), 'submit')
   }
 
   cancel(sessionId: string): void {
@@ -161,7 +163,7 @@ class ReviewSessions extends EventEmitter {
       true,
     )
 
-    const cwd = join(tmpdir(), 'rally', sessionId)
+    const cwd = sessionDir(sessionId)
     mkdirSync(cwd, { recursive: true })
 
     const decide = (toolName: string, input: unknown) =>
@@ -209,7 +211,7 @@ class ReviewSessions extends EventEmitter {
           mcpServers: { [RALLY_SERVER]: rallyServer },
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
           canUseTool,
-          ...reviewModelOptions(configFile.get(), process.env),
+          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: cwd }),
         },
       })
       for await (const message of stream) {

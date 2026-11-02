@@ -1,20 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { PHASE_LABELS, PHASE_ORDER, type Phase, type Pr, type SessionStatus } from '@shared/types'
 import { Avatar } from '../components/Avatar'
 import { DiffStat } from '../components/DiffStat'
+import { FilterPanel } from '../components/FilterPanel'
 import { PhaseBadge } from '../components/PhaseBadge'
 import { RepoChip } from '../components/RepoChip'
+import { SortControl } from '../components/SortControl'
 import { age } from '../lib/format'
-import { usePrs } from '../lib/hooks'
+import { usePersistentState, usePrs } from '../lib/hooks'
+import {
+  activeFilterCount,
+  applySecondaryFilters,
+  DEFAULT_FILTERS,
+  DEFAULT_SORT,
+  sortPrs,
+  type PrFilters,
+  type PrSort,
+} from '../lib/prFilters'
 import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
-
-function sortPrs(prs: Pr[]): Pr[] {
-  return [...prs].sort(
-    (a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.createdAt.localeCompare(b.createdAt),
-  )
-}
 
 function ReviewStatusNote({ status }: { status: SessionStatus }) {
   const busy = BUSY_STATUSES.includes(status)
@@ -70,46 +75,75 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
   )
 }
 
+function EmptyState({ children }: { children: ReactNode }) {
+  return <div className="rounded-xl border border-dashed border-zinc-800 p-10 text-center text-sm text-zinc-400">{children}</div>
+}
+
+function PrList({ prs, visible, refreshing, onOpen }: { prs: Pr[]; visible: Pr[]; refreshing: boolean; onOpen(pr: Pr): void }) {
+  if (prs.length === 0 && !refreshing) {
+    return (
+      <EmptyState>
+        No open PRs match. Add authors and repos in{' '}
+        <Link className="text-sky-400 underline" to="/settings">
+          Settings
+        </Link>
+        .
+      </EmptyState>
+    )
+  }
+  if (visible.length === 0) return <EmptyState>No PRs match these filters.</EmptyState>
+  return (
+    <ul className="space-y-2.5">
+      {visible.map((pr) => (
+        <PrCard key={pr.id} pr={pr} onOpen={() => onOpen(pr)} />
+      ))}
+    </ul>
+  )
+}
+
+function FunnelIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3.5 w-3.5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h18l-7 8.5V19l-4 2v-7.5L3 5Z" />
+    </svg>
+  )
+}
+
 export function Dashboard() {
   const { prs, refreshing, refreshedAt, error } = usePrs()
-  const [hidden, setHidden] = useState<Set<Phase>>(new Set())
+  const [filters, setFilters] = usePersistentState<PrFilters>('rally.dashboard.filters', DEFAULT_FILTERS)
+  const [sort, setSort] = usePersistentState<PrSort>('rally.dashboard.sort', DEFAULT_SORT)
+  const [showFilters, setShowFilters] = useState(false)
   const navigate = useNavigate()
 
+  const filtered = useMemo(() => applySecondaryFilters(prs, filters), [prs, filters])
   const counts = useMemo(() => {
     const result = Object.fromEntries(PHASE_ORDER.map((p) => [p, 0])) as Record<Phase, number>
-    for (const pr of prs) result[pr.phase]++
+    for (const pr of filtered) result[pr.phase]++
     return result
-  }, [prs])
-  const visible = useMemo(() => sortPrs(prs.filter((pr) => !hidden.has(pr.phase))), [prs, hidden])
+  }, [filtered])
+  const visible = useMemo(
+    () => sortPrs(filtered.filter((pr) => !filters.hiddenPhases.includes(pr.phase)), sort),
+    [filtered, filters.hiddenPhases, sort],
+  )
+  const activeCount = activeFilterCount(filters)
 
-  const toggle = (phase: Phase) => {
-    const next = new Set(hidden)
-    if (next.has(phase)) next.delete(phase)
-    else next.add(phase)
-    setHidden(next)
+  const togglePhase = (phase: Phase) => {
+    const hiddenPhases = filters.hiddenPhases.includes(phase)
+      ? filters.hiddenPhases.filter((p) => p !== phase)
+      : [...filters.hiddenPhases, phase]
+    setFilters({ ...filters, hiddenPhases })
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 px-6 py-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="mr-2 text-lg font-semibold">
-          Open PRs <span className="text-zinc-500">{prs.length}</span>
+    <div className="mx-auto max-w-6xl space-y-4 px-6 py-6">
+      <div className="flex items-center gap-3">
+        <h1 className="text-lg font-semibold">
+          Open PRs{' '}
+          <span className="text-zinc-500">
+            {visible.length === prs.length ? prs.length : `${visible.length} of ${prs.length}`}
+          </span>
         </h1>
-        {PHASE_ORDER.map((phase) => {
-          const theme = PHASE_THEME[phase]
-          const active = !hidden.has(phase)
-          return (
-            <button
-              key={phase}
-              onClick={() => toggle(phase)}
-              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ring-1 transition ${active ? theme.chipActive : 'text-zinc-500 ring-zinc-800 hover:text-zinc-300'}`}
-            >
-              <span className={`h-2 w-2 rounded-full ${active ? theme.dot : 'bg-zinc-700'}`} />
-              {PHASE_LABELS[phase]}
-              <span className="font-semibold">{counts[phase]}</span>
-            </button>
-          )
-        })}
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-500">
           {refreshedAt && <span>Updated {age(refreshedAt)} ago</span>}
           <button
@@ -122,23 +156,45 @@ export function Dashboard() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        {PHASE_ORDER.map((phase) => {
+          const theme = PHASE_THEME[phase]
+          const active = !filters.hiddenPhases.includes(phase)
+          return (
+            <button
+              key={phase}
+              onClick={() => togglePhase(phase)}
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ring-1 transition ${active ? theme.chipActive : 'text-zinc-500 ring-zinc-800 hover:text-zinc-300'}`}
+            >
+              <span className={`h-2 w-2 rounded-full ${active ? theme.dot : 'bg-zinc-700'}`} />
+              {PHASE_LABELS[phase]}
+              <span className="font-semibold">{counts[phase]}</span>
+            </button>
+          )
+        })}
+        <div className="ml-auto flex items-center gap-2">
+          {activeCount > 0 && (
+            <button className="text-xs text-zinc-500 hover:text-zinc-300" onClick={() => setFilters({ ...DEFAULT_FILTERS, hiddenPhases: filters.hiddenPhases })}>
+              Clear filters
+            </button>
+          )}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ring-1 transition ${showFilters || activeCount ? 'bg-violet-500/15 text-violet-100 ring-violet-400/40' : 'text-zinc-400 ring-zinc-800 hover:text-zinc-200'}`}
+          >
+            <FunnelIcon />
+            Filters
+            {activeCount > 0 && <span className="rounded-full bg-violet-400 px-1.5 text-[10px] font-semibold text-zinc-950">{activeCount}</span>}
+          </button>
+          <SortControl sort={sort} onChange={setSort} />
+        </div>
+      </div>
+
+      {showFilters && <FilterPanel prs={prs} filters={filters} onChange={setFilters} />}
+
       {error && <div className="rounded-lg bg-rose-950/80 px-4 py-2 text-sm text-rose-200 ring-1 ring-rose-500/30">GitHub refresh failed: {error}</div>}
 
-      {prs.length === 0 && !refreshing ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-10 text-center text-sm text-zinc-400">
-          No open PRs match. Add authors and repos in{' '}
-          <Link className="text-sky-400 underline" to="/settings">
-            Settings
-          </Link>
-          .
-        </div>
-      ) : (
-        <ul className="space-y-2.5">
-          {visible.map((pr) => (
-            <PrCard key={pr.id} pr={pr} onOpen={() => navigate(`/pr/${pr.owner}/${pr.repo}/${pr.number}`)} />
-          ))}
-        </ul>
-      )}
+      <PrList prs={prs} visible={visible} refreshing={refreshing} onOpen={(pr) => navigate(`/pr/${pr.owner}/${pr.repo}/${pr.number}`)} />
     </div>
   )
 }

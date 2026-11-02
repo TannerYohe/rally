@@ -51,6 +51,10 @@ You can edit or drop drafts inline, or type feedback, then click **Send to Claud
 
 **Post and submit** sends a final `SUBMIT` turn. In that turn Claude creates a pending review, posts any thread replies, submits the review with the event you picked (Comment, Approve, or Request changes), and confirms through `mcp__rally__review_submitted`. Rally then re-fetches the PR from GitHub to recompute its phase.
 
+A submitted session stays on the PR page with a link to the review on GitHub. **Start follow-up review** discards that session and starts a new one that runs `/review-pr` again, which picks up the follow-up flow from your earlier review on GitHub.
+
+Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the skill's work directory lands inside it and the submit turn can clean it up by absolute path.
+
 Settings → Reviews picks the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
 
 ### Guardrails
@@ -58,7 +62,7 @@ Settings → Reviews picks the model and effort for the review session and, sepa
 Rally is an internal tool, so the tool policy is a guardrail against accidental writes and destructive commands, not a sandbox. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
 
 - GitHub writes are blocked until the submit turn, and in that turn only review creation, review events, and thread replies are allowed. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`), `sh -c`, `eval`, and `find -exec`. `git push` is always blocked.
-- Write, Edit, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, `find -delete`, output redirects) only land under the temp directory. Paths resolve against the working directory, including `cd`, with `..` and symlinks followed, and `$WORK` stops counting as temp if the command points it elsewhere. Git commands that change a checkout, and `gh pr checkout`, only run in temp repos. `git config --global` is read-only.
+- Write, Edit, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, `find -delete`, output redirects) only land under the temp directory. Paths resolve against the working directory, including `cd`, with `..` and symlinks followed, and `$WORK` counts as temp only in the command that assigns it from `mktemp` or a temp path. Paths that `xargs` supplies are unknown, so file-writing commands behind `xargs` are blocked. Git commands that change a checkout, and `gh pr checkout`, only run in temp repos. `git config --global` is read-only.
 - Network requests that send data (`curl -d`, `curl -X POST`, `wget --post-data`) are blocked; reads are allowed.
 - `ssh`/`scp`, live infrastructure CLIs (`kubectl`, `aws`, `gcloud`, `az`, `terraform`, `helm`), and `sudo` are blocked.
 - Read-only MCP tools (actions starting with a verb like `get`, `list`, `search`, or `read`), `WebSearch`, `WebFetch`, and `LSP` are allowed. MCP tools that write are blocked.

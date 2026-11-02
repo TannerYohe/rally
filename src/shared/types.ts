@@ -123,9 +123,16 @@ export interface SubmittedReview {
   event: ReviewEvent
 }
 
+export interface PrRef {
+  owner: string
+  repo: string
+  number: number
+  url: string
+}
+
 export interface ReviewSession {
   id: string
-  prUrl: string
+  pr: PrRef
   prKey: string
   sdkSessionId: string | null
   status: SessionStatus

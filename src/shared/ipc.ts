@@ -1,11 +1,4 @@
-import type { Config, Health, PrListState, ReviewEvent, ReviewSession } from './types'
-
-export interface PrRef {
-  owner: string
-  repo: string
-  number: number
-  url: string
-}
+import type { Config, Health, PrListState, PrRef, ReviewEvent, ReviewSession } from './types'
 
 export interface RallyApi {
   getConfig(): Promise<Config>
@@ -17,7 +10,7 @@ export interface RallyApi {
   getSession(prKey: string): Promise<ReviewSession | null>
   startReview(pr: PrRef): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
-  submitReview(sessionId: string, event: ReviewEvent): Promise<void>
+  submitReview(sessionId: string, event: ReviewEvent, notes: string): Promise<void>
   cancelReview(sessionId: string): Promise<void>
   discardSession(sessionId: string): Promise<void>
   onSessionChanged(listener: (session: ReviewSession) => void): () => void

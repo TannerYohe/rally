@@ -53,16 +53,17 @@ You can edit or drop drafts inline, or type feedback, then click **Send to Claud
 
 Settings → Reviews picks the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
 
-### Safety
+### Guardrails
 
-PR content is untrusted input to the session, so every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
+Rally is an internal tool, so the tool policy is a guardrail against accidental writes and destructive commands, not a sandbox. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
 
-- Bash runs any command except those on a denylist. The denylist covers programs that reach the network, run arbitrary code (interpreters, shells, package managers, build tools, command wrappers), or act on live infrastructure. It also covers flags that make safe tools run commands (`find -exec`, `rg --pre`, `git -c`), and programs hidden behind a path, variable, or substitution. `src/main/claude/shellCommand.ts` parses comments, heredocs, substitutions, and redirects so the policy sees every command that would run.
-- Write, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, output redirects), are limited to temp directories.
-- Read-only MCP tools (actions starting with a verb like `get`, `list`, `search`, or `read`), `WebSearch`, and `LSP` are allowed. `WebFetch` and other tools are blocked.
-- All GitHub writes are blocked until the submit turn. In that turn, only review creation, review events, and thread replies are allowed.
+- GitHub writes are blocked until the submit turn, and in that turn only review creation, review events, and thread replies are allowed. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`), `sh -c`, `eval`, and `find -exec`. `git push` is always blocked.
+- Write, Edit, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, `find -delete`, output redirects) only land under the temp directory. Paths resolve against the working directory, including `cd`, with `..` and symlinks followed, and `$WORK` stops counting as temp if the command points it elsewhere. Git commands that change a checkout, and `gh pr checkout`, only run in temp repos. `git config --global` is read-only.
+- Network requests that send data (`curl -d`, `curl -X POST`, `wget --post-data`) are blocked; reads are allowed.
+- `ssh`/`scp`, live infrastructure CLIs (`kubectl`, `aws`, `gcloud`, `az`, `terraform`, `helm`), and `sudo` are blocked.
+- Read-only MCP tools (actions starting with a verb like `get`, `list`, `search`, or `read`), `WebSearch`, `WebFetch`, and `LSP` are allowed. MCP tools that write are blocked.
 
-Blocked calls appear in the activity timeline.
+`src/main/claude/shellCommand.ts` parses comments, heredocs, substitutions, and redirects so the policy sees every command in a Bash call. Blocked calls appear in the activity timeline.
 
 ## Data
 

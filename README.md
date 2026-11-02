@@ -52,8 +52,9 @@ You can edit or drop drafts inline, or type feedback, then click **Send to Claud
 
 PR content is untrusted input to the session, so every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
 
-- Bash is limited to the read-only commands `review-pr` needs (`gh pr view`, `gh api` GETs, `git`, and so on).
-- Write is limited to temp directories.
+- Bash runs any command except those on a denylist. The denylist covers programs that reach the network, run arbitrary code (interpreters, shells, package managers, build tools, command wrappers), or act on live infrastructure. It also covers flags that make safe tools run commands (`find -exec`, `rg --pre`, `git -c`), and programs hidden behind a path, variable, or substitution. `src/main/claude/shellCommand.ts` parses comments, heredocs, substitutions, and redirects so the policy sees every command that would run.
+- Write, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, output redirects), are limited to temp directories.
+- Read-only MCP tools (actions starting with a verb like `get`, `list`, `search`, or `read`), `WebSearch`, and `LSP` are allowed. `WebFetch` and other tools are blocked.
 - All GitHub writes are blocked until the submit turn. In that turn, only review creation, review events, and thread replies are allowed.
 
 Blocked calls appear in the activity timeline.

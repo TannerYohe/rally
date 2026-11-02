@@ -20,6 +20,7 @@ function pr(overrides: Partial<Pr>): Pr {
     deletions: 0,
     changedFiles: 0,
     headRefOid: '',
+    headKnownSince: null,
     baseRefName: 'main',
     headRefName: 'x',
     files: [],

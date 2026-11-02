@@ -8,8 +8,8 @@ function review(state: MyReview['state'], commitOid: string, submittedAt: string
   return { state, commitOid, submittedAt }
 }
 
-function phase(myReviews: MyReview[], reviewRequestedFromMe = false, reviewInProgress = false) {
-  return computePhase({ headRefOid: HEAD, reviewRequestedFromMe, myReviews, reviewInProgress })
+function phase(myReviews: MyReview[], reviewRequestedFromMe = false, reviewInProgress = false, headKnownSince: string | null = null) {
+  return computePhase({ headRefOid: HEAD, headKnownSince, reviewRequestedFromMe, myReviews, reviewInProgress })
 }
 
 describe('computePhase', () => {
@@ -52,6 +52,14 @@ describe('computePhase', () => {
   it('is in progress while I have an unsubmitted Rally review, whatever GitHub says', () => {
     expect(phase([], false, true)).toBe('in_progress')
     expect(phase([review('APPROVED', 'old-sha')], true, true)).toBe('in_progress')
+  })
+
+  it('counts a review submitted after the current head existed as reviewing it, even if GitHub stamped an older commit', () => {
+    expect(phase([review('COMMENTED', 'old-sha', '2026-10-02T00:00:00Z')], false, false, '2026-10-01T12:00:00Z')).toBe('pending_changes')
+  })
+
+  it('is awaiting re-review when the head appeared after my review', () => {
+    expect(phase([review('COMMENTED', 'old-sha', '2026-10-01T00:00:00Z')], false, false, '2026-10-01T12:00:00Z')).toBe('awaiting_rereview')
   })
 
   it('uses my most recent submitted review', () => {

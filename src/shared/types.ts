@@ -35,6 +35,7 @@ export interface Pr {
   deletions: number
   changedFiles: number
   headRefOid: string
+  headKnownSince: string | null
   baseRefName: string
   headRefName: string
   files: string[]

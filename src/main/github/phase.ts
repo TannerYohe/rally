@@ -5,6 +5,7 @@ const COUNTED_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'])
 interface PhaseInput {
   reviewInProgress: boolean
   headRefOid: string
+  headKnownSince: string | null
   reviewRequestedFromMe: boolean
   myReviews: MyReview[]
 }
@@ -15,11 +16,16 @@ export function latestSubmittedReview(reviews: MyReview[]): MyReview | null {
   return submitted.at(-1) ?? null
 }
 
+function headChangedSince(review: MyReview, pr: PhaseInput): boolean {
+  if (review.commitOid === pr.headRefOid) return false
+  return !pr.headKnownSince || pr.headKnownSince > review.submittedAt!
+}
+
 export function computePhase(pr: PhaseInput): Phase {
   if (pr.reviewInProgress) return 'in_progress'
   const last = latestSubmittedReview(pr.myReviews)
   if (!last) return 'unreviewed'
-  if (pr.reviewRequestedFromMe || last.commitOid !== pr.headRefOid) return 'awaiting_rereview'
+  if (pr.reviewRequestedFromMe || headChangedSince(last, pr)) return 'awaiting_rereview'
   if (last.state === 'APPROVED') return 'approved'
   return 'pending_changes'
 }

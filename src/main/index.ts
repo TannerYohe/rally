@@ -27,6 +27,15 @@ function createWindow(): BrowserWindow {
   return window
 }
 
+if (!app.requestSingleInstanceLock()) app.quit()
+
+app.on('second-instance', () => {
+  const [window] = BrowserWindow.getAllWindows()
+  if (!window) return
+  if (window.isMinimized()) window.restore()
+  window.focus()
+})
+
 app.whenReady().then(() => {
   loadLoginShellPath()
   registerIpc()

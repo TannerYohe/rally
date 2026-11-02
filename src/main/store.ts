@@ -9,6 +9,8 @@ interface PrCache {
   prs: Pr[]
 }
 
+if (process.env.RALLY_USER_DATA_DIR) app.setPath('userData', process.env.RALLY_USER_DATA_DIR)
+
 const dir = app.getPath('userData')
 
 export const configFile = new JsonFile<Config>(join(dir, 'config.json'), DEFAULT_CONFIG)

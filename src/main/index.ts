@@ -1,5 +1,8 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
+import { registerIpc } from './ipc'
+import { prList } from './prList'
+import { loadLoginShellPath } from './shellPath'
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -25,7 +28,10 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  loadLoginShellPath()
+  registerIpc()
   createWindow()
+  prList.start()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

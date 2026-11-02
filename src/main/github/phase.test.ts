@@ -70,4 +70,14 @@ describe('computePhase', () => {
     ]
     expect(phase(reviews)).toBe('approved')
   })
+
+  it('stays approved when I reply on a thread after approving', () => {
+    const reviews = [review('APPROVED', HEAD, '2026-10-01T00:00:00Z'), review('COMMENTED', HEAD, '2026-10-02T00:00:00Z')]
+    expect(phase(reviews)).toBe('approved')
+  })
+
+  it('is pending changes when I comment after requesting changes', () => {
+    const reviews = [review('CHANGES_REQUESTED', HEAD, '2026-10-01T00:00:00Z'), review('COMMENTED', HEAD, '2026-10-02T00:00:00Z')]
+    expect(phase(reviews)).toBe('pending_changes')
+  })
 })

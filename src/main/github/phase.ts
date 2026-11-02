@@ -1,6 +1,7 @@
 import type { MyReview, Phase } from '@shared/types'
 
 const COUNTED_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'])
+const DECISION_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED'])
 
 interface PhaseInput {
   reviewInProgress: boolean
@@ -10,8 +11,8 @@ interface PhaseInput {
   myReviews: MyReview[]
 }
 
-export function latestSubmittedReview(reviews: MyReview[]): MyReview | null {
-  const submitted = reviews.filter((r) => COUNTED_STATES.has(r.state) && r.submittedAt)
+export function latestSubmittedReview(reviews: MyReview[], states = COUNTED_STATES): MyReview | null {
+  const submitted = reviews.filter((r) => states.has(r.state) && r.submittedAt)
   submitted.sort((a, b) => a.submittedAt!.localeCompare(b.submittedAt!))
   return submitted.at(-1) ?? null
 }
@@ -26,6 +27,6 @@ export function computePhase(pr: PhaseInput): Phase {
   const last = latestSubmittedReview(pr.myReviews)
   if (!last) return 'unreviewed'
   if (pr.reviewRequestedFromMe || headChangedSince(last, pr)) return 'awaiting_rereview'
-  if (last.state === 'APPROVED') return 'approved'
+  if (latestSubmittedReview(pr.myReviews, DECISION_STATES)?.state === 'APPROVED') return 'approved'
   return 'pending_changes'
 }

@@ -57,6 +57,19 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash("gh api repos/acme/api/pulls/12/comments/5/replies --method POST -f body='still broken'", SUBMITTING)).toBe(true)
   })
 
+  it('finds the endpoint after flag values', () => {
+    expect(bash('gh api -X POST repos/acme/api/pulls/12/reviews --input x.json', SUBMITTING)).toBe(true)
+    expect(bash('gh api -H "Accept: application/json" --method POST repos/acme/api/pulls/12/reviews/9/events -f event=COMMENT', SUBMITTING)).toBe(true)
+    expect(bash('gh api --jq .id -X POST repos/acme/api/pulls/12/merge', SUBMITTING)).toBe(false)
+  })
+
+  it('allows only review mutations through graphql during submit', () => {
+    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
+    const merge = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
+    expect(bash(resolve, SUBMITTING)).toBe(true)
+    expect(bash(merge, SUBMITTING)).toBe(false)
+  })
+
   it('blocks unrelated writes even during submit', () => {
     expect(bash('gh api repos/acme/api/pulls/12/merge --method PUT', SUBMITTING)).toBe(false)
     expect(bash('gh api repos/acme/api/issues/12/comments -f body=hi', SUBMITTING)).toBe(false)

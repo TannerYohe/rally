@@ -87,6 +87,10 @@ const WGET_METHOD_FLAGS = ['--method']
 const WGET_BODY_FLAGS = ['--post-data', '--post-file', '--body-data', '--body-file']
 const READ_METHODS = new Set(['GET', 'HEAD'])
 
+const GH_API_VALUE_FLAGS = new Set([
+  '-X', '--method', '-H', '--header', '-f', '-F', '--field', '--raw-field', '--input', '-q', '--jq', '-t', '--template',
+  '-p', '--preview', '--hostname', '--cache',
+])
 const SUBMIT_REST_PATHS = [
   /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/,
   /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews\/\d+\/events$/,
@@ -371,7 +375,7 @@ function decideGh(args: string[], segment: string, state: ShellState, context: P
 }
 
 function decideGhApi(args: string[], segment: string, context: PolicyContext): ToolDecision {
-  const endpoint = args.find((a) => !a.startsWith('-')) ?? ''
+  const endpoint = ghApiEndpoint(args)
   if (endpoint === 'graphql') {
     if (!context.submitting && args.some((a) => matchesFlag(a, '--input'))) {
       return deny('Rally cannot inspect `gh api graphql --input`. Pass the query inline with `-f query=`.')
@@ -390,3 +394,11 @@ function decideGhApi(args: string[], segment: string, context: PolicyContext): T
       : 'GitHub writes are blocked until the user submits the review from Rally.',
   )
 }
+function ghApiEndpoint(args: string[]): string {
+  for (let i = 0; i < args.length; i++) {
+    if (GH_API_VALUE_FLAGS.has(args[i])) i++
+    else if (!args[i].startsWith('-')) return args[i]
+  }
+  return ''
+}
+

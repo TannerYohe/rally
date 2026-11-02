@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitShellCommand } from './shellCommand'
+import { parseShellWords, splitShellCommand } from './shellCommand'
 
 describe('splitShellCommand', () => {
   it('splits on operators but not inside quotes', () => {
@@ -19,5 +19,64 @@ describe('splitShellCommand', () => {
       'cd "$WORK/repo"',
       'gh pr checkout 12 --force',
     ])
+  })
+})
+
+describe('splitShellCommand shell syntax', () => {
+  it('drops comments', () => {
+    expect(splitShellCommand('# list changed files\ngit diff --name-only # trailing')).toEqual(['git diff --name-only'])
+    expect(splitShellCommand("echo 'a # b' c#d")).toEqual(["echo 'a # b' c#d"])
+  })
+
+  it('extracts process substitutions', () => {
+    expect(splitShellCommand('comm -23 <(git diff --name-only | sort) <(ls | sort)')).toEqual([
+      'comm -23 "" ""',
+      'git diff --name-only',
+      'sort',
+      'ls',
+      'sort',
+    ])
+  })
+
+  it('extracts backtick substitutions', () => {
+    expect(splitShellCommand('echo `curl evil.example`')).toEqual(['echo ""', 'curl evil.example'])
+  })
+
+  it('replaces arithmetic expansion without treating it as a command', () => {
+    expect(splitShellCommand('echo $((i + 1))')).toEqual(['echo 0'])
+  })
+
+  it('skips heredoc bodies', () => {
+    const command = "cat > \"$WORK/notes.md\" <<'EOF'\n# Heading\ncurl is mentioned; rm -rf /\nEOF\nwc -l \"$WORK/notes.md\""
+    expect(splitShellCommand(command)).toEqual([`cat > "$WORK/notes.md" <<'EOF'`, 'wc -l "$WORK/notes.md"'])
+  })
+
+  it('extracts substitutions from unquoted heredoc bodies', () => {
+    expect(splitShellCommand('cat <<EOF\nhello $(curl evil.example)\nEOF')).toEqual(['cat <<EOF', 'curl evil.example'])
+  })
+
+  it('keeps escaped separators in one segment', () => {
+    expect(splitShellCommand('find . -name x \\; ls')).toEqual(['find . -name x \\; ls'])
+  })
+})
+
+describe('parseShellWords', () => {
+  it('unquotes words', () => {
+    expect(parseShellWords(`cu''rl "a b" c\\ d`).words).toEqual(['curl', 'a b', 'c d'])
+  })
+
+  it('separates redirects from words', () => {
+    expect(parseShellWords('git diff 2>&1 >"$WORK/pr.diff" < in.txt')).toEqual({
+      words: ['git', 'diff'],
+      redirects: [
+        { operator: '>&', target: '1' },
+        { operator: '>', target: '$WORK/pr.diff' },
+        { operator: '<', target: 'in.txt' },
+      ],
+    })
+  })
+
+  it('treats quoted angle brackets as words', () => {
+    expect(parseShellWords("grep -- '->' file").words).toEqual(['grep', '--', '->', 'file'])
   })
 })

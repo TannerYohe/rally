@@ -11,6 +11,9 @@ const PR_FIELDS = `
     files(first: 100) { nodes { path } }
     reviewRequests(first: 50) { nodes { requestedReviewer { ... on User { login } } } }
     reviews(author: $viewer, last: 20) { nodes { state submittedAt commit { oid } } }
+    timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
+      nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
+    }
   }
 `
 
@@ -53,6 +56,12 @@ interface RawPr {
   files: { nodes: { path: string }[] } | null
   reviewRequests: { nodes: { requestedReviewer: { login?: string } | null }[] }
   reviews: { nodes: { state: ReviewState; submittedAt: string | null; commit: { oid: string } | null }[] }
+  timelineItems: { nodes: { createdAt: string; afterCommit: { oid: string } | null }[] }
+}
+
+function forcePushedToHeadAt(raw: RawPr): string | null {
+  const [event] = raw.timelineItems.nodes
+  return event?.afterCommit?.oid === raw.headRefOid ? event.createdAt : null
 }
 
 interface SearchResponse {
@@ -85,6 +94,7 @@ function toPr(raw: RawPr, viewer: string): Pr {
     deletions: raw.deletions,
     changedFiles: raw.changedFiles,
     headRefOid: raw.headRefOid,
+    headKnownSince: forcePushedToHeadAt(raw),
     baseRefName: raw.baseRefName,
     headRefName: raw.headRefName,
     files: raw.files?.nodes.map((f) => f.path) ?? [],

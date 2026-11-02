@@ -9,6 +9,7 @@ import {
   type PrRef,
   type ReviewEvent,
   type ReviewSession,
+  type SessionStatus,
   type SubmittedReview,
   type TimelineEntry,
 } from '@shared/types'
@@ -16,7 +17,7 @@ import { prList } from '../prList'
 import { sessionsFile } from '../store'
 import { APP_PROTOCOL, reviewPrompt, submitPrompt } from './prompts'
 import { createRallyServer } from './rallyTools'
-import { reduceTimeline } from './timeline'
+import { closeOpenEntries, reduceTimeline } from './timeline'
 import { decideToolUse } from './toolPolicy'
 
 type TurnMode = 'review' | 'refine' | 'submit'
@@ -44,6 +45,10 @@ class ReviewSessions extends EventEmitter {
 
   getByPr(key: string): ReviewSession | null {
     return this.sessions.get(key) ?? null
+  }
+
+  statusOf(key: string): SessionStatus | null {
+    return this.sessions.get(key)?.status ?? null
   }
 
   async start(pr: PrRef): Promise<ReviewSession> {
@@ -87,6 +92,7 @@ class ReviewSessions extends EventEmitter {
     const session = this.byId(sessionId)
     this.sessions.delete(session.prKey)
     this.persist()
+    this.emit('removed', session.prKey)
   }
 
   private assertIdle(sessionId: string): void {
@@ -219,6 +225,7 @@ class ReviewSessions extends EventEmitter {
       )
     } finally {
       this.controllers.delete(sessionId)
+      this.patch(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()
     }
   }

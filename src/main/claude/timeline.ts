@@ -58,7 +58,8 @@ function toolEntry(block: ToolUseBlock, at: string): TimelineEntry | null {
   if (QUIET_TOOLS.has(block.name)) return null
   if (block.name === 'Agent' || block.name === 'Task') {
     const label = String(block.input.description ?? block.input.subagent_type ?? 'Subagent')
-    return { kind: 'agent', id: block.id, label, done: false, activity: 0, at }
+    const background = block.input.run_in_background !== false
+    return { kind: 'agent', id: block.id, label, done: false, activity: 0, background, at }
   }
   if (block.name === 'Bash') {
     const command = String(block.input.command ?? '')
@@ -69,8 +70,25 @@ function toolEntry(block: ToolUseBlock, at: string): TimelineEntry | null {
 }
 
 function markDone(timeline: TimelineEntry[], toolUseIds: Set<string>): TimelineEntry[] {
+  return timeline.map((entry) => {
+    if (!toolUseIds.has(entry.id)) return entry
+    if (entry.kind === 'step' || (entry.kind === 'agent' && !entry.background)) return { ...entry, done: true }
+    return entry
+  })
+}
+
+function updateAgent(
+  timeline: TimelineEntry[],
+  toolUseId: string | undefined,
+  patch: (entry: Extract<TimelineEntry, { kind: 'agent' }>) => Partial<Extract<TimelineEntry, { kind: 'agent' }>>,
+): TimelineEntry[] {
+  if (!toolUseId) return timeline
+  return timeline.map((entry) => (entry.kind === 'agent' && entry.id === toolUseId ? { ...entry, ...patch(entry) } : entry))
+}
+
+export function closeOpenEntries(timeline: TimelineEntry[]): TimelineEntry[] {
   return timeline.map((entry) =>
-    (entry.kind === 'step' || entry.kind === 'agent') && toolUseIds.has(entry.id) ? { ...entry, done: true } : entry,
+    (entry.kind === 'step' || entry.kind === 'agent') && !entry.done ? { ...entry, done: true } : entry,
   )
 }
 
@@ -106,12 +124,24 @@ export function reduceTimeline(timeline: TimelineEntry[], message: SDKMessage, a
       )
       return results.length ? markDone(timeline, new Set(results.map((r) => r.tool_use_id))) : timeline
     }
+    case 'system': {
+      switch (message.subtype) {
+        case 'task_started':
+          return updateAgent(timeline, message.tool_use_id, () => ({ background: message.is_backgrounded ?? false }))
+        case 'task_progress':
+          return updateAgent(timeline, message.tool_use_id, (entry) => ({
+            activity: Math.max(entry.activity, message.usage.tool_uses),
+          }))
+        case 'task_notification':
+          return updateAgent(timeline, message.tool_use_id, () => ({ done: true }))
+        default:
+          return timeline
+      }
+    }
     case 'result': {
       const ok = message.subtype === 'success' && !message.is_error
       const text = message.subtype === 'success' ? '' : message.subtype.replaceAll('_', ' ')
-      const finished = timeline.map((entry) =>
-        (entry.kind === 'step' || entry.kind === 'agent') && !entry.done ? { ...entry, done: true } : entry,
-      )
+      const finished = timeline.map((entry) => (entry.kind === 'step' && !entry.done ? { ...entry, done: true } : entry))
       return [
         ...finished,
         { kind: 'result', id: message.uuid, ok, text, costUsd: message.total_cost_usd, durationMs: message.duration_ms, at },

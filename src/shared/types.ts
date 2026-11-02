@@ -1,8 +1,9 @@
-export type Phase = 'unreviewed' | 'awaiting_rereview' | 'pending_changes' | 'approved'
+export type Phase = 'in_progress' | 'unreviewed' | 'awaiting_rereview' | 'pending_changes' | 'approved'
 
-export const PHASE_ORDER: Phase[] = ['awaiting_rereview', 'unreviewed', 'pending_changes', 'approved']
+export const PHASE_ORDER: Phase[] = ['in_progress', 'awaiting_rereview', 'unreviewed', 'pending_changes', 'approved']
 
 export const PHASE_LABELS: Record<Phase, string> = {
+  in_progress: 'In progress',
   unreviewed: 'Unreviewed',
   awaiting_rereview: 'Awaiting re-review',
   pending_changes: 'Pending changes',
@@ -40,6 +41,7 @@ export interface Pr {
   reviewRequestedFromMe: boolean
   myReviews: MyReview[]
   phase: Phase
+  reviewStatus: SessionStatus | null
   summary: string | null
 }
 
@@ -114,7 +116,7 @@ export type TimelineEntry =
   | { kind: 'user'; id: string; text: string; at: string }
   | { kind: 'text'; id: string; text: string; at: string }
   | { kind: 'step'; id: string; label: string; detail: string; done: boolean; at: string }
-  | { kind: 'agent'; id: string; label: string; done: boolean; activity: number; at: string }
+  | { kind: 'agent'; id: string; label: string; done: boolean; activity: number; background: boolean; at: string }
   | { kind: 'denied'; id: string; label: string; at: string }
   | { kind: 'result'; id: string; ok: boolean; text: string; costUsd: number; durationMs: number; at: string }
 

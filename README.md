@@ -35,7 +35,7 @@ In progress comes from Rally's own review sessions and takes precedence. The oth
 |---|---|
 | In progress | You have a Rally review session for the PR that hasn't been submitted. This includes sessions that errored or were cancelled. **Start over** clears it. |
 | Unreviewed | You have no submitted review. |
-| Awaiting re-review | The author re-requested your review, or the head SHA moved past the commit your latest review was on. |
+| Awaiting re-review | The author re-requested your review, or the head SHA differs from the commit your latest review was on and that head appeared after you submitted. The head's time is the force-push time when there is one, else when Rally first saw it. |
 | Approved | Your latest review is an approval and nothing changed since. |
 | Pending changes | Anything else: you reviewed and nothing new has happened. |
 

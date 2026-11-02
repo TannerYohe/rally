@@ -28,10 +28,11 @@ Each row shows author, title, repo, age, phase, and a one-line summary. Claude H
 
 ### Phases
 
-Only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored.
+In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count; pending (unsubmitted) and dismissed reviews are ignored.
 
 | Phase | Rule |
 |---|---|
+| In progress | You have a Rally review session for the PR that hasn't been submitted. This includes sessions that errored or were cancelled. **Start over** clears it. |
 | Unreviewed | You have no submitted review. |
 | Awaiting re-review | The author re-requested your review, or the head SHA moved past the commit your latest review was on. |
 | Approved | Your latest review is an approval and nothing changed since. |
@@ -59,4 +60,4 @@ Blocked calls appear in the activity timeline.
 
 ## Data
 
-Rally stores config, the PR cache, summaries, and review sessions as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS). Claude session transcripts live where Claude Code keeps them.
+Rally stores config, the PR cache, summaries, and review sessions as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS). Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.

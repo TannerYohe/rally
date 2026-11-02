@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
+import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
 import { prList } from './prList'
 import { loadLoginShellPath } from './shellPath'
@@ -9,6 +10,7 @@ function createWindow(): BrowserWindow {
     width: 1400,
     height: 900,
     title: 'Rally',
+    icon,
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
     },
@@ -37,6 +39,7 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(() => {
+  app.dock?.setIcon(icon)
   loadLoginShellPath()
   registerIpc()
   createWindow()

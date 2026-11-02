@@ -1,4 +1,5 @@
 import { tmpdir } from 'node:os'
+import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
@@ -109,7 +110,7 @@ const deny = (reason: string): ToolDecision => ({ allow: false, reason })
 const ALLOW: ToolDecision = { allow: true }
 
 export function decideToolUse(toolName: string, input: Record<string, unknown>, context: PolicyContext): ToolDecision {
-  if (ALWAYS_ALLOWED_TOOLS.has(toolName) || toolName.startsWith('mcp__rally__') || isReadOnlyMcpTool(toolName)) {
+  if (ALWAYS_ALLOWED_TOOLS.has(toolName) || toolName.startsWith(RALLY_TOOL_PREFIX) || isReadOnlyMcpTool(toolName)) {
     return ALLOW
   }
   if (toolName === 'AskUserQuestion') {

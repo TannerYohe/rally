@@ -17,7 +17,7 @@ import { prList } from '../prList'
 import { configFile, sessionsFile } from '../store'
 import { APP_PROTOCOL, reviewPrompt, submitPrompt } from './prompts'
 import { reviewModelOptions } from './modelOptions'
-import { createRallyServer } from './rallyTools'
+import { createRallyServer, RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
 import { decideToolUse } from './toolPolicy'
 
@@ -201,7 +201,7 @@ class ReviewSessions extends EventEmitter {
           settingSources: ['user'],
           skills: 'all',
           systemPrompt: { type: 'preset', preset: 'claude_code', append: APP_PROTOCOL },
-          mcpServers: { rally: rallyServer },
+          mcpServers: { [RALLY_SERVER]: rallyServer },
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
           canUseTool,
           ...reviewModelOptions(configFile.get(), process.env),

@@ -19,11 +19,19 @@ const commentSchema = z.object({
   reply_to_comment_id: z.number().int().nullable().describe('Comment id being replied to, for kind=reply'),
 })
 
+const PUBLISH_DRAFTS = 'publish_drafts'
+const REVIEW_SUBMITTED = 'review_submitted'
+
+export const RALLY_SERVER = 'rally'
+export const RALLY_TOOL_PREFIX = `mcp__${RALLY_SERVER}__`
+export const PUBLISH_DRAFTS_TOOL = `${RALLY_TOOL_PREFIX}${PUBLISH_DRAFTS}`
+export const REVIEW_SUBMITTED_TOOL = `${RALLY_TOOL_PREFIX}${REVIEW_SUBMITTED}`
+
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] })
 
 export function createRallyServer(handlers: RallyToolHandlers) {
   const publishDrafts = tool(
-    'publish_drafts',
+    PUBLISH_DRAFTS,
     'Publish the current review report and the complete set of draft comments to the Rally app. Call every time you present or revise drafts, always with the full set.',
     {
       mode: z.enum(['full', 'followup']),
@@ -60,7 +68,7 @@ export function createRallyServer(handlers: RallyToolHandlers) {
   )
 
   const reviewSubmitted = tool(
-    'review_submitted',
+    REVIEW_SUBMITTED,
     'Tell Rally the review was posted and submitted on GitHub. Call once at the end of a SUBMIT turn.',
     {
       review_id: z.number().int(),
@@ -73,5 +81,5 @@ export function createRallyServer(handlers: RallyToolHandlers) {
     },
   )
 
-  return createSdkMcpServer({ name: 'rally', version: '1.0.0', tools: [publishDrafts, reviewSubmitted] })
+  return createSdkMcpServer({ name: RALLY_SERVER, version: '1.0.0', tools: [publishDrafts, reviewSubmitted] })
 }

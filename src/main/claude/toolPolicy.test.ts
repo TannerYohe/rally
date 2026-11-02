@@ -88,6 +88,14 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('f() { gh pr merge 12; }; f')).toBe(false)
     expect(bash('$(which gh) pr merge 12')).toBe(false)
     expect(bash('timeout 60 gh pr view 12')).toBe(true)
+    expect(bash('git diff --name-only | xargs wc -l')).toBe(true)
+  })
+
+  it('blocks file writes on paths that xargs supplies', () => {
+    expect(bash("grep -rl foo ~/src/rally | xargs sed -i 's/foo/bar/'")).toBe(false)
+    expect(bash('git ls-files | xargs -n 1 rm')).toBe(false)
+    expect(bash('find . -name "*.orig" | xargs -I % mv % ~/trash/')).toBe(false)
+    expect(bash('git diff --name-only | xargs -P4 -n1 grep -l TODO')).toBe(true)
   })
 
   it('allows interpreters, build tools, and awk for exploring the code', () => {

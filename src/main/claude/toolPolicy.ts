@@ -55,7 +55,14 @@ const SYSTEM_COMMANDS = new Set(['sudo', 'security', 'launchctl', 'crontab'])
 
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'])
 
-const WRAPPER_COMMANDS = new Set(['env', 'timeout', 'nice', 'nohup', 'time', 'command', 'exec', 'xargs', 'watch', 'parallel'])
+const WRAPPER_COMMANDS = new Set(['env', 'timeout', 'nice', 'nohup', 'time', 'command', 'exec', 'watch', 'parallel'])
+
+const XARGS_VALUE_FLAGS = new Set([
+  '-I', '-J', '-L', '-n', '-P', '-s', '-E', '-d', '-a', '-R', '-S', '--replace', '--max-args', '--max-procs',
+  '--max-lines', '--max-chars', '--delimiter', '--arg-file', '--eof',
+])
+
+const XARGS_INPUT = '$xargs_input'
 
 const SHELL_KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', '!', '{', '('])
 
@@ -193,6 +200,7 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   if (SYSTEM_COMMANDS.has(program)) return deny(`\`${program}\` changes this machine's system settings, so Rally blocks it.`)
   if (SHELLS.has(program)) return decideShell(args, state, context)
   if (WRAPPER_COMMANDS.has(program)) return decideWrapped(args, segment, state, context)
+  if (program === 'xargs') return decideXargs(args, segment, state, context)
 
   const operands = args.filter((a) => !a.startsWith('-'))
   switch (program) {
@@ -255,6 +263,21 @@ function decideWrapped(args: string[], segment: string, state: ShellState, conte
     if (!decision.allow) return decision
   }
   return ALLOW
+}
+
+function decideXargs(args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
+  let index = 0
+  let placeholder: string | null = null
+  while (index < args.length && args[index].startsWith('-')) {
+    const flag = args[index]
+    if (flag === '-I' || flag === '--replace') placeholder = args[index + 1] ?? null
+    else if (/^-I./.test(flag)) placeholder = flag.slice(2)
+    index += XARGS_VALUE_FLAGS.has(flag) ? 2 : 1
+  }
+  const command = args.slice(index)
+  if (command.length === 0) return ALLOW
+  const withInput = placeholder ? command.map((w) => w.replaceAll(placeholder, XARGS_INPUT)) : [...command, XARGS_INPUT]
+  return decideCommand(withInput, segment, { ...state }, context)
 }
 
 function decideSed(args: string[], state: ShellState): ToolDecision {

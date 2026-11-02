@@ -12,7 +12,7 @@ Prerequisites:
 - The `review-pr` skill at `~/.claude/skills/review-pr/`.
 
 ```bash
-npm install
+npm install      # on macOS, postinstall renames the dev Electron.app to Rally for the dock and menu bar
 npm run dev      # launch with hot reload
 npm test         # unit tests
 npm run typecheck

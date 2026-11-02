@@ -35,7 +35,8 @@ export async function summarizePr(pr: Pr): Promise<string> {
   })
   for await (const message of stream) {
     if (message.type === 'result') {
-      if (message.subtype !== 'success' || message.is_error) throw new Error(`Summary failed: ${message.subtype}`)
+      if (message.subtype !== 'success') throw new Error(`Summary failed: ${message.subtype}`)
+      if (message.is_error) throw new Error(`Summary failed: ${message.result}`)
       return message.result.trim()
     }
   }

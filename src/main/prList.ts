@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { headKey, prKey, type Pr, type PrListState, type SessionStatus } from '@shared/types'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
-import { fetchPr, searchPrs } from './github/queries'
+import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { buildSearchQueries } from './github/search'
 import { configFile, headsSeenFile, prCacheFile, summariesFile } from './store'
 
@@ -54,7 +54,7 @@ class PrList extends EventEmitter {
     try {
       const { viewer, prs } = await searchPrs(buildSearchQueries(configFile.get()))
       const refreshedAt = new Date().toISOString()
-      this.update({ prs: this.withReviewStatus(this.withHeadTimes(this.withSummaries(prs), true)), viewer, refreshedAt, refreshing: false })
+      this.update({ prs: this.decorate(prs, true), viewer, refreshedAt, refreshing: false })
       prCacheFile.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
     } catch (error) {
@@ -63,7 +63,7 @@ class PrList extends EventEmitter {
   }
 
   async refreshOne(owner: string, repo: string, number: number): Promise<void> {
-    const [fresh] = this.withReviewStatus(this.withHeadTimes(this.withSummaries([await fetchPr(owner, repo, number)]), false))
+    const [fresh] = this.decorate([await fetchPr(owner, repo, number)], false)
     const prs = this.state.prs.some((p) => p.id === fresh.id)
       ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p))
       : [...this.state.prs, fresh]
@@ -71,7 +71,11 @@ class PrList extends EventEmitter {
     prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
-  private withHeadTimes(prs: Pr[], prune: boolean): Pr[] {
+  private decorate(prs: GithubPr[], pruneHeads: boolean): Pr[] {
+    return this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, pruneHeads)))
+  }
+
+  private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {
     const seen = headsSeenFile.get()
     const now = new Date().toISOString()
     const recorded: Record<string, string> = prune ? {} : { ...seen }
@@ -79,14 +83,14 @@ class PrList extends EventEmitter {
       const key = headKey(pr)
       const firstSeen = seen[key] ?? now
       recorded[key] = firstSeen
-      const headKnownSince = pr.headKnownSince && pr.headKnownSince < firstSeen ? pr.headKnownSince : firstSeen
+      const headKnownSince = pr.headForcePushedAt && pr.headForcePushedAt < firstSeen ? pr.headForcePushedAt : firstSeen
       return { ...pr, headKnownSince }
     })
     headsSeenFile.set(recorded)
     return result
   }
 
-  private withReviewStatus(prs: Pr[]): Pr[] {
+  private withReviewStatus(prs: Omit<Pr, 'phase' | 'reviewStatus'>[]): Pr[] {
     return prs.map((pr) => {
       const reviewStatus = this.reviewStatusOf(prKey(pr.owner, pr.repo, pr.number))
       const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'
@@ -94,7 +98,7 @@ class PrList extends EventEmitter {
     })
   }
 
-  private withSummaries(prs: Pr[]): Pr[] {
+  private withSummaries<T extends GithubPr>(prs: T[]): (T & { summary: string | null })[] {
     const summaries = summariesFile.get()
     return prs.map((pr) => ({ ...pr, summary: summaries[headKey(pr)] ?? null }))
   }

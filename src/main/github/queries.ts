@@ -1,6 +1,7 @@
 import type { MyReview, Pr, ReviewState } from '@shared/types'
 import { github } from './client'
-import { computePhase } from './phase'
+
+export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary'>
 
 const PR_FIELDS = `
   fragment PrFields on PullRequest {
@@ -83,7 +84,7 @@ interface SearchResponse {
   search: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawPr | Record<string, never>)[] }
 }
 
-function toPr(raw: RawPr, viewer: string): Pr {
+function toPr(raw: RawPr, viewer: string): GithubPr {
   const myReviews: MyReview[] = raw.reviews.nodes.map((r) => ({
     state: r.state,
     submittedAt: r.submittedAt,
@@ -93,7 +94,7 @@ function toPr(raw: RawPr, viewer: string): Pr {
   const reviewRequestedFromMe = raw.reviewRequests.nodes.some(
     (n) => n.requestedReviewer?.login?.toLowerCase() === viewer.toLowerCase(),
   )
-  const base = {
+  return {
     id: raw.id,
     number: raw.number,
     owner: raw.repository.owner.login,
@@ -110,21 +111,18 @@ function toPr(raw: RawPr, viewer: string): Pr {
     deletions: raw.deletions,
     changedFiles: raw.changedFiles,
     headRefOid: raw.headRefOid,
-    headKnownSince: forcePushedToHeadAt(raw),
+    headForcePushedAt: forcePushedToHeadAt(raw),
     baseRefName: raw.baseRefName,
     headRefName: raw.headRefName,
     files: raw.files?.nodes.map((f) => f.path) ?? [],
     reviewRequestedFromMe,
     myReviews,
-    reviewStatus: null,
-    summary: null,
   }
-  return { ...base, phase: computePhase({ ...base, reviewInProgress: false }) }
 }
 
-export async function searchPrs(queries: string[]): Promise<{ viewer: string; prs: Pr[] }> {
+export async function searchPrs(queries: string[]): Promise<{ viewer: string; prs: GithubPr[] }> {
   const gh = await github()
-  const byId = new Map<string, Pr>()
+  const byId = new Map<string, GithubPr>()
   for (const q of queries) {
     let cursor: string | null = null
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -139,7 +137,7 @@ export async function searchPrs(queries: string[]): Promise<{ viewer: string; pr
   return { viewer: gh.login, prs: [...byId.values()] }
 }
 
-export async function fetchPr(owner: string, repo: string, number: number): Promise<Pr> {
+export async function fetchPr(owner: string, repo: string, number: number): Promise<GithubPr> {
   const gh = await github()
   const response = await gh.graphql<{ repository: { pullRequest: RawPr } }>(SINGLE_QUERY, {
     owner,

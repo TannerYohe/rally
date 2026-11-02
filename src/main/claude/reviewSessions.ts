@@ -14,7 +14,7 @@ import {
   type TimelineEntry,
 } from '@shared/types'
 import { prList } from '../prList'
-import { configFile, sessionsFile } from '../store'
+import { configFile, sessionsDir } from '../store'
 import { APP_PROTOCOL, reviewPrompt, submitPrompt } from './prompts'
 import { reviewModelOptions } from './modelOptions'
 import { createRallyServer, RALLY_SERVER } from './rallyTools'
@@ -36,7 +36,7 @@ class ReviewSessions extends EventEmitter {
 
   constructor() {
     super()
-    const stored = Object.values(sessionsFile.get()).map((session) =>
+    const stored = sessionsDir.readAll().map((session) =>
       ACTIVE_STATUSES.has(session.status)
         ? { ...session, status: 'error' as const, error: 'Interrupted when Rally closed. Send feedback to resume.' }
         : session,
@@ -92,7 +92,7 @@ class ReviewSessions extends EventEmitter {
     this.cancel(sessionId)
     const session = this.byId(sessionId)
     this.sessions.delete(session.prKey)
-    this.persist()
+    sessionsDir.remove(session.prKey)
     this.emit('removed', session.prKey)
   }
 
@@ -137,14 +137,11 @@ class ReviewSessions extends EventEmitter {
     this.pendingFlush = null
     for (const key of this.dirty) {
       const session = this.sessions.get(key)
-      if (session) this.emit('changed', session)
+      if (!session) continue
+      sessionsDir.write(key, session)
+      this.emit('changed', session)
     }
     this.dirty.clear()
-    this.persist()
-  }
-
-  private persist(): void {
-    sessionsFile.set(Object.fromEntries(this.sessions))
   }
 
   private async runTurn(sessionId: string, prompt: string, mode: TurnMode): Promise<void> {

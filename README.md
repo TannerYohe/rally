@@ -66,4 +66,4 @@ Blocked calls appear in the activity timeline.
 
 ## Data
 
-Rally stores config, the PR cache, summaries, and review sessions as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS). Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.
+Rally stores config, the PR cache, and summaries as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS), and each review session as its own file under `sessions/` there. Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.

@@ -30,6 +30,7 @@ function pr(overrides: Partial<Pr>): Pr {
     phase: 'unreviewed',
     reviewStatus: null,
     summary: null,
+    summaryError: null,
     ...overrides,
   }
 }

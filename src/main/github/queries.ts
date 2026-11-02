@@ -1,7 +1,7 @@
 import type { MyReview, Pr, ReviewState } from '@shared/types'
 import { github } from './client'
 
-export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary'>
+export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError'>
 
 const PR_FIELDS = `
   fragment PrFields on PullRequest {

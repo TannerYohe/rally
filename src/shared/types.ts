@@ -46,6 +46,7 @@ export interface Pr {
   phase: Phase
   reviewStatus: SessionStatus | null
   summary: string | null
+  summaryError: string | null
 }
 
 export type ModelChoice = 'opus' | 'opus[1m]' | 'sonnet' | 'sonnet[1m]' | 'haiku'

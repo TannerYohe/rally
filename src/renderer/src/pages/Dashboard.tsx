@@ -67,7 +67,14 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
           </div>
           <p className="line-clamp-2 text-sm text-zinc-400">
             <span className="mr-1.5 text-violet-400">✦</span>
-            {pr.summary ?? <span className="italic text-zinc-600">Summarizing…</span>}
+            {pr.summary ??
+              (pr.summaryError ? (
+                <span className="italic text-zinc-600" title={pr.summaryError}>
+                  Summary unavailable
+                </span>
+              ) : (
+                <span className="italic text-zinc-600">Summarizing…</span>
+              ))}
           </p>
         </div>
       </button>

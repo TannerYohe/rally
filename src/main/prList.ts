@@ -14,6 +14,7 @@ class PrList extends EventEmitter {
   private state: PrListState
   private timer: NodeJS.Timeout | null = null
   private summarizing = new Set<string>()
+  private summaryErrors = new Map<string, string>()
   private reviewStatusOf: ReviewStatusLookup = () => null
 
   constructor() {
@@ -98,13 +99,21 @@ class PrList extends EventEmitter {
     })
   }
 
-  private withSummaries<T extends GithubPr>(prs: T[], prune: boolean): (T & { summary: string | null })[] {
+  private withSummaries<T extends GithubPr>(
+    prs: T[],
+    prune: boolean,
+  ): (T & { summary: string | null; summaryError: string | null })[] {
     const summaries = summariesFile.get()
     if (prune) {
       const current = new Set(prs.map(headKey))
       summariesFile.set(Object.fromEntries(Object.entries(summaries).filter(([key]) => current.has(key))))
+      for (const key of this.summaryErrors.keys()) if (!current.has(key)) this.summaryErrors.delete(key)
     }
-    return prs.map((pr) => ({ ...pr, summary: summaries[headKey(pr)] ?? null }))
+    return prs.map((pr) => ({
+      ...pr,
+      summary: summaries[headKey(pr)] ?? null,
+      summaryError: this.summaryErrors.get(headKey(pr)) ?? null,
+    }))
   }
 
   private async fillSummaries(): Promise<void> {
@@ -116,8 +125,12 @@ class PrList extends EventEmitter {
         try {
           const summary = await summarizePr(pr)
           summariesFile.set({ ...summariesFile.get(), [key]: summary })
-          this.update({ prs: this.state.prs.map((p) => (headKey(p) === key ? { ...p, summary } : p)) })
+          this.summaryErrors.delete(key)
+          this.patchByHead(key, { summary, summaryError: null })
         } catch (error) {
+          const summaryError = error instanceof Error ? error.message : String(error)
+          this.summaryErrors.set(key, summaryError)
+          this.patchByHead(key, { summaryError })
           console.error('PR summary failed', { pr: pr.url, error })
         } finally {
           this.summarizing.delete(key)
@@ -126,6 +139,10 @@ class PrList extends EventEmitter {
     })
     await Promise.all(workers)
     prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs: this.state.prs })
+  }
+
+  private patchByHead(key: string, patch: Partial<Pr>): void {
+    this.update({ prs: this.state.prs.map((p) => (headKey(p) === key ? { ...p, ...patch } : p)) })
   }
 
   private update(patch: Partial<PrListState>): void {

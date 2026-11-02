@@ -19,9 +19,14 @@ function chunkQualifiers(qualifiers: string[], budget: number): string[][] {
   return chunks
 }
 
+export function repoQualifier(entry: string): string {
+  const scope = entry.trim().replace(/\/\*?$/, '')
+  return scope.includes('/') ? `repo:${scope}` : `org:${scope}`
+}
+
 export function buildSearchQueries(config: Config): string[] {
   const queries: string[] = []
-  const repos = config.repos.map((r) => `repo:${r}`)
+  const repos = config.repos.map(repoQualifier)
   const authors = config.authors.map((a) => `author:${a}`)
 
   if (repos.length > 0 || authors.length > 0) {

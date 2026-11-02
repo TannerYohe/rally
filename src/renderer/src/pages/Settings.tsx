@@ -60,7 +60,7 @@ export function Settings() {
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-semibold">Repos</span>
-          <span className="block text-xs text-zinc-500">owner/name, one per line. Empty means any repo.</span>
+          <span className="block text-xs text-zinc-500">owner/name or owner/* for a whole org, one per line. Empty means any repo.</span>
           <textarea className="h-48 w-full rounded border border-zinc-800 bg-zinc-900 p-2 font-mono" value={repos} onChange={(e) => setRepos(e.target.value)} />
         </label>
       </section>

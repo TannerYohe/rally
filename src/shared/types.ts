@@ -26,6 +26,7 @@ export interface Pr {
   title: string
   body: string
   author: string
+  authorAvatarUrl: string | null
   createdAt: string
   updatedAt: string
   isDraft: boolean

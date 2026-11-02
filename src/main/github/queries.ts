@@ -6,7 +6,7 @@ const PR_FIELDS = `
   fragment PrFields on PullRequest {
     id number url title body createdAt updatedAt isDraft additions deletions changedFiles
     headRefOid baseRefName headRefName
-    author { login }
+    author { login avatarUrl(size: 80) }
     repository { name owner { login } }
     files(first: 100) { nodes { path } }
     reviewRequests(first: 50) { nodes { requestedReviewer { ... on User { login } } } }
@@ -48,7 +48,7 @@ interface RawPr {
   headRefOid: string
   baseRefName: string
   headRefName: string
-  author: { login: string } | null
+  author: { login: string; avatarUrl: string } | null
   repository: { name: string; owner: { login: string } }
   files: { nodes: { path: string }[] } | null
   reviewRequests: { nodes: { requestedReviewer: { login?: string } | null }[] }
@@ -77,6 +77,7 @@ function toPr(raw: RawPr, viewer: string): Pr {
     title: raw.title,
     body: raw.body,
     author: raw.author?.login ?? 'ghost',
+    authorAvatarUrl: raw.author?.avatarUrl ?? null,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     isDraft: raw.isDraft,

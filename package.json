@@ -11,7 +11,7 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "icons": "electron scripts/render-icon.cjs resources/icon.svg resources/icon.png && sh scripts/build-icns.sh",
+    "icons": "electron scripts/render-icon.cjs resources/icon.svg resources/icon.png",
     "postinstall": "node scripts/brand-dev-electron.mjs"
   },
   "dependencies": {

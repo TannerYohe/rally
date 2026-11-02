@@ -16,7 +16,7 @@ npm install      # on macOS, postinstall renames the dev Electron.app to Rally f
 npm run dev      # launch with hot reload
 npm test         # unit tests
 npm run typecheck
-npm run icons    # regenerate resources/icon.png and build/icon.icns from resources/icon.svg (macOS)
+npm run icons    # regenerate resources/icon.png from resources/icon.svg
 ```
 
 ## How it works

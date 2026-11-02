@@ -39,7 +39,15 @@ export class JsonDir<T> {
     if (!existsSync(this.dir)) return []
     return readdirSync(this.dir)
       .filter((name) => name.endsWith('.json'))
-      .map((name) => readJson<T>(join(this.dir, name)))
+      .flatMap((name) => {
+        const path = join(this.dir, name)
+        try {
+          return [readJson<T>(path)]
+        } catch (error) {
+          console.error('Skipping unreadable JSON file', { path, error })
+          return []
+        }
+      })
   }
 
   write(key: string, value: T): void {

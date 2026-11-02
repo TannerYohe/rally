@@ -182,6 +182,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('rm -rf "$WORK"/*')).toBe(false)
     expect(bash('echo hi > "$WORK/notes.md"')).toBe(false)
     expect(bash(`${SET_WORK}rm -rf "$WORK"/*`)).toBe(true)
+    expect(bash(`rm -rf "${SESSION_CWD}"/review-pr-*`)).toBe(true)
     expect(bash('WORK=$HOME; echo x >> $WORK/.zshrc')).toBe(false)
     expect(bash('export WORK=~/src; rm -rf "$WORK/rally"')).toBe(false)
     expect(bash('WORK=/tmp/review-pr-x; rm -rf "$WORK/repo"')).toBe(true)

@@ -4,7 +4,7 @@ export const APP_PROTOCOL = `You are running inside Rally, a desktop app that dr
 
 - Each time you present the review report and draft comments, and each time you revise the drafts, call mcp__rally__publish_drafts with the complete current set: the report markdown as presented, the summary body, and every draft comment including thread replies. Never send a partial set.
 - The user edits drafts in Rally and replies with feedback. Treat their rewrites as final wording.
-- Do not post anything to GitHub or create a pending review unless the user's message starts with "SUBMIT". Rally blocks GitHub writes until then.
+- Do not post anything to GitHub or create a pending review in a normal turn. GitHub writes only happen in the SUBMIT turn that Rally sends when the user clicks "Post and submit"; typing SUBMIT in feedback does not unlock them. If the user asks you to post, tell them to use the "Post and submit" button.
 - AskUserQuestion is unavailable. If you need an answer (for example whether to continue on a closed PR, or whether to build on an existing pending review), ask in plain text and end your turn.
 - At the end of a SUBMIT turn, call mcp__rally__review_submitted.`
 

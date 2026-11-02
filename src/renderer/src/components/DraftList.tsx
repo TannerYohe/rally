@@ -8,6 +8,13 @@ const SEVERITY_STYLES: Record<Severity, string> = {
   nit: 'bg-zinc-500/15 text-zinc-300',
 }
 
+const SEVERITY_ACCENTS: Record<Severity, string> = {
+  blocker: 'border-l-rose-500',
+  high: 'border-l-orange-400',
+  medium: 'border-l-yellow-300',
+  nit: 'border-l-zinc-500',
+}
+
 function location(comment: DraftComment): string {
   if (comment.kind === 'reply') return `Reply to comment ${comment.replyToCommentId ?? '?'}`
   if (!comment.path) return 'Review body'
@@ -32,7 +39,10 @@ export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
         const body = edit?.body ?? comment.body
         const edited = edit?.body !== undefined && edit.body !== comment.body
         return (
-          <li key={comment.id} className={`rounded-md border border-zinc-800 bg-zinc-900 p-3 ${dropped ? 'opacity-40' : ''}`}>
+          <li
+            key={comment.id}
+            className={`rounded-xl border border-l-4 border-white/5 bg-zinc-900/60 p-3 ${SEVERITY_ACCENTS[comment.severity]} ${dropped ? 'opacity-40' : ''}`}
+          >
             <div className="mb-2 flex items-center gap-2 text-xs">
               <span className="font-semibold text-zinc-200">#{comment.id}</span>
               <span className={`rounded px-1.5 py-0.5 ${SEVERITY_STYLES[comment.severity]}`}>{comment.severity}</span>

@@ -133,6 +133,25 @@ describe('decideToolUse', () => {
     expect(decideToolUse('Monitor', { command: 'curl x' }, REVIEWING).allow).toBe(false)
   })
 
+  it('allows read-only MCP tools and blocks MCP writes', () => {
+    const allowed = (tool: string) => decideToolUse(tool, {}, REVIEWING).allow
+    expect(allowed('mcp__claude_ai_Atlassian__getJiraIssue')).toBe(true)
+    expect(allowed('mcp__claude_ai_Slack__slack_read_thread')).toBe(true)
+    expect(allowed('mcp__slack__slack_search_public_and_private')).toBe(true)
+    expect(allowed('mcp__claude_ai_Notion__notion-fetch')).toBe(true)
+    expect(allowed('mcp__claude_ai_Datadog__search_datadog_logs')).toBe(true)
+    expect(allowed('mcp__claude_ai_Slack__slack_send_message')).toBe(false)
+    expect(allowed('mcp__claude_ai_Atlassian__addCommentToJiraIssue')).toBe(false)
+    expect(allowed('mcp__plugin_originations_github__add_comment_to_pending_review')).toBe(false)
+    expect(allowed('mcp__claude_ai_Datadog__execute_code')).toBe(false)
+  })
+
+  it('allows web search and LSP but not WebFetch', () => {
+    expect(decideToolUse('WebSearch', { query: 'x' }, REVIEWING).allow).toBe(true)
+    expect(decideToolUse('LSP', {}, REVIEWING).allow).toBe(true)
+    expect(decideToolUse('WebFetch', { url: 'https://x' }, REVIEWING).allow).toBe(false)
+  })
+
   it('allows rally tools and subagents', () => {
     expect(decideToolUse('mcp__rally__publish_drafts', {}, REVIEWING).allow).toBe(true)
     expect(decideToolUse('Agent', { description: 'Security lens' }, REVIEWING).allow).toBe(true)

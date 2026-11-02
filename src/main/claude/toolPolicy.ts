@@ -26,11 +26,13 @@ const ALWAYS_ALLOWED_TOOLS = new Set([
   'Skill',
   'ToolSearch',
   'TodoWrite',
-  'mcp__claude_ai_Atlassian__getJiraIssue',
-  'mcp__claude_ai_Slack__slack_search_public_and_private',
-  'mcp__claude_ai_Slack__slack_read_thread',
-  'mcp__slack__slack_search_public_and_private',
-  'mcp__slack__slack_read_thread',
+  'WebSearch',
+  'LSP',
+])
+
+const READ_ONLY_MCP_VERBS = new Set([
+  'get', 'list', 'search', 'read', 'fetch', 'query', 'lookup', 'describe', 'explain', 'analyze', 'analyse', 'aggregate',
+  'find', 'inspect', 'view',
 ])
 
 const NETWORK_COMMANDS = new Set([
@@ -107,13 +109,24 @@ const deny = (reason: string): ToolDecision => ({ allow: false, reason })
 const ALLOW: ToolDecision = { allow: true }
 
 export function decideToolUse(toolName: string, input: Record<string, unknown>, context: PolicyContext): ToolDecision {
-  if (ALWAYS_ALLOWED_TOOLS.has(toolName) || toolName.startsWith('mcp__rally__')) return ALLOW
+  if (ALWAYS_ALLOWED_TOOLS.has(toolName) || toolName.startsWith('mcp__rally__') || isReadOnlyMcpTool(toolName)) {
+    return ALLOW
+  }
   if (toolName === 'AskUserQuestion') {
     return deny('AskUserQuestion is unavailable in Rally. Ask the question in plain text and end your turn.')
   }
   if (toolName === 'Write') return decideWrite(String(input.file_path ?? ''))
   if (toolName === 'Bash') return decideBash(String(input.command ?? ''), context)
   return deny(`${toolName} is not permitted in Rally review sessions.`)
+}
+
+function isReadOnlyMcpTool(toolName: string): boolean {
+  const match = toolName.match(/^mcp__(.+?)__(.+)$/)
+  if (!match) return false
+  const [, server, action] = match
+  const words = action.split(/[-_]|(?=[A-Z])/).map((w) => w.toLowerCase())
+  const verb = server.toLowerCase().endsWith(words[0]) ? words[1] : words[0]
+  return READ_ONLY_MCP_VERBS.has(verb)
 }
 
 function decideWrite(path: string): ToolDecision {

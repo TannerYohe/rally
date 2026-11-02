@@ -22,3 +22,15 @@ export function useSession(prKey: string): [ReviewSession | null, (session: Revi
   }, [prKey])
   return [session, setSession]
 }
+
+export function usePersistentState<T>(key: string, fallback: T): [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    const stored = localStorage.getItem(key)
+    return stored ? { ...fallback, ...JSON.parse(stored) } : fallback
+  })
+  const update = (next: T) => {
+    localStorage.setItem(key, JSON.stringify(next))
+    setValue(next)
+  }
+  return [value, update]
+}

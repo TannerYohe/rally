@@ -33,6 +33,6 @@ export function buildSearchQueries(config: Config): string[] {
     }
   }
 
-  if (config.includeReviewRequests) queries.push(`${BASE} review-requested:@me`)
+  if (config.includeReviewRequests) queries.push(`${BASE} user-review-requested:@me`)
   return queries
 }

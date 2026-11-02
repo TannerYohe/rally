@@ -17,7 +17,7 @@ describe('buildSearchQueries', () => {
 
   it('adds a review-requested query', () => {
     expect(buildSearchQueries(config({ includeReviewRequests: true }))).toEqual([
-      'is:pr is:open archived:false review-requested:@me',
+      'is:pr is:open archived:false user-review-requested:@me',
     ])
   })
 

@@ -16,6 +16,7 @@ export interface MyReview {
   state: ReviewState
   submittedAt: string | null
   commitOid: string | null
+  replyOnly: boolean
 }
 
 export interface Pr {

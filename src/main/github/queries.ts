@@ -10,7 +10,9 @@ const PR_FIELDS = `
     repository { name owner { login } }
     files(first: 100) { nodes { path } }
     reviewRequests(first: 50) { nodes { requestedReviewer { ... on User { login } } } }
-    reviews(author: $viewer, last: 20) { nodes { state submittedAt commit { oid } } }
+    reviews(author: $viewer, last: 20) {
+      nodes { state submittedAt body commit { oid } comments(first: 20) { nodes { replyTo { id } } } }
+    }
     timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
       nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
     }
@@ -36,6 +38,14 @@ const SINGLE_QUERY = `
 
 const MAX_PAGES = 4
 
+interface RawReview {
+  state: ReviewState
+  submittedAt: string | null
+  body: string
+  commit: { oid: string } | null
+  comments: { nodes: { replyTo: { id: string } | null }[] }
+}
+
 interface RawPr {
   id: string
   number: number
@@ -55,8 +65,13 @@ interface RawPr {
   repository: { name: string; owner: { login: string } }
   files: { nodes: { path: string }[] } | null
   reviewRequests: { nodes: { requestedReviewer: { login?: string } | null }[] }
-  reviews: { nodes: { state: ReviewState; submittedAt: string | null; commit: { oid: string } | null }[] }
+  reviews: { nodes: RawReview[] }
   timelineItems: { nodes: { createdAt: string; afterCommit: { oid: string } | null }[] }
+}
+
+function isReplyOnly(review: RawReview): boolean {
+  const comments = review.comments.nodes
+  return review.state === 'COMMENTED' && !review.body.trim() && comments.length > 0 && comments.every((c) => c.replyTo)
 }
 
 function forcePushedToHeadAt(raw: RawPr): string | null {
@@ -73,6 +88,7 @@ function toPr(raw: RawPr, viewer: string): Pr {
     state: r.state,
     submittedAt: r.submittedAt,
     commitOid: r.commit?.oid ?? null,
+    replyOnly: isReplyOnly(r),
   }))
   const reviewRequestedFromMe = raw.reviewRequests.nodes.some(
     (n) => n.requestedReviewer?.login?.toLowerCase() === viewer.toLowerCase(),

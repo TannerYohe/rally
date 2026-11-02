@@ -5,7 +5,11 @@ import { computePhase } from './phase'
 const HEAD = 'head-sha'
 
 function review(state: MyReview['state'], commitOid: string, submittedAt: string | null = '2026-10-01T00:00:00Z'): MyReview {
-  return { state, commitOid, submittedAt }
+  return { state, commitOid, submittedAt, replyOnly: false }
+}
+
+function threadReply(commitOid: string, submittedAt: string): MyReview {
+  return { ...review('COMMENTED', commitOid, submittedAt), replyOnly: true }
 }
 
 function phase(myReviews: MyReview[], reviewRequestedFromMe = false, reviewInProgress = false, headKnownSince: string | null = null) {
@@ -74,6 +78,15 @@ describe('computePhase', () => {
   it('stays approved when I reply on a thread after approving', () => {
     const reviews = [review('APPROVED', HEAD, '2026-10-01T00:00:00Z'), review('COMMENTED', HEAD, '2026-10-02T00:00:00Z')]
     expect(phase(reviews)).toBe('approved')
+  })
+
+  it('stays awaiting re-review when I reply on a thread after the author pushes', () => {
+    const reviews = [review('CHANGES_REQUESTED', 'old-sha', '2026-10-01T00:00:00Z'), threadReply(HEAD, '2026-10-03T00:00:00Z')]
+    expect(phase(reviews, false, false, '2026-10-02T00:00:00Z')).toBe('awaiting_rereview')
+  })
+
+  it('is unreviewed when my only activity is a thread reply', () => {
+    expect(phase([threadReply(HEAD, '2026-10-02T00:00:00Z')])).toBe('unreviewed')
   })
 
   it('is pending changes when I comment after requesting changes', () => {

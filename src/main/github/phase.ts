@@ -12,7 +12,7 @@ interface PhaseInput {
 }
 
 export function latestSubmittedReview(reviews: MyReview[], states = COUNTED_STATES): MyReview | null {
-  const submitted = reviews.filter((r) => states.has(r.state) && r.submittedAt)
+  const submitted = reviews.filter((r) => states.has(r.state) && r.submittedAt && !r.replyOnly)
   submitted.sort((a, b) => a.submittedAt!.localeCompare(b.submittedAt!))
   return submitted.at(-1) ?? null
 }

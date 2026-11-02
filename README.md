@@ -31,14 +31,14 @@ The phase chips above the list show a count per phase and toggle that phase on o
 
 ### Phases
 
-In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count; pending (unsubmitted) and dismissed reviews are ignored.
+In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads.
 
 | Phase | Rule |
 |---|---|
 | In progress | You have a Rally review session for the PR that hasn't been submitted. This includes sessions that errored or were cancelled. **Start over** clears it. |
 | Unreviewed | You have no submitted review. |
 | Awaiting re-review | The author re-requested your review, or the head SHA differs from the commit your latest review was on and that head appeared after you submitted. The head's time is the force-push time when there is one, else when Rally first saw it. |
-| Approved | Your latest approval or change request is an approval, and nothing changed since. Comment-only reviews, such as thread replies, don't change it. |
+| Approved | Your latest approval or change request is an approval, and nothing changed since. Comment-only reviews don't change it. |
 | Pending changes | Anything else: you reviewed and nothing new has happened. |
 
 The logic lives in `src/main/github/phase.ts`.

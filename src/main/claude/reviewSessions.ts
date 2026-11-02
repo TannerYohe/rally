@@ -185,6 +185,7 @@ class ReviewSessions extends EventEmitter {
       onDrafts: (drafts) => this.patch(sessionId, () => ({ drafts }), true),
       onSubmitted: (review) => {
         submitted = review
+        this.patch(sessionId, () => ({ submitted: review }), true)
       },
     })
 
@@ -216,6 +217,10 @@ class ReviewSessions extends EventEmitter {
       }
       this.finishTurn(sessionId, mode, resultOk, submitted)
     } catch (error) {
+      if (submitted) {
+        this.finishTurn(sessionId, mode, resultOk, submitted)
+        return
+      }
       const cancelled = controller.signal.aborted
       this.patch(
         sessionId,

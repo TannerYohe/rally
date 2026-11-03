@@ -1,5 +1,7 @@
 import type { MyReview, Phase } from '@shared/types'
 
+export const MY_REVIEW_WINDOW = 20
+
 const COUNTED_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'])
 const DECISION_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED'])
 

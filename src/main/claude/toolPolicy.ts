@@ -91,6 +91,7 @@ const GH_API_VALUE_FLAGS = new Set([
   '-X', '--method', '-H', '--header', '-f', '-F', '--field', '--raw-field', '--input', '-q', '--jq', '-t', '--template',
   '-p', '--preview', '--hostname', '--cache',
 ])
+const GH_API_FIELD_FLAGS = ['--raw-field', '--field', '-f', '-F']
 const GH_API_METHOD_FLAGS = ['--method', '-X']
 const GH_API_BODY_FLAGS = ['-f', '-F', '--field', '--raw-field', '--input']
 const CURL_METHOD_FLAGS = ['--request', '-X']
@@ -408,11 +409,27 @@ function ghApiEndpoint(args: string[]): string {
   return ''
 }
 
+function graphqlQueries(args: string[]): string[] {
+  const queries: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const flag = GH_API_FIELD_FLAGS.find((f) => matchesFlag(args[i], f))
+    if (!flag) continue
+    const field = args[i] === flag ? (args[++i] ?? '') : args[i].slice(flag.length).replace(/^=/, '')
+    const [name, ...value] = field.split('=')
+    if (name === 'query') queries.push(value.join('='))
+  }
+  return queries
+}
+
+function isInlineGraphql(query: string): boolean {
+  return !query.startsWith('@') && query.includes('{')
+}
+
 function decideGhApi(args: string[], segment: string, context: PolicyContext): ToolDecision {
   const endpoint = ghApiEndpoint(args)
   if (endpoint === 'graphql') {
-    if (!context.submitting && args.some((a) => matchesFlag(a, '--input'))) {
-      return deny('Rally cannot inspect `gh api graphql --input`. Pass the query inline with `-f query=`.')
+    if (args.some((a) => matchesFlag(a, '--input')) || !graphqlQueries(args).every(isInlineGraphql)) {
+      return deny("Rally only inspects inline graphql queries. Pass the query text with `-f query='...'`.")
     }
     if (!/\bmutation\b/.test(segment)) return ALLOW
     if (context.submitting && SUBMIT_GRAPHQL_MUTATIONS.some((m) => segment.includes(m))) return ALLOW

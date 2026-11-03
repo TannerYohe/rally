@@ -63,6 +63,15 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api --jq .id -X POST repos/acme/api/pulls/12/merge', SUBMITTING)).toBe(false)
   })
 
+  it('blocks graphql queries Rally cannot read inline', () => {
+    expect(bash('gh api graphql -F query=@mutation.graphql')).toBe(false)
+    expect(bash("gh api graphql -F query=@- <<'EOF'\nmutation { mergePullRequest(input:{pullRequestId:\"x\"}) { clientMutationId } }\nEOF")).toBe(false)
+    expect(bash('gh api graphql -f query="$(cat mutation.graphql)"')).toBe(false)
+    expect(bash('Q=$(cat m.graphql); gh api graphql -f query="$Q"')).toBe(false)
+    expect(bash('gh api graphql -F query=@mutation.graphql', SUBMITTING)).toBe(false)
+    expect(bash("gh api graphql -f query='query { viewer { login } }'")).toBe(true)
+  })
+
   it('allows only review mutations through graphql during submit', () => {
     const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
     const merge = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`

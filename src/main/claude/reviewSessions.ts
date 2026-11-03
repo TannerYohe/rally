@@ -30,6 +30,12 @@ const now = () => new Date().toISOString()
 
 const sessionDir = (sessionId: string) => join(tmpdir(), 'rally', sessionId)
 
+function restoreSession(session: ReviewSession): ReviewSession {
+  if (!ACTIVE_STATUSES.has(session.status)) return session
+  if (session.submitted) return { ...session, status: 'submitted', error: null }
+  return { ...session, status: 'error', error: 'Interrupted when Rally closed. Send feedback to resume.' }
+}
+
 class ReviewSessions extends EventEmitter {
   private sessions: Map<string, ReviewSession>
   private controllers = new Map<string, AbortController>()
@@ -38,11 +44,7 @@ class ReviewSessions extends EventEmitter {
 
   constructor() {
     super()
-    const stored = sessionsDir.readAll().map((session) =>
-      ACTIVE_STATUSES.has(session.status)
-        ? { ...session, status: 'error' as const, error: 'Interrupted when Rally closed. Send feedback to resume.' }
-        : session,
-    )
+    const stored = sessionsDir.readAll().map(restoreSession)
     this.sessions = new Map(stored.map((s) => [s.prKey, s]))
   }
 
@@ -83,6 +85,7 @@ class ReviewSessions extends EventEmitter {
 
   async submit(sessionId: string, event: ReviewEvent, notes: string): Promise<void> {
     this.assertIdle(sessionId)
+    if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
     void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes, sessionDir(sessionId)), 'submit')
   }
 

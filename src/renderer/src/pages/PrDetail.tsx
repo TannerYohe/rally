@@ -95,7 +95,7 @@ export function PrDetail() {
       ) : (
         <div className="rounded-xl border border-dashed border-violet-500/30 bg-violet-500/5 p-8 text-center">
           <p className="mb-3 text-sm text-zinc-400">
-            Runs the <code>review-pr</code> skill in a Claude session. Nothing is posted to GitHub until you submit.
+            Runs your review skill from Settings in a Claude session. Nothing is posted to GitHub until you submit.
           </p>
           <button
             className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400"

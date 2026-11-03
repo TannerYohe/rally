@@ -74,6 +74,7 @@ export interface Config {
   repos: string[]
   includeReviewRequests: boolean
   pollIntervalMinutes: number
+  reviewSkill: string
   reviewModel: ModelChoice | null
   reviewEffort: EffortChoice | null
   subagentModel: ModelChoice | null
@@ -85,6 +86,7 @@ export const DEFAULT_CONFIG: Config = {
   repos: [],
   includeReviewRequests: true,
   pollIntervalMinutes: 5,
+  reviewSkill: 'review-pr',
   reviewModel: null,
   reviewEffort: null,
   subagentModel: null,

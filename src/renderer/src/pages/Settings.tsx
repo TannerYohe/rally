@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  DEFAULT_CONFIG,
   EFFORT_LABELS,
   MODEL_LABELS,
   type Config,
@@ -77,6 +78,18 @@ export function Settings() {
           <h2 className="font-semibold">Reviews</h2>
           <p className="text-xs text-zinc-500">Changes apply to the next Claude turn, including turns in reviews already in progress.</p>
         </div>
+        <label className="block space-y-1">
+          <span className="block text-xs font-medium text-zinc-400">Review skill</span>
+          <input
+            className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono"
+            value={config.reviewSkill}
+            placeholder={DEFAULT_CONFIG.reviewSkill}
+            onChange={(e) => setConfig({ ...config, reviewSkill: e.target.value })}
+          />
+          <span className="block text-xs text-zinc-500">
+            The Claude Code skill a new review runs as <code>/&lt;skill&gt; &lt;PR URL&gt;</code>. Empty means <code>{DEFAULT_CONFIG.reviewSkill}</code>.
+          </span>
+        </label>
         <div className="grid grid-cols-2 gap-4">
           <ChoiceSelect
             label="Review model"

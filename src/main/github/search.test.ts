@@ -16,8 +16,8 @@ describe('buildSearchQueries', () => {
   })
 
   it('treats owner/* and bare owners as org scopes alongside exact repos', () => {
-    expect(buildSearchQueries(config({ repos: ['AvantFinCo/*', 'TannerYohe/rally'], authors: ['alice'] }))).toEqual([
-      'is:pr is:open archived:false org:AvantFinCo repo:TannerYohe/rally author:alice',
+    expect(buildSearchQueries(config({ repos: ['acme/*', 'octo/tools'], authors: ['alice'] }))).toEqual([
+      'is:pr is:open archived:false org:acme repo:octo/tools author:alice',
     ])
   })
 

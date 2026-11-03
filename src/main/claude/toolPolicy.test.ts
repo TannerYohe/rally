@@ -243,7 +243,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(allowed('mcp__claude_ai_Datadog__search_datadog_logs')).toBe(true)
     expect(allowed('mcp__claude_ai_Slack__slack_send_message')).toBe(false)
     expect(allowed('mcp__claude_ai_Atlassian__addCommentToJiraIssue')).toBe(false)
-    expect(allowed('mcp__plugin_originations_github__add_comment_to_pending_review')).toBe(false)
+    expect(allowed('mcp__plugin_example_github__add_comment_to_pending_review')).toBe(false)
     expect(allowed('mcp__claude_ai_Datadog__execute_code')).toBe(false)
   })
 

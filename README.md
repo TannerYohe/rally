@@ -1,6 +1,6 @@
 # Rally
 
-A local desktop dashboard for the GitHub PRs you review. It drives the `review-pr` Claude skill to draft reviews, and you refine and submit them without leaving the app.
+A local desktop dashboard for the GitHub PRs you review. It drives a Claude Code review skill of your choice to draft reviews, and you refine and submit them without leaving the app.
 
 > [!WARNING]
 > Only use Rally on PRs from people you trust, such as teammates in your own organization. Rally has no strong prompt injection protection, so a malicious PR can steer the review session. That session can read any file your user can (SSH keys, cloud credentials, your GitHub token via `gh auth status --show-token`), call read tools on every MCP server you have connected (Slack, Jira, Notion, Datadog, and so on), and send what it finds out through `curl` GET URLs, `WebFetch`, or interpreters like `python` and `node`. See [Guardrails](#guardrails) for what the tool policy does block.
@@ -12,7 +12,7 @@ Prerequisites:
 - An Apple Silicon Mac.
 - `gh` CLI signed in (`gh auth login`). Rally reads its token with `gh auth token`.
 - Claude Code signed in (`claude` then `/login`). The Agent SDK reuses that login.
-- The `review-pr` skill at `~/.claude/skills/review-pr/`.
+- A PR review skill for Claude Code. Rally doesn't include one; see [Review skill](#review-skill).
 
 Install or update to the latest release:
 
@@ -74,19 +74,27 @@ In progress comes from Rally's own review sessions and takes precedence. The oth
 
 The logic lives in `src/main/github/phase.ts`.
 
+### Review skill
+
+Rally doesn't include a review skill; bring your own. Install it where Claude Code loads skills, for example `~/.claude/skills/<name>/`, and set its name in Settings → Reviews. The default is `review-pr`. Rally starts each review with `/<skill> <PR URL>`, so the skill should:
+
+- Take a PR URL as its argument and review that PR.
+- Produce a report and draft comments: inline comments on diff lines, an optional summary body, and optional replies to existing threads. Rally's system prompt tells Claude to send these to the app with `mcp__rally__publish_drafts`, so the skill doesn't need to know about Rally.
+- Leave posting to Rally. GitHub writes are blocked until you click **Post and submit**, and the submit turn posts the drafts with `gh api` without relying on the skill.
+
 ### Reviews
 
-On a PR's detail page, **Start review** opens a Claude Agent SDK session whose first prompt is `/review-pr <url>`. The page shows the session's activity: commands, lens subagents, and turn cost. An in-process MCP tool, `mcp__rally__publish_drafts`, carries the report and draft comments back to the app as structured data.
+On a PR's detail page, **Start review** opens a Claude Agent SDK session whose first prompt is `/<skill> <url>`. The page shows the session's activity: commands, subagents, and turn cost. An in-process MCP tool, `mcp__rally__publish_drafts`, carries the report and draft comments back to the app as structured data.
 
 You can edit or drop drafts inline, or type feedback, then click **Send to Claude** for another turn. Turns are unlimited, and every turn resumes the same SDK session, so a review survives an app restart.
 
 **Post and submit** sends a final `SUBMIT` turn. In that turn Claude creates a pending review, posts any thread replies, submits the review with the event you picked (Comment, Approve, or Request changes), and confirms through `mcp__rally__review_submitted`. Rally then re-fetches the PR from GitHub to recompute its phase.
 
-A submitted session stays on the PR page with a link to the review on GitHub. **Start follow-up review** discards that session and starts a new one that runs `/review-pr` again, which picks up the follow-up flow from your earlier review on GitHub.
+A submitted session stays on the PR page with a link to the review on GitHub. **Start follow-up review** discards that session and starts a new one that runs the review skill again. A skill that reads your earlier review on GitHub can use it to do a follow-up review.
 
-Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the skill's work directory lands inside it and the submit turn can clean it up by absolute path.
+Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the skill's work directory lands inside it. Rally deletes the directory after the review is submitted or discarded.
 
-Settings → Reviews picks the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
+Settings → Reviews picks the review skill, and the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
 
 ### Guardrails
 
@@ -103,3 +111,7 @@ The tool policy is a guardrail against accidental writes and destructive command
 ## Data
 
 Rally stores config, the PR cache, and summaries as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS), and each review session as its own file under `sessions/` there. Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.
+
+## License
+
+Rally is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). You can use, change, and share it for noncommercial purposes as long as every copy keeps the `Required Notice` line from `LICENSE.md`. Commercial use, including using Rally for work at a for-profit company, needs separate permission from the copyright holder.

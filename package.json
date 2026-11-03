@@ -2,6 +2,7 @@
   "name": "rally",
   "version": "0.0.0-development",
   "description": "Local dashboard for GitHub PR reviews driven by Claude",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",

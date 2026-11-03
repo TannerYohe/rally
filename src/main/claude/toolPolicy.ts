@@ -55,11 +55,13 @@ const SYSTEM_COMMANDS = new Set(['sudo', 'security', 'launchctl', 'crontab'])
 
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'])
 
-const WRAPPER_COMMANDS = new Set(['env', 'timeout', 'nice', 'nohup', 'time', 'command', 'exec', 'watch', 'parallel'])
+const WRAPPER_COMMANDS = new Set(['env', 'timeout', 'nice', 'nohup', 'time', 'command', 'exec', 'watch'])
+
+const INPUT_ARGUMENT_COMMANDS = new Set(['xargs', 'parallel'])
 
 const XARGS_VALUE_FLAGS = new Set([
   '-I', '-J', '-L', '-n', '-P', '-s', '-E', '-d', '-a', '-R', '-S', '--replace', '--max-args', '--max-procs',
-  '--max-lines', '--max-chars', '--delimiter', '--arg-file', '--eof',
+  '--max-lines', '--max-chars', '--delimiter', '--arg-file', '--eof', '-j', '--jobs',
 ])
 
 const XARGS_INPUT = '$xargs_input'
@@ -201,7 +203,7 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   if (SYSTEM_COMMANDS.has(program)) return deny(`\`${program}\` changes this machine's system settings, so Rally blocks it.`)
   if (SHELLS.has(program)) return decideShell(args, state, context)
   if (WRAPPER_COMMANDS.has(program)) return decideWrapped(args, segment, state, context)
-  if (program === 'xargs') return decideXargs(args, segment, state, context)
+  if (INPUT_ARGUMENT_COMMANDS.has(program)) return decideXargs(args, segment, state, context)
 
   const operands = args.filter((a) => !a.startsWith('-'))
   switch (program) {

@@ -105,6 +105,9 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('git ls-files | xargs -n 1 rm')).toBe(false)
     expect(bash('find . -name "*.orig" | xargs -I % mv % ~/trash/')).toBe(false)
     expect(bash('git diff --name-only | xargs -P4 -n1 grep -l TODO')).toBe(true)
+    expect(bash('git ls-files | parallel rm')).toBe(false)
+    expect(bash('git ls-files | parallel -j 4 sed -i s/a/b/')).toBe(false)
+    expect(bash('git ls-files | parallel -j4 wc -l')).toBe(true)
   })
 
   it('allows interpreters, build tools, and awk for exploring the code', () => {

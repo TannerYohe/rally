@@ -1,0 +1,22 @@
+appId: com.tanneryohe.rally
+productName: Rally
+artifactName: ${productName}-${version}-${arch}.${ext}
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - out/**
+  - resources/**
+asarUnpack:
+  - resources/**
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.png
+  identity: '-'
+  hardenedRuntime: false
+  target:
+    - target: zip
+      arch: arm64
+    - target: dmg
+      arch: arm64

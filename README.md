@@ -2,6 +2,9 @@
 
 A local desktop dashboard for the GitHub PRs you review. It drives the `review-pr` Claude skill to draft reviews, and you refine and submit them without leaving the app.
 
+> [!WARNING]
+> Rally is designed for reviewing PRs from people you trust, such as teammates in your own organization. It does not have strong prompt injection protections. The review session reads the PR's code, description, and comments, and it can run shell commands and read files on your machine, so a malicious PR can steer it. Do not use Rally on PRs from untrusted contributors. See [Guardrails](#guardrails) for what the tool policy does and does not block.
+
 ## Install
 
 Prerequisites:
@@ -87,7 +90,7 @@ Settings → Reviews picks the model and effort for the review session and, sepa
 
 ### Guardrails
 
-Rally is an internal tool, so the tool policy is a guardrail against accidental writes and destructive commands, not a sandbox. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
+The tool policy is a guardrail against accidental writes and destructive commands, not a sandbox, and it does not defend against prompt injection. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
 
 - GitHub writes are blocked until the submit turn, and in that turn only review creation, review events, and thread replies are allowed. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`), `sh -c`, `eval`, and `find -exec`. `git push` is always blocked.
 - Write, Edit, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, `find -delete`, output redirects) only land under the temp directory. Paths resolve against the working directory, including `cd`, with `..` and symlinks followed, and `$WORK` counts as temp only in the command that assigns it from `mktemp` or a temp path. Paths that `xargs` supplies are unknown, so file-writing commands behind `xargs` are blocked. Git commands that change a checkout, and `gh pr checkout`, only run in temp repos. `git config --global` is read-only.

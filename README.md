@@ -2,22 +2,50 @@
 
 A local desktop dashboard for the GitHub PRs you review. It drives the `review-pr` Claude skill to draft reviews, and you refine and submit them without leaving the app.
 
-## Setup
+## Install
 
 Prerequisites:
 
-- Node 20+
+- An Apple Silicon Mac.
 - `gh` CLI signed in (`gh auth login`). Rally reads its token with `gh auth token`.
 - Claude Code signed in (`claude` then `/login`). The Agent SDK reuses that login.
 - The `review-pr` skill at `~/.claude/skills/review-pr/`.
+
+Install or update to the latest release:
+
+```bash
+gh api repos/TannerYohe/rally/contents/scripts/install.sh -H 'Accept: application/vnd.github.raw' | sh
+```
+
+The script downloads the release zip with `gh`, quits Rally if it is running, and replaces `/Applications/Rally.app`. The app is ad-hoc signed, not notarized. Files that `gh` downloads are not quarantined, so it opens without a Gatekeeper prompt. If you download the zip or dmg from the release page in a browser instead, macOS blocks the first launch: open it once, then allow it under System Settings → Privacy & Security → Open Anyway.
+
+## Development
+
+Development needs Node 22.14+.
 
 ```bash
 npm install      # on macOS, postinstall renames the dev Electron.app to Rally for the dock and menu bar
 npm run dev      # launch with hot reload
 npm test         # unit tests
 npm run typecheck
+npm run dist     # package dist/Rally-<version>-arm64.zip and .dmg
 npm run icons    # regenerate resources/icon.png from resources/icon.svg
 ```
+
+`electron-builder.yml` configures packaging. The Claude Code binary from the Agent SDK's platform package is unpacked from `app.asar` so it can be spawned, and `src/main/claude/executable.ts` points the SDK at it.
+
+## Releases
+
+Every push to `main` runs `.github/workflows/release.yml`: typecheck, tests, then [semantic-release](https://semantic-release.gitbook.io/). semantic-release reads the [Conventional Commits](https://www.conventionalcommits.org/) since the last `v*` tag to pick the next version, sets it in `package.json` in the CI checkout, runs `npm run dist`, and creates a GitHub release with the zip and dmg attached. Nothing is committed back to `main`, so `package.json` stays at `0.0.0-development` in the repo.
+
+| Commit | Release |
+|---|---|
+| `fix: ...` | patch |
+| `feat: ...` | minor |
+| `feat!: ...` or a `BREAKING CHANGE:` footer | major |
+| `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, ... | none |
+
+PRs are squash-merged, so the PR title becomes the commit semantic-release reads. The `pr-title` job in `.github/workflows/ci.yml` fails a PR whose title is not a Conventional Commit.
 
 ## How it works
 

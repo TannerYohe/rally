@@ -3,7 +3,7 @@
 A local desktop dashboard for the GitHub PRs you review. It drives the `review-pr` Claude skill to draft reviews, and you refine and submit them without leaving the app.
 
 > [!WARNING]
-> Rally is designed for reviewing PRs from people you trust, such as teammates in your own organization. It does not have strong prompt injection protections. The review session reads the PR's code, description, and comments, and it can run shell commands and read files on your machine, so a malicious PR can steer it. Do not use Rally on PRs from untrusted contributors. See [Guardrails](#guardrails) for what the tool policy does and does not block.
+> Only use Rally on PRs from people you trust, such as teammates in your own organization. Rally has no strong prompt injection protection, so a malicious PR can steer the review session. That session can read any file your user can (SSH keys, cloud credentials, your GitHub token via `gh auth status --show-token`), call read tools on every MCP server you have connected (Slack, Jira, Notion, Datadog, and so on), and send what it finds out through `curl` GET URLs, `WebFetch`, or interpreters like `python` and `node`. See [Guardrails](#guardrails) for what the tool policy does block.
 
 ## Install
 
@@ -90,11 +90,11 @@ Settings → Reviews picks the model and effort for the review session and, sepa
 
 ### Guardrails
 
-The tool policy is a guardrail against accidental writes and destructive commands, not a sandbox, and it does not defend against prompt injection. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
+The tool policy is a guardrail against accidental writes and destructive commands, not a sandbox; see the warning at the top. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
 
-- GitHub writes are blocked until the submit turn, and in that turn only review creation, review events, and thread replies are allowed. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`), `sh -c`, `eval`, and `find -exec`. `git push` is always blocked.
+- GitHub writes are blocked until the submit turn, and in that turn only review creation, review events, and thread replies are allowed, on any repo rather than only the PR under review. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`), `sh -c`, `eval`, and `find -exec`. `git push` is always blocked.
 - Write, Edit, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, `find -delete`, output redirects) only land under the temp directory. Paths resolve against the working directory, including `cd`, with `..` and symlinks followed, and `$WORK` counts as temp only in the command that assigns it from `mktemp` or a temp path. Paths that `xargs` supplies are unknown, so file-writing commands behind `xargs` are blocked. Git commands that change a checkout, and `gh pr checkout`, only run in temp repos. `git config --global` is read-only.
-- Network requests that send data (`curl -d`, `curl -X POST`, `wget --post-data`) are blocked; reads are allowed.
+- `curl` and `wget` requests with a body or a non-GET method (`curl -d`, `curl -X POST`, `wget --post-data`) are blocked. This is not an exfiltration control: GET URLs, `WebFetch`, and interpreters can still send data out.
 - `ssh`/`scp`, live infrastructure CLIs (`kubectl`, `aws`, `gcloud`, `az`, `terraform`, `helm`), and `sudo` are blocked.
 - Read-only MCP tools (actions starting with a verb like `get`, `list`, `search`, or `read`), `WebSearch`, `WebFetch`, and `LSP` are allowed. MCP tools that write are blocked.
 

@@ -103,4 +103,18 @@ describe('reduceTimeline', () => {
     expect(timeline[2]).toEqual({ kind: 'result', id: 'r1', ok: true, text: '', costUsd: 1.5, durationMs: 1000, at: AT })
     expect(closeOpenEntries(timeline)[0]).toMatchObject({ done: true })
   })
+
+  it('returns the same timeline when a message changes nothing', () => {
+    const timeline = run([
+      assistant([{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+      assistant([{ type: 'tool_use', id: 'agent1', name: 'Agent', input: { description: 'Lens' } }], null, 'a2'),
+      system({ subtype: 'task_progress', tool_use_id: 'agent1', usage: { tool_uses: 0 } }),
+    ])
+    expect(reduceTimeline(timeline, toolResult('unknown'), AT)).toBe(timeline)
+    expect(reduceTimeline(timeline, system({ subtype: 'task_progress', tool_use_id: 'agent1', usage: { tool_uses: 0 } }), AT)).toBe(timeline)
+    expect(reduceTimeline(timeline, system({ subtype: 'task_progress', tool_use_id: 'other', usage: { tool_uses: 3 } }), AT)).toBe(timeline)
+    const done = reduceTimeline(timeline, toolResult('t1'), AT)
+    expect(done).not.toBe(timeline)
+    expect(reduceTimeline(done, toolResult('t1'), AT)).toBe(done)
+  })
 })

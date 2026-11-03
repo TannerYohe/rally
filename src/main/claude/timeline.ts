@@ -70,11 +70,21 @@ function toolEntry(block: ToolUseBlock, at: string): TimelineEntry | null {
   return { kind: 'step', id: block.id, label: TOOL_LABELS[block.name] ?? block.name, detail, done: false, at }
 }
 
+function mapEntries(timeline: TimelineEntry[], update: (entry: TimelineEntry) => TimelineEntry): TimelineEntry[] {
+  let changed = false
+  const next = timeline.map((entry) => {
+    const updated = update(entry)
+    if (updated !== entry) changed = true
+    return updated
+  })
+  return changed ? next : timeline
+}
+
 function markDone(timeline: TimelineEntry[], toolUseIds: Set<string>): TimelineEntry[] {
-  return timeline.map((entry) => {
+  return mapEntries(timeline, (entry) => {
     if (!toolUseIds.has(entry.id)) return entry
-    if (entry.kind === 'step' || (entry.kind === 'agent' && !entry.background)) return { ...entry, done: true }
-    return entry
+    const completes = entry.kind === 'step' || (entry.kind === 'agent' && !entry.background)
+    return completes && !entry.done ? { ...entry, done: true } : entry
   })
 }
 
@@ -84,17 +94,22 @@ function updateAgent(
   patch: (entry: Extract<TimelineEntry, { kind: 'agent' }>) => Partial<Extract<TimelineEntry, { kind: 'agent' }>>,
 ): TimelineEntry[] {
   if (!toolUseId) return timeline
-  return timeline.map((entry) => (entry.kind === 'agent' && entry.id === toolUseId ? { ...entry, ...patch(entry) } : entry))
+  return mapEntries(timeline, (entry) => {
+    if (entry.kind !== 'agent' || entry.id !== toolUseId) return entry
+    const changes = patch(entry)
+    const differs = (Object.keys(changes) as (keyof typeof changes)[]).some((key) => changes[key] !== entry[key])
+    return differs ? { ...entry, ...changes } : entry
+  })
 }
 
 export function closeOpenEntries(timeline: TimelineEntry[]): TimelineEntry[] {
-  return timeline.map((entry) =>
+  return mapEntries(timeline, (entry) =>
     (entry.kind === 'step' || entry.kind === 'agent') && !entry.done ? { ...entry, done: true } : entry,
   )
 }
 
 function bumpActivity(timeline: TimelineEntry[], parentId: string, count: number): TimelineEntry[] {
-  return timeline.map((entry) =>
+  return mapEntries(timeline, (entry) =>
     entry.kind === 'agent' && entry.id === parentId ? { ...entry, activity: entry.activity + count } : entry,
   )
 }

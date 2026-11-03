@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1b4b" />
+      <stop offset="0.55" stop-color="#111027" />
+      <stop offset="1" stop-color="#09090b" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0.28" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity="0.28" />
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.85" cy="0.9" r="0.6">
+      <stop offset="0" stop-color="#d946ef" stop-opacity="0.22" />
+      <stop offset="1" stop-color="#d946ef" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="accent" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
+      <stop offset="0" stop-color="#38bdf8" />
+      <stop offset="0.5" stop-color="#a78bfa" />
+      <stop offset="1" stop-color="#e879f9" />
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)" />
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#glow)" />
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#glow2)" />
+  <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="4" />
+  <path
+    d="M330 300 H668 A92 92 0 0 1 760 392 V600 A92 92 0 0 1 668 692 H460 L338 798 L362 692 H330 A92 92 0 0 1 238 600 V392 A92 92 0 0 1 330 300 Z"
+    fill="#ffffff" fill-opacity="0.05" stroke="url(#accent)" stroke-width="44" stroke-linejoin="round" />
+  <path d="M362 500 L458 594 L640 410" fill="none" stroke="url(#accent)" stroke-width="64" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M790 176 Q799 238 860 248 Q799 258 790 320 Q781 258 720 248 Q781 238 790 176 Z" fill="#f0abfc" />
+  <path d="M846 352 Q850 378 876 382 Q850 386 846 412 Q842 386 816 382 Q842 378 846 352 Z" fill="#7dd3fc" />
+</svg>

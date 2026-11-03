@@ -1,4 +1,4 @@
-import { REVIEW_EVENT_LABELS, type PrRef, type ReviewEvent } from '@shared/types'
+import { DEFAULT_CONFIG, REVIEW_EVENT_LABELS, type PrRef, type ReviewEvent } from '@shared/types'
 import { PUBLISH_DRAFTS_TOOL, REVIEW_SUBMITTED_TOOL } from './rallyTools'
 
 export const APP_PROTOCOL = `You are running inside Rally, a desktop app that drives this PR review. The user reads your output in a GUI.
@@ -10,8 +10,9 @@ export const APP_PROTOCOL = `You are running inside Rally, a desktop app that dr
 - AskUserQuestion is unavailable. If you need an answer (for example whether to continue on a closed PR, or whether to build on an existing pending review), ask in plain text and end your turn.
 - At the end of a SUBMIT turn, call ${REVIEW_SUBMITTED_TOOL}.`
 
-export function reviewPrompt(pr: PrRef): string {
-  return `/review-pr ${pr.url}`
+export function reviewPrompt(pr: PrRef, skill: string): string {
+  const name = skill.trim().replace(/^\//, '') || DEFAULT_CONFIG.reviewSkill
+  return `/${name} ${pr.url}`
 }
 
 export function submitPrompt(pr: PrRef, event: ReviewEvent, notes: string): string {

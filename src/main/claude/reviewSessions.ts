@@ -83,7 +83,7 @@ class ReviewSessions extends EventEmitter {
       updatedAt: now(),
     }
     this.sessions.set(key, session)
-    void this.runTurn(session.id, reviewPrompt(pr), 'review')
+    void this.runTurn(session.id, reviewPrompt(pr, configFile.get().reviewSkill), 'review')
     return this.sessions.get(key)!
   }
 

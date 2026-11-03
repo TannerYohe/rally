@@ -14,13 +14,13 @@ export function reviewPrompt(pr: PrRef): string {
   return `/review-pr ${pr.url}`
 }
 
-export function submitPrompt(pr: PrRef, event: ReviewEvent, notes: string, workRoot: string): string {
+export function submitPrompt(pr: PrRef, event: ReviewEvent, notes: string): string {
   const edits = notes.trim() ? `\nApply these final edits from the user before posting:\n${notes.trim()}\n` : ''
+  const pullPath = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}`
   return `SUBMIT as "${REVIEW_EVENT_LABELS[event]}" (event ${event}).
 The drafts as last published are final.${edits}
-1. Post the inline comments and summary body as one pending review per step 9, omitting "event" so it stays pending. If GitHub rejects a comment for an out-of-diff line, move it into the body and retry.
-2. Post any thread replies per F5.
-3. Submit the pending review: gh api repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews/<review_id>/events --method POST -f event=${event}
-4. Call ${REVIEW_SUBMITTED_TOOL} with the review id, its html_url, and the event.
-5. Clean up per step 10: rm -rf "${workRoot}"/review-pr-*`
+1. Write the inline comments and summary body to a JSON file in the working directory with "commit_id" (the PR's current head SHA), "body", and "comments" (each with "path", "line", "side", and "start_line" for ranges). Omit "event" so the review stays pending. Create it with: gh api ${pullPath}/reviews --method POST --input <file>. If GitHub rejects a comment for an out-of-diff line, move it into the body and retry.
+2. Post each thread reply with: gh api ${pullPath}/comments/<comment_id>/replies --method POST -f body='<reply>'
+3. Submit the pending review: gh api ${pullPath}/reviews/<review_id>/events --method POST -f event=${event}
+4. Call ${REVIEW_SUBMITTED_TOOL} with the review id, its html_url, and the event.`
 }

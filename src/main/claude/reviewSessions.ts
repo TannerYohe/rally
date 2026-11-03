@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
@@ -30,6 +30,14 @@ const ACTIVE_STATUSES = new Set(['running', 'submitting'])
 const now = () => new Date().toISOString()
 
 const sessionDir = (sessionId: string) => join(tmpdir(), 'rally', sessionId)
+
+function removeSessionDir(sessionId: string): void {
+  try {
+    rmSync(sessionDir(sessionId), { recursive: true, force: true })
+  } catch (error) {
+    console.error('Removing review session directory failed', { sessionId, error })
+  }
+}
 
 function restoreSession(session: ReviewSession): ReviewSession {
   if (!ACTIVE_STATUSES.has(session.status)) return session
@@ -87,7 +95,7 @@ class ReviewSessions extends EventEmitter {
   async submit(sessionId: string, event: ReviewEvent, notes: string): Promise<void> {
     this.assertIdle(sessionId)
     if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
-    void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes, sessionDir(sessionId)), 'submit')
+    void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
   }
 
   cancel(sessionId: string): void {
@@ -99,6 +107,7 @@ class ReviewSessions extends EventEmitter {
     const session = this.byId(sessionId)
     this.sessions.delete(session.prKey)
     sessionsDir.remove(session.prKey)
+    removeSessionDir(sessionId)
     this.emit('removed', session.prKey)
   }
 
@@ -269,6 +278,7 @@ class ReviewSessions extends EventEmitter {
       return
     }
     this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
+    removeSessionDir(sessionId)
     const pr = this.find(sessionId)?.pr
     if (!pr) return
     prList.refreshOne(pr.owner, pr.repo, pr.number).catch((error) => {

@@ -15,6 +15,7 @@ import {
 } from '@shared/types'
 import { prList } from '../prList'
 import { configFile, sessionsDir } from '../store'
+import { claudeExecutable } from './executable'
 import { APP_PROTOCOL, reviewPrompt, submitPrompt } from './prompts'
 import { reviewModelOptions } from './modelOptions'
 import { createRallyServer, RALLY_SERVER } from './rallyTools'
@@ -207,6 +208,7 @@ class ReviewSessions extends EventEmitter {
         options: {
           resume: this.find(sessionId)?.sdkSessionId ?? undefined,
           cwd,
+          pathToClaudeCodeExecutable: claudeExecutable(),
           abortController: controller,
           settingSources: ['user'],
           skills: 'all',

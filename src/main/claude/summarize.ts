@@ -1,5 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type { Pr } from '@shared/types'
+import { claudeExecutable } from './executable'
 
 const MAX_BODY_CHARS = 2000
 const MAX_FILES = 40
@@ -27,6 +28,7 @@ export async function summarizePr(pr: Pr): Promise<string> {
       settingSources: [],
       maxTurns: 1,
       persistSession: false,
+      pathToClaudeCodeExecutable: claudeExecutable(),
     },
   })
   for await (const message of stream) {

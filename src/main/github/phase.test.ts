@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MyReview } from '@shared/types'
-import { computePhase } from './phase'
+import { computePhase, MY_REVIEW_WINDOW } from './phase'
 
 const HEAD = 'head-sha'
 
@@ -83,6 +83,11 @@ describe('computePhase', () => {
   it('stays awaiting re-review when I reply on a thread after the author pushes', () => {
     const reviews = [review('CHANGES_REQUESTED', 'old-sha', '2026-10-01T00:00:00Z'), threadReply(HEAD, '2026-10-03T00:00:00Z')]
     expect(phase(reviews, false, false, '2026-10-02T00:00:00Z')).toBe('awaiting_rereview')
+  })
+
+  it('falls back to my latest thread reply when the review window holds only replies', () => {
+    const replies = Array.from({ length: MY_REVIEW_WINDOW }, (_, i) => threadReply(HEAD, `2026-10-${String(i + 1).padStart(2, '0')}T00:00:00Z`))
+    expect(phase(replies)).toBe('pending_changes')
   })
 
   it('is unreviewed when my only activity is a thread reply', () => {

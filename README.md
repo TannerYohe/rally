@@ -31,7 +31,7 @@ The phase chips above the list show a count per phase and toggle that phase on o
 
 ### Phases
 
-In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads.
+In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads. If your last 20 reviews are all thread replies, the latest reply counts, since an earlier real review is out of view.
 
 | Phase | Rule |
 |---|---|

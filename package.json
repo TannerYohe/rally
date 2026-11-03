@@ -1,6 +1,6 @@
 {
   "name": "rally",
-  "version": "0.1.0",
+  "version": "0.0.0-development",
   "description": "Local dashboard for GitHub PR reviews driven by Claude",
   "private": true,
   "type": "module",
@@ -27,6 +27,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@semantic-release/exec": "^7.1.0",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.6",
@@ -36,6 +37,7 @@
     "electron": "^45.2.1",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
+    "semantic-release": "^25.0.9",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
     "vite": "^8.3.5",

@@ -19,6 +19,7 @@ import {
   type PrSort,
 } from '../lib/prFilters'
 import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { settingsPath } from '../lib/settingsSections'
 import { PHASE_THEME } from '../lib/theme'
 
 function ReviewStatusNote({ status }: { status: SessionStatus }) {
@@ -91,7 +92,7 @@ function PrList({ prs, visible, refreshing, onOpen }: { prs: Pr[]; visible: Pr[]
     return (
       <EmptyState>
         No open PRs match. Add authors and repos in{' '}
-        <Link className="text-sky-400 underline" to="/settings">
+        <Link className="text-sky-400 underline" to={settingsPath('pull-requests')}>
           Settings
         </Link>
         .

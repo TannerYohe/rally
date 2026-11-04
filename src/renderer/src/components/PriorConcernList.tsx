@@ -45,14 +45,18 @@ export function PriorConcernList(props: Props) {
       <ul className="space-y-2">
         {rows.map((row) => (
           <li key={row.concern.id} className="flex gap-3 rounded-xl border border-white/5 bg-zinc-900/60 p-3 text-sm">
-            <input
-              type="checkbox"
-              className="mt-1"
-              aria-label={`Resolve ${row.concern.id}`}
-              checked={isSelected(row, overrides)}
-              disabled={disabled || !isResolvable(row)}
-              onChange={(e) => isResolvable(row) && onSelect(row.thread.id, e.target.checked)}
-            />
+            {isResolvable(row) ? (
+              <input
+                type="checkbox"
+                className="mt-1"
+                aria-label={`Resolve ${row.concern.id}`}
+                checked={isSelected(row, overrides)}
+                disabled={disabled}
+                onChange={(e) => onSelect(row.thread.id, e.target.checked)}
+              />
+            ) : (
+              <span className="w-[13px] shrink-0" />
+            )}
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-semibold text-zinc-200">{row.concern.id}</span>

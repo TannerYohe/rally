@@ -24,7 +24,7 @@ export function App() {
         <header className="flex items-center border-b border-white/5 bg-ink-950/70 px-6 py-2.5 backdrop-blur">
           <Link to="/" className="flex items-center gap-2">
             <img src={logo} alt="" className="h-7 w-7" />
-            <span className="bg-gradient-to-r from-primary-400 via-secondary-400 to-highlight-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
+            <span className="wordmark bg-gradient-to-r from-primary-400 via-secondary-400 to-highlight-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
               Rally
             </span>
           </Link>

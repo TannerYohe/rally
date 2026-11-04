@@ -359,6 +359,7 @@ function isWritableTarget(redirect: Redirect, state: ShellState): boolean {
 
 function expandPath(word: string, state: ShellState): string | null {
   if (/^\$(?:\{WORK\}|WORK\b)/.test(word) && !state.workTrusted) return null
+  if (/^~(?!\/|$)/.test(word)) return null
   const expanded = toNativePath(
     word
       .replace(/^\$(?:\{WORK\}|WORK\b)/, WORK_STAND_IN)

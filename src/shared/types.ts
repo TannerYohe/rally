@@ -152,8 +152,10 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
+export type TurnMode = 'review' | 'refine' | 'submit'
+
 export type TimelineEntry =
-  | { kind: 'user'; id: string; text: string; at: string }
+  | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }
   | { kind: 'text'; id: string; text: string; at: string }
   | { kind: 'step'; id: string; label: string; detail: string; done: boolean; at: string }
   | { kind: 'agent'; id: string; label: string; done: boolean; activity: number; background: boolean; at: string }

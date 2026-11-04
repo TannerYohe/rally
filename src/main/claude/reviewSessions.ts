@@ -12,6 +12,7 @@ import {
   type SessionStatus,
   type SubmittedReview,
   type TimelineEntry,
+  type TurnMode,
 } from '@shared/types'
 import { prList } from '../prList'
 import { configFile, sessionsDir } from '../store'
@@ -21,8 +22,6 @@ import { reviewModelOptions } from './modelOptions'
 import { createRallyServer, RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
 import { decideToolUse } from './toolPolicy'
-
-type TurnMode = 'review' | 'refine' | 'submit'
 
 const FLUSH_INTERVAL_MS = 200
 const ACTIVE_STATUSES = new Set(['running', 'submitting'])
@@ -171,7 +170,7 @@ class ReviewSessions extends EventEmitter {
       (s) => ({
         status: submitting ? 'submitting' : 'running',
         error: null,
-        timeline: [...s.timeline, { kind: 'user', id: randomUUID(), text: prompt, at: now() }],
+        timeline: [...s.timeline, { kind: 'user', id: randomUUID(), text: prompt, at: now(), turn: mode }],
       }),
       true,
     )

@@ -21,27 +21,27 @@ const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> =
 
 export function Settings() {
   const section = sectionFromParam(useParams().section)
-  const [saved, setSaved] = useState<Config | null>(null)
+  const [savedConfig, setSavedConfig] = useState<Config | null>(null)
   const [config, setConfig] = useState<Config | null>(null)
   const [health, setHealth] = useState<Health | null>(null)
   const [justSaved, setJustSaved] = useState(false)
 
   useEffect(() => {
     window.rally.getConfig().then((c) => {
-      setSaved(c)
+      setSavedConfig(c)
       setConfig(c)
     })
     window.rally.getHealth().then(setHealth)
   }, [])
 
-  const dirty = JSON.stringify(config) !== JSON.stringify(saved)
+  const dirty = JSON.stringify(config) !== JSON.stringify(savedConfig)
   const blocker = useBlocker(({ nextLocation }) => blocksLeavingSettings(dirty, nextLocation.pathname))
 
-  if (!config || !saved) return null
+  if (!config || !savedConfig) return null
 
   const save = async () => {
     await window.rally.saveConfig(config)
-    setSaved(config)
+    setSavedConfig(config)
     setJustSaved(true)
     setTimeout(() => setJustSaved(false), 2000)
   }
@@ -83,7 +83,7 @@ export function Settings() {
           <button
             className="ml-auto rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100 disabled:invisible"
             disabled={!dirty}
-            onClick={() => setConfig(saved)}
+            onClick={() => setConfig(savedConfig)}
           >
             Discard
           </button>

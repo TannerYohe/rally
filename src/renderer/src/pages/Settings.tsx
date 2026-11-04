@@ -263,11 +263,15 @@ function AccountsSection({ health }: SectionProps) {
           <div className="px-4 pb-3 font-mono text-xs text-rose-300/80">{health.githubError}</div>
         )}
         <Row label="Claude Code" description="Uses your Claude Code login. System defaults come from ~/.claude/settings.json.">
-          <span className="text-right text-xs text-zinc-400">
-            Model <span className="text-zinc-200">{health?.claudeDefaults.model ?? 'not set'}</span>
-            <br />
-            Effort <span className="text-zinc-200">{health?.claudeDefaults.effort ?? 'not set'}</span>
-          </span>
+          {health === null ? (
+            <StatusText tone="pending">Checking…</StatusText>
+          ) : (
+            <span className="text-right text-xs text-zinc-400">
+              Model <span className="text-zinc-200">{health.claudeDefaults.model ?? 'not set'}</span>
+              <br />
+              Effort <span className="text-zinc-200">{health.claudeDefaults.effort ?? 'not set'}</span>
+            </span>
+          )}
         </Row>
       </Card>
     </>

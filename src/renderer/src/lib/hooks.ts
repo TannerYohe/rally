@@ -60,6 +60,10 @@ export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityI
   useEffect(() => setOpen(autoOpen), [autoOpen])
 
   useEffect(() => {
+    if (busy) setOpen(true)
+  }, [busy])
+
+  useEffect(() => {
     if (following) ref.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
   }, [following, open, timeline])
 

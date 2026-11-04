@@ -43,7 +43,7 @@ const REVIEW_COMMENTS_QUERY = `
 `
 
 const MAX_PAGES = 4
-const MAX_NODE_IDS = 100
+export const MAX_NODE_IDS = 100
 
 interface RawReview {
   id: string

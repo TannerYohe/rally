@@ -175,6 +175,18 @@ export type TimelineEntry =
   | { kind: 'denied'; id: string; label: string; at: string }
   | { kind: 'result'; id: string; ok: boolean; text: string; costUsd: number; durationMs: number; at: string }
 
+export interface ReviewThread {
+  id: string
+  url: string
+  isResolved: boolean
+  isOutdated: boolean
+}
+
+export interface ThreadResolution {
+  resolved: string[]
+  failed: { threadId: string; error: string }[]
+}
+
 export interface SubmittedReview {
   reviewId: number
   url: string
@@ -198,6 +210,7 @@ export interface ReviewSession {
   timeline: TimelineEntry[]
   drafts: Drafts | null
   submitted: SubmittedReview | null
+  threadResolution?: ThreadResolution | null
   createdAt: string
   updatedAt: string
 }

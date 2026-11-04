@@ -371,7 +371,7 @@ function expandPath(word: string, state: ShellState): string | null {
   return state.cwd ? resolve(state.cwd, expanded) : null
 }
 
-// Lowercases the program name and drops Windows executable extensions, since gh.exe and GIT both run gh and git.
+// Returns the lowercased program name without a .exe, .cmd, .bat, or .com extension.
 function programName(programPath: string): string {
   return basename(programPath).toLowerCase().replace(/\.(?:exe|cmd|bat|com)$/, '')
 }

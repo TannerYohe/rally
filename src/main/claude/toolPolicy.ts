@@ -204,7 +204,7 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   const [word, ...args] = words
   const programPath = /[$`]/.test(word) ? expandPath(word, state) : word
   if (!programPath) return deny(`Rally needs to see which program \`${word}\` runs. Call it by name or path.`)
-  const program = basename(programPath)
+  const program = programName(programPath)
 
   if (REMOTE_SHELL_COMMANDS.has(program)) return deny(`\`${program}\` reaches other machines, so Rally blocks it.`)
   if (INFRASTRUCTURE_COMMANDS.has(program)) return deny(`\`${program}\` acts on live infrastructure, so Rally blocks it.`)
@@ -368,6 +368,11 @@ function expandPath(word: string, state: ShellState): string | null {
   if (!expanded || /[$`]/.test(expanded) || isRemotePath(expanded)) return null
   if (isAbsolute(expanded)) return resolve(expanded)
   return state.cwd ? resolve(state.cwd, expanded) : null
+}
+
+// Lowercases the program name and drops Windows executable extensions, since gh.exe and GIT both run gh and git.
+function programName(programPath: string): string {
+  return basename(programPath).toLowerCase().replace(/\.(?:exe|cmd|bat|com)$/, '')
 }
 
 // Maps Git Bash paths such as /tmp and /c/Users to Windows paths; other platforms keep the path unchanged.

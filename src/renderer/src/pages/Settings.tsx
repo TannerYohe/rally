@@ -11,17 +11,12 @@ import {
 } from '@shared/types'
 import { Avatar } from '../components/Avatar'
 import { TagInput } from '../components/TagInput'
+import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
 
-type SectionId = 'pull-requests' | 'reviews' | 'accounts'
-
-const SECTIONS: { id: SectionId; label: string; icon: ReactNode }[] = [
-  { id: 'pull-requests', label: 'Pull requests', icon: <PullRequestIcon /> },
-  { id: 'reviews', label: 'Reviews', icon: <SparkleIcon /> },
-  { id: 'accounts', label: 'Accounts', icon: <PersonIcon /> },
-]
-
-function sectionFromParam(param: string | undefined): SectionId {
-  return SECTIONS.find((s) => s.id === param)?.id ?? 'pull-requests'
+const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
+  'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
+  reviews: { label: 'Reviews', icon: <SparkleIcon /> },
+  accounts: { label: 'Accounts', icon: <PersonIcon /> },
 }
 
 export function Settings() {
@@ -40,7 +35,7 @@ export function Settings() {
   }, [])
 
   const dirty = JSON.stringify(config) !== JSON.stringify(saved)
-  const blocker = useBlocker(({ nextLocation }) => dirty && !nextLocation.pathname.startsWith('/settings'))
+  const blocker = useBlocker(({ nextLocation }) => blocksLeavingSettings(dirty, nextLocation.pathname))
 
   if (!config || !saved) return null
 
@@ -58,14 +53,14 @@ export function Settings() {
           ← All PRs
         </Link>
         <h1 className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Settings</h1>
-        {SECTIONS.map((s) => (
+        {SETTINGS_SECTIONS.map((id) => (
           <Link
-            key={s.id}
-            to={`/settings/${s.id}`}
-            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition ${s.id === section ? 'bg-white/10 text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+            key={id}
+            to={settingsPath(id)}
+            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition ${id === section ? 'bg-white/10 text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
           >
-            {s.icon}
-            {s.label}
+            {SECTION_NAV[id].icon}
+            {SECTION_NAV[id].label}
           </Link>
         ))}
       </nav>
@@ -157,7 +152,7 @@ interface SectionProps {
   onChange(config: Config): void
 }
 
-function SectionBody({ section, ...props }: SectionProps & { section: SectionId }) {
+function SectionBody({ section, ...props }: SectionProps & { section: SettingsSection }) {
   switch (section) {
     case 'pull-requests':
       return <PullRequestsSection {...props} />

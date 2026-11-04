@@ -1,10 +1,8 @@
-/// <reference types="node" />
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG } from '@shared/types'
+import indexCss from '../index.css?raw'
+import skinsCss from '../skins.css?raw'
 import { SKIN_IDS, parseSkinId } from './skins'
-
-const readCss = (name: string) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')
 
 describe('parseSkinId', () => {
   it('returns a known skin id', () => {
@@ -18,9 +16,8 @@ describe('parseSkinId', () => {
 })
 
 describe('skins.css', () => {
-  const themeBlock = readCss('index.css').match(/@theme \{([^}]*)\}/)![1]
+  const themeBlock = indexCss.match(/@theme \{([^}]*)\}/)![1]
   const scaleVariables = [...themeBlock.matchAll(/(--color-[a-z]+-\d+):/g)].map((m) => m[1])
-  const skinsCss = readCss('skins.css')
   const skinBlocks = new Map([...skinsCss.matchAll(/:root\[data-skin='([a-z]+)'\] \{([^}]*)\}/g)].map((m) => [m[1], m[2]]))
 
   it('reads the semantic scales from index.css', () => {

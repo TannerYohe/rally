@@ -9,14 +9,17 @@ import {
   type Health,
   type ModelChoice,
 } from '@shared/types'
+import logo from '../../../../resources/icon.svg'
 import { Avatar } from '../components/Avatar'
 import { TagInput } from '../components/TagInput'
+import { SKINS, saveSkin, useSkin } from '../lib/skins'
 
-type SectionId = 'pull-requests' | 'reviews' | 'accounts'
+type SectionId = 'pull-requests' | 'reviews' | 'appearance' | 'accounts'
 
 const SECTIONS: { id: SectionId; label: string; icon: ReactNode }[] = [
   { id: 'pull-requests', label: 'Pull requests', icon: <PullRequestIcon /> },
   { id: 'reviews', label: 'Reviews', icon: <SparkleIcon /> },
+  { id: 'appearance', label: 'Appearance', icon: <PaletteIcon /> },
   { id: 'accounts', label: 'Accounts', icon: <PersonIcon /> },
 ]
 
@@ -163,6 +166,8 @@ function SectionBody({ section, ...props }: SectionProps & { section: SectionId 
       return <PullRequestsSection {...props} />
     case 'reviews':
       return <ReviewsSection {...props} />
+    case 'appearance':
+      return <AppearanceSection />
     case 'accounts':
       return <AccountsSection {...props} />
   }
@@ -274,6 +279,40 @@ function ReviewsSection({ config, health, onChange }: SectionProps) {
             onChange={(subagentEffort) => onChange({ ...config, subagentEffort })}
           />
         </Row>
+      </Card>
+    </>
+  )
+}
+
+function AppearanceSection() {
+  const current = useSkin()
+  return (
+    <>
+      <SectionHeader title="Appearance">A skin changes Rally's colors and backdrop. It applies right away and doesn't need saving.</SectionHeader>
+      <Card title="Skin">
+        <div role="radiogroup" aria-label="Skin" className="divide-y divide-white/5">
+          {SKINS.map((skin) => (
+            <button
+              key={skin.id}
+              type="button"
+              role="radio"
+              aria-checked={skin.id === current.id}
+              onClick={() => saveSkin(skin.id)}
+              className={`flex w-full items-center gap-4 px-4 py-3 text-left transition first:rounded-t-xl last:rounded-b-xl ${skin.id === current.id ? 'bg-white/5' : 'hover:bg-white/[0.03]'}`}
+            >
+              {skin.mark ? <span className="w-7 text-center text-2xl">{skin.mark}</span> : <img src={logo} alt="" className="h-7 w-7" />}
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-ink-100">{skin.name}</span>
+                <span className="block text-xs text-ink-500">{skin.tagline}</span>
+              </span>
+              <span
+                className={`flex h-4 w-4 items-center justify-center rounded-full ring-1 ${skin.id === current.id ? 'bg-secondary-500 ring-secondary-500' : 'ring-ink-600'}`}
+              >
+                {skin.id === current.id && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+              </span>
+            </button>
+          ))}
+        </div>
       </Card>
     </>
   )
@@ -429,6 +468,20 @@ function SparkleIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
       <path strokeLinejoin="round" d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7Z" />
       <path strokeLinecap="round" d="M19 16v4M17 18h4" />
+    </svg>
+  )
+}
+
+function PaletteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
+      <path
+        strokeLinejoin="round"
+        d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8Z"
+      />
+      <circle cx="7.5" cy="11" r="1" fill="currentColor" />
+      <circle cx="10.5" cy="7" r="1" fill="currentColor" />
+      <circle cx="15" cy="7.5" r="1" fill="currentColor" />
     </svg>
   )
 }

@@ -40,7 +40,19 @@ export function createRallyServer(handlers: RallyToolHandlers) {
       summary_body: z.string().describe('Top-level review body, or empty string for none'),
       comments: z.array(commentSchema),
       prior_concerns: z
-        .array(z.object({ id: z.string(), location: z.string(), gist: z.string(), verdict: z.string() }))
+        .array(
+          z.object({
+            id: z.string(),
+            location: z.string(),
+            gist: z.string(),
+            verdict: z.string().describe('One-line verdict with evidence, e.g. "addressed in abc1234"'),
+            status: z.enum(['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot']),
+            thread_id: z
+              .string()
+              .nullable()
+              .describe('GraphQL node id of the review thread (PRRT_...) for inline comments; null for review bodies and conversation comments'),
+          }),
+        )
         .default([])
         .describe('Follow-up mode ledger of my earlier comments and their verdicts'),
     },
@@ -50,7 +62,14 @@ export function createRallyServer(handlers: RallyToolHandlers) {
         verdict: args.verdict,
         reportMarkdown: args.report_markdown,
         summaryBody: args.summary_body,
-        priorConcerns: args.prior_concerns,
+        priorConcerns: args.prior_concerns.map((c) => ({
+          id: c.id,
+          location: c.location,
+          gist: c.gist,
+          verdict: c.verdict,
+          status: c.status,
+          threadId: c.thread_id,
+        })),
         comments: args.comments.map((c) => ({
           id: c.id,
           kind: c.kind,

@@ -134,11 +134,24 @@ export interface DraftComment {
   replyToCommentId: number | null
 }
 
+export type ConcernStatus = 'addressed' | 'partly' | 'not_addressed' | 'pushed_back_accept' | 'pushed_back_hold' | 'moot'
+
+export const CONCERN_STATUS_LABELS: Record<ConcernStatus, string> = {
+  addressed: 'Addressed',
+  partly: 'Partly addressed',
+  not_addressed: 'Not addressed',
+  pushed_back_accept: 'Pushed back, accepted',
+  pushed_back_hold: 'Pushed back, holding',
+  moot: 'Moot',
+}
+
 export interface PriorConcern {
   id: string
   location: string
   gist: string
   verdict: string
+  status?: ConcernStatus
+  threadId?: string | null
 }
 
 export interface Drafts {

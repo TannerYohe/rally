@@ -52,6 +52,6 @@ jobs:
       - run: npm ci
       - run: npm version "$VERSION" --no-git-tag-version
       - run: npm run dist
-      - run: gh release upload "v$VERSION" dist/Rally-*-x64.exe dist/Rally-*-x64.zip
+      - run: gh release upload "v$VERSION" dist/Rally-*-x64.exe dist/Rally-*-x64.zip --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

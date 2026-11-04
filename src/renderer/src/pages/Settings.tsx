@@ -211,42 +211,26 @@ function ReviewsSection({ config, health, onChange }: SectionProps) {
           </div>
         </StackedRow>
       </Card>
-      <Card title="Review session" description="The main Claude session that runs the skill and drafts the review.">
-        <Row label="Model">
-          <ChoiceSelect
-            labels={MODEL_LABELS}
-            value={config.reviewModel}
-            defaultLabel={systemDefault(health?.claudeDefaults.model)}
-            onChange={(reviewModel) => onChange({ ...config, reviewModel })}
-          />
-        </Row>
-        <Row label="Effort">
-          <ChoiceSelect
-            labels={EFFORT_LABELS}
-            value={config.reviewEffort}
-            defaultLabel={systemDefault(health?.claudeDefaults.effort)}
-            onChange={(reviewEffort) => onChange({ ...config, reviewEffort })}
-          />
-        </Row>
-      </Card>
-      <Card title="Subagents" description="Reviewer subagents the skill fans out to.">
-        <Row label="Model">
-          <ChoiceSelect
-            labels={MODEL_LABELS}
-            value={config.subagentModel}
-            defaultLabel="System default (inherits)"
-            onChange={(subagentModel) => onChange({ ...config, subagentModel })}
-          />
-        </Row>
-        <Row label="Effort">
-          <ChoiceSelect
-            labels={EFFORT_LABELS}
-            value={config.subagentEffort}
-            defaultLabel="System default"
-            onChange={(subagentEffort) => onChange({ ...config, subagentEffort })}
-          />
-        </Row>
-      </Card>
+      <ModelEffortCard
+        title="Review session"
+        description="The main Claude session that runs the skill and drafts the review."
+        model={config.reviewModel}
+        effort={config.reviewEffort}
+        modelDefault={systemDefault(health?.claudeDefaults.model)}
+        effortDefault={systemDefault(health?.claudeDefaults.effort)}
+        onModelChange={(reviewModel) => onChange({ ...config, reviewModel })}
+        onEffortChange={(reviewEffort) => onChange({ ...config, reviewEffort })}
+      />
+      <ModelEffortCard
+        title="Subagents"
+        description="Reviewer subagents the skill fans out to."
+        model={config.subagentModel}
+        effort={config.subagentEffort}
+        modelDefault={systemDefault('inherits')}
+        effortDefault={systemDefault(null)}
+        onModelChange={(subagentModel) => onChange({ ...config, subagentModel })}
+        onEffortChange={(subagentEffort) => onChange({ ...config, subagentEffort })}
+      />
     </>
   )
 }
@@ -360,6 +344,30 @@ function StatusText({ tone, children }: { tone: keyof typeof STATUS_TONES; child
       <span className={`h-2 w-2 rounded-full ${STATUS_TONES[tone].dot}`} />
       {children}
     </span>
+  )
+}
+
+interface ModelEffortCardProps {
+  title: string
+  description: string
+  model: ModelChoice | null
+  effort: EffortChoice | null
+  modelDefault: string
+  effortDefault: string
+  onModelChange(model: ModelChoice | null): void
+  onEffortChange(effort: EffortChoice | null): void
+}
+
+function ModelEffortCard({ title, description, model, effort, modelDefault, effortDefault, onModelChange, onEffortChange }: ModelEffortCardProps) {
+  return (
+    <Card title={title} description={description}>
+      <Row label="Model">
+        <ChoiceSelect labels={MODEL_LABELS} value={model} defaultLabel={modelDefault} onChange={onModelChange} />
+      </Row>
+      <Row label="Effort">
+        <ChoiceSelect labels={EFFORT_LABELS} value={effort} defaultLabel={effortDefault} onChange={onEffortChange} />
+      </Row>
+    </Card>
   )
 }
 

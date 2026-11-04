@@ -257,15 +257,7 @@ function AccountsSection({ health }: SectionProps) {
       <SectionHeader title="Accounts">Rally signs in with your existing CLI logins.</SectionHeader>
       <Card>
         <Row label="GitHub" description="Read from the gh CLI.">
-          {health === null ? (
-            <StatusText tone="pending">Checking…</StatusText>
-          ) : health.githubLogin ? (
-            <StatusText tone="ok">Signed in as {health.githubLogin}</StatusText>
-          ) : (
-            <StatusText tone="error">
-              Not signed in. Run <code>gh auth login</code>.
-            </StatusText>
-          )}
+          <GithubStatus health={health} />
         </Row>
         {health?.githubError && (
           <div className="px-4 pb-3 font-mono text-xs text-rose-300/80">{health.githubError}</div>
@@ -280,6 +272,27 @@ function AccountsSection({ health }: SectionProps) {
       </Card>
     </>
   )
+}
+
+function GithubStatus({ health }: { health: Health | null }) {
+  if (health === null) return <StatusText tone="pending">Checking…</StatusText>
+  if (health.githubLogin) return <StatusText tone="ok">Signed in as {health.githubLogin}</StatusText>
+  switch (health.githubFailure) {
+    case 'gh_missing':
+      return (
+        <StatusText tone="error">
+          gh CLI not found. Install it and run <code>gh auth login</code>.
+        </StatusText>
+      )
+    case 'signed_out':
+      return (
+        <StatusText tone="error">
+          Not signed in. Run <code>gh auth login</code>.
+        </StatusText>
+      )
+    default:
+      return <StatusText tone="error">Couldn't reach GitHub</StatusText>
+  }
 }
 
 const FIELD_CLASS = 'rounded-md bg-zinc-950/60 px-2.5 py-1.5 text-sm text-zinc-100 outline-none ring-1 ring-zinc-800 focus:ring-violet-400/50'

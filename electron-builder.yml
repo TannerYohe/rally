@@ -9,7 +9,7 @@ files:
   - resources/**
 asarUnpack:
   - resources/**
-  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude*
 mac:
   category: public.app-category.developer-tools
   icon: resources/icon.png

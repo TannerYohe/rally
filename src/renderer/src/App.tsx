@@ -1,5 +1,6 @@
 import { HashRouter, Link, NavLink, Route, Routes } from 'react-router-dom'
 import logo from '../../../resources/icon.svg'
+import { useSkin } from './lib/skins'
 import { Dashboard } from './pages/Dashboard'
 import { PrDetail } from './pages/PrDetail'
 import { Settings } from './pages/Settings'
@@ -18,6 +19,7 @@ function GearIcon() {
 }
 
 export function App() {
+  const skin = useSkin()
   return (
     <HashRouter>
       <div className="flex h-full flex-col">
@@ -27,6 +29,7 @@ export function App() {
             <span className="wordmark bg-gradient-to-r from-primary-400 via-secondary-400 to-highlight-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
               Rally
             </span>
+            {skin.mark && <span className="text-base">{skin.mark}</span>}
           </Link>
           <NavLink
             to="/settings"

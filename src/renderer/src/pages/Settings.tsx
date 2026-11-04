@@ -9,6 +9,8 @@ import {
   type Health,
   type ModelChoice,
 } from '@shared/types'
+import logo from '../../../../resources/icon.svg'
+import { SKINS, saveSkin, useSkin } from '../lib/skins'
 
 const toLines = (values: string[]) => values.join('\n')
 const fromLines = (text: string) =>
@@ -59,6 +61,8 @@ export function Settings() {
           <p className="text-rose-300">gh CLI not available: {health.githubError}. Run `gh auth login`.</p>
         )}
       </section>
+
+      <SkinPicker />
 
       <section className="grid grid-cols-2 gap-4">
         <label className="space-y-1 text-sm">
@@ -150,6 +154,36 @@ export function Settings() {
         {saved && <span className="text-sm text-emerald-300">Saved. Refreshing PRs…</span>}
       </div>
     </div>
+  )
+}
+
+function SkinPicker() {
+  const current = useSkin()
+  return (
+    <section className="space-y-3 rounded-md border border-ink-800 p-4 text-sm">
+      <div>
+        <h2 className="font-semibold">Skin</h2>
+        <p className="text-xs text-ink-500">Applies right away, without saving.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {SKINS.map((skin) => (
+          <button
+            key={skin.id}
+            aria-pressed={skin.id === current.id}
+            onClick={() => saveSkin(skin.id)}
+            className={`flex items-center gap-3 rounded-md p-3 text-left ring-1 transition ${
+              skin.id === current.id ? 'bg-primary-400/10 ring-primary-400/50' : 'ring-ink-800 hover:bg-white/5'
+            }`}
+          >
+            {skin.mark ? <span className="w-7 text-center text-2xl">{skin.mark}</span> : <img src={logo} alt="" className="h-7 w-7" />}
+            <span>
+              <span className="block font-medium">{skin.name}</span>
+              <span className="block text-xs text-ink-400">{skin.tagline}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 

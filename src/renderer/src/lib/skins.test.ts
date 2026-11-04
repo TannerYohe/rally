@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SKIN, parseSkin } from './skins'
+import { SKINS, findSkin } from './skins'
 
-describe('parseSkin', () => {
-  it('returns a known skin id', () => {
-    expect(parseSkin('tennis')).toBe('tennis')
+describe('findSkin', () => {
+  it('returns the skin with a known id', () => {
+    expect(findSkin('tennis').id).toBe('tennis')
   })
 
-  it('falls back to the default for a missing or unknown value', () => {
-    expect(parseSkin(null)).toBe(DEFAULT_SKIN)
-    expect(parseSkin('bowling')).toBe(DEFAULT_SKIN)
+  it('falls back to the first skin for a missing or unknown id', () => {
+    expect(findSkin(null)).toBe(SKINS[0])
+    expect(findSkin('bowling')).toBe(SKINS[0])
   })
 })

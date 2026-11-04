@@ -1,4 +1,4 @@
-import { HashRouter, Link, NavLink, Route, Routes } from 'react-router-dom'
+import { createHashRouter, Link, NavLink, Outlet, RouterProvider } from 'react-router-dom'
 import logo from '../../../resources/icon.svg'
 import { useSkin } from './lib/skins'
 import { Dashboard } from './pages/Dashboard'
@@ -18,38 +18,47 @@ function GearIcon() {
   )
 }
 
-export function App() {
+function Layout() {
   const skin = useSkin()
   return (
-    <HashRouter>
-      <div className="flex h-full flex-col">
-        <header className="flex items-center border-b border-white/5 bg-ink-950/70 px-6 py-2.5 backdrop-blur">
-          <Link to="/" className="flex items-center gap-2">
-            <img src={logo} alt="" className="h-7 w-7" />
-            <span className="wordmark bg-gradient-to-r from-primary-400 via-secondary-400 to-highlight-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
-              Rally
-            </span>
-            {skin.mark && <span className="text-base">{skin.mark}</span>}
-          </Link>
-          <NavLink
-            to="/settings"
-            title="Settings"
-            aria-label="Settings"
-            className={({ isActive }) =>
-              `ml-auto rounded-md p-1.5 transition ${isActive ? 'bg-white/10 text-white' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100'}`
-            }
-          >
-            <GearIcon />
-          </NavLink>
-        </header>
-        <main className="min-h-0 flex-1 overflow-auto">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/pr/:owner/:repo/:number" element={<PrDetail />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </main>
-      </div>
-    </HashRouter>
+    <div className="flex h-full flex-col">
+      <header className="flex items-center border-b border-white/5 bg-ink-950/70 px-6 py-2.5 backdrop-blur">
+        <Link to="/" className="flex items-center gap-2">
+          <img src={logo} alt="" className="h-7 w-7" />
+          <span className="wordmark bg-gradient-to-r from-primary-400 via-secondary-400 to-highlight-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
+            Rally
+          </span>
+          {skin.mark && <span className="text-base">{skin.mark}</span>}
+        </Link>
+        <NavLink
+          to="/settings"
+          title="Settings"
+          aria-label="Settings"
+          className={({ isActive }) =>
+            `ml-auto rounded-md p-1.5 transition ${isActive ? 'bg-white/10 text-white' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100'}`
+          }
+        >
+          <GearIcon />
+        </NavLink>
+      </header>
+      <main className="min-h-0 flex-1 overflow-auto">
+        <Outlet />
+      </main>
+    </div>
   )
+}
+
+const router = createHashRouter([
+  {
+    element: <Layout />,
+    children: [
+      { path: '/', element: <Dashboard /> },
+      { path: '/pr/:owner/:repo/:number', element: <PrDetail /> },
+      { path: '/settings/:section?', element: <Settings /> },
+    ],
+  },
+])
+
+export function App() {
+  return <RouterProvider router={router} />
 }

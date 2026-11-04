@@ -164,6 +164,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('find ~/src -name "*.orig" -delete')).toBe(false)
     expect(bash(`find "${WORK}" -name "*.orig" -delete`)).toBe(true)
     expect(bash('find ~/src -name "*.orig" -exec rm {} \\;')).toBe(false)
+    expect(bash('find ~/.. -name "*.orig" -exec rm {} \\;')).toBe(false)
   })
 
   it('resolves relative paths against the working directory, including cd', () => {
@@ -182,8 +183,8 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('rm -rf /tmp')).toBe(false)
     const dir = mkdtempSync(join(tmpdir(), 'rally-policy-'))
     try {
-      symlinkSync(homedir(), join(dir, 'home'))
-      expect(bash(`echo x >> ${join(dir, 'home', '.zshrc')}`)).toBe(false)
+      symlinkSync(homedir(), join(dir, 'home'), 'junction')
+      expect(bash(`echo x >> "${join(dir, 'home', '.zshrc')}"`)).toBe(false)
       expect(decideToolUse('Write', { file_path: join(dir, 'home', '.zshrc') }, REVIEWING).allow).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -221,6 +222,17 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(decideToolUse('Write', { file_path: '/Users/me/.zshrc' }, REVIEWING).allow).toBe(false)
     expect(decideToolUse('Edit', { file_path: join(SESSION_CWD, 'repo/a.ts') }, REVIEWING).allow).toBe(true)
     expect(decideToolUse('Edit', { file_path: join(homedir(), 'src/rally/a.ts') }, REVIEWING).allow).toBe(false)
+  })
+
+  it.runIf(process.platform === 'win32')('maps Git Bash and Windows paths before checking temp paths', () => {
+    const forwardSlashTemp = tmpdir().replaceAll('\\', '/')
+    const gitBashHome = homedir().replace(/^([A-Za-z]):\\/, '/$1/').replaceAll('\\', '/')
+    expect(bash('echo hi > /tmp/review-pr-x/notes.md')).toBe(true)
+    expect(bash(`echo hi > "${forwardSlashTemp}/review-pr-x/notes.md"`)).toBe(true)
+    expect(bash(`echo hi > "${join(tmpdir(), 'review-pr-x', 'notes.md')}"`)).toBe(true)
+    expect(bash(`echo hi > ${gitBashHome}/.bashrc`)).toBe(false)
+    expect(bash('echo hi > /c/Windows/x.txt')).toBe(false)
+    expect(bash('echo hi > C:/Windows/x.txt')).toBe(false)
   })
 
   it('denies AskUserQuestion, Monitor, and unknown tools', () => {

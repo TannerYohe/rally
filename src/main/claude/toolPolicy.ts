@@ -74,6 +74,14 @@ const PLAIN_WORD = /^[\w./-]+$/
 
 const REMOTE_PATH = /^[\w.@-]+:/
 
+const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[\\/]/
+
+const GIT_BASH_DRIVE = /^\/([a-zA-Z])(?:\/|$)/
+
+const GIT_BASH_TEMP = /^\/tmp(?=\/|$)/
+
+const IS_WINDOWS = process.platform === 'win32'
+
 const WRITABLE_DEVICES = ['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/fd/']
 
 const READ_ONLY_GH_VERBS = new Set(['view', 'diff', 'list', 'status', 'checks', 'checkout', 'clone'])
@@ -120,7 +128,7 @@ const SUBMIT_GRAPHQL_MUTATIONS = [
   'resolveReviewThread',
 ]
 
-const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map(realPath))]
+const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
 
 const WORK_STAND_IN = join(realPath(tmpdir()), 'rally-work')
 
@@ -314,7 +322,7 @@ function decideFind(args: string[], segment: string, state: ShellState, context:
     const command = args.slice(i + 1, end < 0 ? args.length : end)
     for (const root of searchRoots) {
       const decision = decideCommand(
-        command.map((w) => w.replaceAll('{}', join(root, 'match'))),
+        command.map((w) => w.replaceAll('{}', `${root}/match`)),
         segment,
         { ...state },
         context,
@@ -351,13 +359,25 @@ function isWritableTarget(redirect: Redirect, state: ShellState): boolean {
 
 function expandPath(word: string, state: ShellState): string | null {
   if (/^\$(?:\{WORK\}|WORK\b)/.test(word) && !state.workTrusted) return null
-  const expanded = word
-    .replace(/^\$(?:\{WORK\}|WORK\b)/, WORK_STAND_IN)
-    .replace(/^\$(?:\{TMPDIR(?::?-[^}]*)?\}|TMPDIR\b)/, tmpdir())
-    .replace(/^(?:~|\$\{HOME\}|\$HOME\b)(?=\/|$)/, homedir())
-  if (!expanded || /[$`]/.test(expanded) || REMOTE_PATH.test(expanded)) return null
+  const expanded = toNativePath(
+    word
+      .replace(/^\$(?:\{WORK\}|WORK\b)/, WORK_STAND_IN)
+      .replace(/^\$(?:\{TMPDIR(?::?-[^}]*)?\}|TMPDIR\b)/, tmpdir())
+      .replace(/^(?:~|\$\{HOME\}|\$HOME\b)(?=\/|$)/, homedir()),
+  )
+  if (!expanded || /[$`]/.test(expanded) || isRemotePath(expanded)) return null
   if (isAbsolute(expanded)) return resolve(expanded)
   return state.cwd ? resolve(state.cwd, expanded) : null
+}
+
+// Maps Git Bash paths such as /tmp and /c/Users to Windows paths; other platforms keep the path unchanged.
+function toNativePath(path: string): string {
+  if (!IS_WINDOWS) return path
+  return path.replace(GIT_BASH_TEMP, tmpdir()).replace(GIT_BASH_DRIVE, (_, drive: string) => `${drive}:/`)
+}
+
+function isRemotePath(path: string): boolean {
+  return REMOTE_PATH.test(path) && !(IS_WINDOWS && WINDOWS_DRIVE_PATH.test(path))
 }
 
 function realPath(path: string): string {

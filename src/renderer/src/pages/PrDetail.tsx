@@ -170,7 +170,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-primary-400" />}
           {SESSION_STATUS_LABELS[session.status]}
         </span>
-        <span className="text-sm text-zinc-500" title={fullTime(session.createdAt)}>
+        <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>
           started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
         </span>
         {prUpdatedAfterLastTurn && prUpdatedAt && (
@@ -212,7 +212,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </a>
           </span>
           {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
-          {resolvingThreads && <span className="text-zinc-300">Resolving threads…</span>}
+          {resolvingThreads && <span className="text-ink-300">Resolving threads…</span>}
           <button
             className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`}
             disabled={resolvingThreads}
@@ -285,7 +285,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             onKeyDown={sendOnEnter}
           />
           <div className="flex items-center justify-end gap-3">
-            <span className="text-xs text-zinc-500">Enter to send · Shift+Enter for a new line</span>
+            <span className="text-xs text-ink-500">Enter to send · Shift+Enter for a new line</span>
             <button
               className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
               disabled={!canSend}

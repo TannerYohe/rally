@@ -17,12 +17,12 @@ interface Props {
 
 function ThreadState({ row, loaded }: { row: ConcernRow; loaded: boolean }) {
   if (!row.concern.threadId) return null
-  if (!row.thread) return loaded ? <span className="text-zinc-500">not your thread</span> : null
+  if (!row.thread) return loaded ? <span className="text-ink-500">not your thread</span> : null
   return (
     <>
       {row.thread.isResolved && <span className="text-emerald-300">resolved</span>}
-      {row.thread.isOutdated && <span className="text-zinc-500">outdated</span>}
-      <a className="text-sky-400 hover:text-sky-300" href={row.thread.url} target="_blank" rel="noreferrer">
+      {row.thread.isOutdated && <span className="text-ink-500">outdated</span>}
+      <a className="text-primary-400 hover:text-primary-300" href={row.thread.url} target="_blank" rel="noreferrer">
         Thread ↗
       </a>
     </>
@@ -37,7 +37,7 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
       <h3 className="text-sm font-semibold">Earlier comments</h3>
       <ul className="space-y-2">
         {rows.map((row) => (
-          <li key={row.concern.id} className="flex gap-3 rounded-xl border border-white/5 bg-zinc-900/60 p-3 text-sm">
+          <li key={row.concern.id} className="flex gap-3 rounded-xl border border-white/5 bg-ink-900/60 p-3 text-sm">
             {isResolvable(row) ? (
               <input
                 type="checkbox"
@@ -52,17 +52,17 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
             )}
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-semibold text-zinc-200">{row.concern.id}</span>
+                <span className="font-semibold text-ink-200">{row.concern.id}</span>
                 {row.concern.status && (
                   <span className={`rounded px-1.5 py-0.5 ${statusStyle(row.concern.status)}`}>{CONCERN_STATUS_LABELS[row.concern.status]}</span>
                 )}
-                <span className="truncate font-mono text-zinc-400">{row.concern.location}</span>
+                <span className="truncate font-mono text-ink-400">{row.concern.location}</span>
                 <span className="ml-auto flex gap-2">
                   <ThreadState row={row} loaded={threadsLoaded} />
                 </span>
               </div>
-              <div className="text-zinc-200">{row.concern.gist}</div>
-              {row.concern.verdict && <div className="text-zinc-400">{row.concern.verdict}</div>}
+              <div className="text-ink-200">{row.concern.gist}</div>
+              {row.concern.verdict && <div className="text-ink-400">{row.concern.verdict}</div>}
             </div>
           </li>
         ))}
@@ -80,9 +80,9 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
         </div>
       )}
       <div className="flex items-center justify-end gap-3">
-        {!submitted && <span className="text-xs text-zinc-500">Selected threads are also resolved when you post and submit.</span>}
+        {!submitted && <span className="text-xs text-ink-500">Selected threads are also resolved when you post and submit.</span>}
         <button
-          className="rounded-md bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700 disabled:opacity-40"
+          className="rounded-md bg-ink-800 px-3 py-1.5 text-sm hover:bg-ink-700 disabled:opacity-40"
           disabled={disabled || selectedIds.length === 0}
           onClick={resolveSelected}
         >

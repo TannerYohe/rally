@@ -20,7 +20,7 @@ import {
 } from '../lib/prFilters'
 import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { settingsPath } from '../lib/settingsSections'
-import { PHASE_THEME } from '../lib/theme'
+import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 function ReviewStatusNote({ status }: { status: SessionStatus }) {
   const busy = BUSY_STATUSES.includes(status)
@@ -155,7 +155,7 @@ export function Dashboard() {
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-500">
           {refreshedAt && <span>Updated {age(refreshedAt)} ago</span>}
           <button
-            className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-3 py-1.5 font-medium text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400 disabled:opacity-50"
+            className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5`}
             disabled={refreshing}
             onClick={() => window.rally.refreshPrs()}
           >

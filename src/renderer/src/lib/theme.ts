@@ -1,5 +1,8 @@
 import type { Phase } from '@shared/types'
 
+export const PRIMARY_BUTTON_CLASS =
+  'rounded-md bg-gradient-to-r from-sky-500 to-violet-500 font-medium text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400 disabled:opacity-50'
+
 interface PhaseTheme {
   accent: string
   badge: string

@@ -14,6 +14,7 @@ import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
+import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
   'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
@@ -91,7 +92,7 @@ export function Settings() {
             Discard
           </button>
           <button
-            className={`rounded-md px-4 py-1.5 font-medium transition ${dirty ? 'bg-gradient-to-r from-sky-500 to-violet-500 text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+            className={`px-4 py-1.5 transition ${dirty ? PRIMARY_BUTTON_CLASS : 'rounded-md bg-zinc-800 font-medium text-zinc-400 hover:text-zinc-200'}`}
             onClick={save}
           >
             Save

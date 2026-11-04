@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { Blocker } from 'react-router-dom'
+import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 interface Props {
   blocker: Blocker
@@ -42,7 +43,7 @@ export function UnsavedChangesDialog({ blocker, error, onSave }: Props) {
             Discard
           </button>
           <button
-            className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-4 py-1.5 font-medium text-white hover:from-sky-400 hover:to-violet-400"
+            className={`${PRIMARY_BUTTON_CLASS} px-4 py-1.5`}
             onClick={saveAndLeave}
           >
             Save and leave

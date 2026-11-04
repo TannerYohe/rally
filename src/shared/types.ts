@@ -221,6 +221,7 @@ export interface ReviewSession {
   drafts: Drafts | null
   submitted: SubmittedReview | null
   threadResolution?: ThreadResolution | null
+  resolvingThreads?: boolean
   createdAt: string
   updatedAt: string
 }

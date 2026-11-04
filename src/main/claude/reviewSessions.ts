@@ -42,7 +42,8 @@ function removeSessionDir(sessionId: string): void {
   }
 }
 
-function restoreSession(session: ReviewSession): ReviewSession {
+function restoreSession(stored: ReviewSession): ReviewSession {
+  const session = stored.resolvingThreads ? { ...stored, resolvingThreads: false } : stored
   if (!ACTIVE_STATUSES.has(session.status)) return session
   if (session.submitted) return { ...session, status: 'submitted', error: null }
   return { ...session, status: 'error', error: 'Interrupted when Rally closed. Send feedback to resume.' }
@@ -109,7 +110,9 @@ class ReviewSessions extends EventEmitter {
   }
 
   async resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution> {
-    const { pr } = this.byId(sessionId)
+    const { pr, resolvingThreads } = this.byId(sessionId)
+    if (resolvingThreads) throw new Error('Rally is already resolving threads for this review')
+    this.patch(sessionId, () => ({ resolvingThreads: true }), true)
     let result: ThreadResolution
     try {
       result = { at: now(), ...(await resolveOwnThreads(pr, threadIds)) }
@@ -118,7 +121,7 @@ class ReviewSessions extends EventEmitter {
       console.error('Resolving review threads failed', { pr: pr.url, error })
       result = { at: now(), resolved: [], failed: threadIds.map((threadId) => ({ threadId, error: message })) }
     }
-    this.patch(sessionId, () => ({ threadResolution: result }), true)
+    this.patch(sessionId, () => ({ threadResolution: result, resolvingThreads: false }), true)
     return result
   }
 
@@ -127,8 +130,9 @@ class ReviewSessions extends EventEmitter {
   }
 
   discard(sessionId: string): void {
-    this.cancel(sessionId)
     const session = this.byId(sessionId)
+    if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
+    this.cancel(sessionId)
     this.sessions.delete(session.prKey)
     sessionsDir.remove(session.prKey)
     removeSessionDir(sessionId)

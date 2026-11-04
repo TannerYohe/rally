@@ -133,7 +133,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
   const { threads, error: threadsError } = useReviewThreads(session)
   const [resolveOverrides, setResolveOverrides] = useState<Record<string, boolean>>({})
-  const [resolving, setResolving] = useState(false)
+  const resolvingThreads = session.resolvingThreads ?? false
   const priorConcernRows = concernRows(drafts?.priorConcerns ?? [], threads)
   const threadsToResolve = selectedThreadIds(priorConcernRows, resolveOverrides)
 
@@ -164,13 +164,10 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const resolveSelected = async () => {
     if (!window.confirm(`Resolve ${threadsToResolve.length} review thread(s) on GitHub?`)) return
     setActionError(null)
-    setResolving(true)
     try {
       await window.rally.resolveThreads(session.id, threadsToResolve)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setResolving(false)
     }
   }
   const startOver = () => {
@@ -203,7 +200,11 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </button>
           )}
           {!busy && session.status !== 'submitted' && (
-            <button className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700" onClick={startOver}>
+            <button
+              className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700 disabled:opacity-40"
+              disabled={resolvingThreads}
+              onClick={startOver}
+            >
               Start over
             </button>
           )}
@@ -223,8 +224,10 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </a>
           </span>
           {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
+          {resolvingThreads && <span className="text-zinc-300">Resolving threads…</span>}
           <button
             className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`}
+            disabled={resolvingThreads}
             onClick={onStartFollowUp}
           >
             Start follow-up review
@@ -262,7 +265,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               selectedCount={threadsToResolve.length}
               resolution={session.threadResolution ?? null}
               threadsError={threadsError}
-              disabled={busy || resolving}
+              disabled={busy || resolvingThreads}
               submitted={session.status === 'submitted'}
               onSelect={(threadId, selected) => setResolveOverrides((current) => ({ ...current, [threadId]: selected }))}
               onResolveSelected={resolveSelected}

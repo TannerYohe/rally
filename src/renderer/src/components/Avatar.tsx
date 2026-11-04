@@ -4,12 +4,18 @@ interface Props {
   login: string
   url: string | null
   ringClass?: string
-  size?: 'sm' | 'md'
+  size?: 'xs' | 'sm' | 'md'
+}
+
+const DIMENSIONS = {
+  xs: 'h-4 w-4 text-[7px]',
+  sm: 'h-6 w-6 text-[10px]',
+  md: 'h-10 w-10 text-sm',
 }
 
 export function Avatar({ login, url, ringClass = 'ring-zinc-700', size = 'md' }: Props) {
   const [failed, setFailed] = useState(false)
-  const dimensions = size === 'md' ? 'h-10 w-10 text-sm' : 'h-6 w-6 text-[10px]'
+  const dimensions = DIMENSIONS[size]
   if (!url || failed) {
     return (
       <span className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-sky-500 font-semibold uppercase text-white ring-2 ${ringClass} ${dimensions}`}>

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link, useBlocker, useParams } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
   EFFORT_LABELS,
@@ -9,147 +9,365 @@ import {
   type Health,
   type ModelChoice,
 } from '@shared/types'
+import { Avatar } from '../components/Avatar'
+import { Switch } from '../components/Switch'
+import { TagInput } from '../components/TagInput'
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
+import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
+import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
-const toLines = (values: string[]) => values.join('\n')
-const fromLines = (text: string) =>
-  text
-    .split(/[\n,]/)
-    .map((v) => v.trim())
-    .filter(Boolean)
+const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
+  'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
+  reviews: { label: 'Reviews', icon: <SparkleIcon /> },
+  accounts: { label: 'Accounts', icon: <PersonIcon /> },
+}
 
 export function Settings() {
+  const section = sectionFromParam(useParams().section)
+  const [savedConfig, setSavedConfig] = useState<Config | null>(null)
   const [config, setConfig] = useState<Config | null>(null)
-  const [authors, setAuthors] = useState('')
-  const [repos, setRepos] = useState('')
   const [health, setHealth] = useState<Health | null>(null)
-  const [saved, setSaved] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     window.rally.getConfig().then((c) => {
+      setSavedConfig(c)
       setConfig(c)
-      setAuthors(toLines(c.authors))
-      setRepos(toLines(c.repos))
     })
     window.rally.getHealth().then(setHealth)
   }, [])
 
-  if (!config) return null
+  const dirty = JSON.stringify(config) !== JSON.stringify(savedConfig)
+  const blocker = useBlocker(({ nextLocation }) => blocksLeavingSettings(dirty, nextLocation.pathname))
 
-  const save = async () => {
-    await window.rally.saveConfig({ ...config, authors: fromLines(authors), repos: fromLines(repos) })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  if (!config || !savedConfig) return null
+
+  const edit = (next: Config) => {
+    setConfig(next)
+    setSaveError(null)
+  }
+  const save = async (): Promise<string | null> => {
+    try {
+      await window.rally.saveConfig(config)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setSaveError(message)
+      return message
+    }
+    setSaveError(null)
+    setSavedConfig(config)
+    setJustSaved(true)
+    setTimeout(() => setJustSaved(false), 2000)
+    return null
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-6">
-      <div>
-        <Link to="/" className="text-xs text-zinc-500 hover:text-zinc-300">
+    <div className="flex h-full">
+      <nav className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-white/5 bg-zinc-950/40 p-3">
+        <Link to="/" className="mb-3 px-2.5 pt-1 text-xs text-zinc-500 hover:text-zinc-300">
           ← All PRs
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">Settings</h1>
-      </div>
-      <section className="rounded-md border border-zinc-800 p-4 text-sm">
-        <h2 className="mb-2 font-semibold">GitHub</h2>
-        {health === null ? (
-          <p className="text-zinc-400">Checking…</p>
-        ) : health.githubLogin ? (
-          <p className="text-emerald-300">Signed in as {health.githubLogin} via the gh CLI.</p>
-        ) : (
-          <p className="text-rose-300">gh CLI not available: {health.githubError}. Run `gh auth login`.</p>
-        )}
-      </section>
+        <h1 className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Settings</h1>
+        {SETTINGS_SECTIONS.map((id) => (
+          <Link
+            key={id}
+            to={settingsPath(id)}
+            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition ${id === section ? 'bg-white/10 text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+          >
+            {SECTION_NAV[id].icon}
+            {SECTION_NAV[id].label}
+          </Link>
+        ))}
+      </nav>
 
-      <section className="grid grid-cols-2 gap-4">
-        <label className="space-y-1 text-sm">
-          <span className="font-semibold">Authors</span>
-          <span className="block text-xs text-zinc-500">GitHub logins, one per line. Empty means any author.</span>
-          <textarea className="h-48 w-full rounded border border-zinc-800 bg-zinc-900 p-2 font-mono" value={authors} onChange={(e) => setAuthors(e.target.value)} />
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="font-semibold">Repos</span>
-          <span className="block text-xs text-zinc-500">owner/name or owner/* for a whole org, one per line. Empty means any repo.</span>
-          <textarea className="h-48 w-full rounded border border-zinc-800 bg-zinc-900 p-2 font-mono" value={repos} onChange={(e) => setRepos(e.target.value)} />
-        </label>
-      </section>
-
-      <section className="space-y-3 rounded-md border border-zinc-800 p-4 text-sm">
-        <div>
-          <h2 className="font-semibold">Reviews</h2>
-          <p className="text-xs text-zinc-500">Changes apply to the next Claude turn, including turns in reviews already in progress.</p>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="max-w-2xl space-y-5 px-10 py-8">
+            <SectionBody section={section} config={config} health={health} onChange={edit} />
+          </div>
         </div>
-        <label className="block space-y-1">
-          <span className="block text-xs font-medium text-zinc-400">Review skill</span>
-          <input
-            className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono"
-            value={config.reviewSkill}
-            placeholder={DEFAULT_CONFIG.reviewSkill}
-            onChange={(e) => setConfig({ ...config, reviewSkill: e.target.value })}
-          />
-          <span className="block text-xs text-zinc-500">
-            The Claude Code skill a new review runs as <code>/&lt;skill&gt; &lt;PR URL&gt;</code>. Empty means <code>{DEFAULT_CONFIG.reviewSkill}</code>.
-          </span>
-        </label>
-        <div className="grid grid-cols-2 gap-4">
-          <ChoiceSelect
-            label="Review model"
-            labels={MODEL_LABELS}
-            value={config.reviewModel}
-            defaultLabel={systemDefault(health?.claudeDefaults.model)}
-            onChange={(reviewModel) => setConfig({ ...config, reviewModel })}
-          />
-          <ChoiceSelect
-            label="Review effort"
-            labels={EFFORT_LABELS}
-            value={config.reviewEffort}
-            defaultLabel={systemDefault(health?.claudeDefaults.effort)}
-            onChange={(reviewEffort) => setConfig({ ...config, reviewEffort })}
-          />
-          <ChoiceSelect
-            label="Subagent model"
-            labels={MODEL_LABELS}
-            value={config.subagentModel}
-            defaultLabel="System default (inherits)"
-            onChange={(subagentModel) => setConfig({ ...config, subagentModel })}
-          />
-          <ChoiceSelect
-            label="Subagent effort"
-            labels={EFFORT_LABELS}
-            value={config.subagentEffort}
-            defaultLabel="System default"
-            onChange={(subagentEffort) => setConfig({ ...config, subagentEffort })}
-          />
+        <div className="flex items-center gap-3 border-t border-white/5 bg-zinc-950/70 px-10 py-3 text-sm backdrop-blur">
+          <SaveStatus error={saveError} dirty={dirty} justSaved={justSaved} />
+          <button
+            className="ml-auto rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100 disabled:invisible"
+            disabled={!dirty}
+            onClick={() => edit(savedConfig)}
+          >
+            Discard
+          </button>
+          <button
+            className={`px-4 py-1.5 transition ${dirty ? PRIMARY_BUTTON_CLASS : 'rounded-md bg-zinc-800 font-medium text-zinc-400 hover:text-zinc-200'}`}
+            onClick={save}
+          >
+            Save
+          </button>
         </div>
-      </section>
-
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={config.includeReviewRequests}
-          onChange={(e) => setConfig({ ...config, includeReviewRequests: e.target.checked })}
-        />
-        Also include any PR where my review is requested directly (not via a team) or that I have reviewed
-      </label>
-
-      <label className="flex items-center gap-2 text-sm">
-        Refresh every
-        <input
-          type="number"
-          min={1}
-          className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1"
-          value={config.pollIntervalMinutes}
-          onChange={(e) => setConfig({ ...config, pollIntervalMinutes: Math.max(1, Number(e.target.value)) })}
-        />
-        minutes
-      </label>
-
-      <div className="flex items-center gap-3">
-        <button className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-500" onClick={save}>
-          Save
-        </button>
-        {saved && <span className="text-sm text-emerald-300">Saved. Refreshing PRs…</span>}
       </div>
+      {blocker.state === 'blocked' && <UnsavedChangesDialog blocker={blocker} onSave={save} />}
     </div>
+  )
+}
+
+function SaveStatus({ error, dirty, justSaved }: { error: string | null; dirty: boolean; justSaved: boolean }) {
+  if (error) return <span className="min-w-0 truncate text-rose-300" title={error}>Couldn't save: {error}</span>
+  if (dirty) {
+    return (
+      <span className="flex items-center gap-2 text-amber-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+        Unsaved changes
+      </span>
+    )
+  }
+  if (justSaved) return <span className="text-emerald-300">Saved. Refreshing PRs…</span>
+  return null
+}
+
+interface SectionProps {
+  config: Config
+  health: Health | null
+  onChange(config: Config): void
+}
+
+function SectionBody({ section, ...props }: SectionProps & { section: SettingsSection }) {
+  switch (section) {
+    case 'pull-requests':
+      return <PullRequestsSection {...props} />
+    case 'reviews':
+      return <ReviewsSection {...props} />
+    case 'accounts':
+      return <AccountsSection {...props} />
+  }
+}
+
+function PullRequestsSection({ config, onChange }: SectionProps) {
+  return (
+    <>
+      <SectionHeader title="Pull requests">
+        The dashboard lists open PRs whose author and repo both match these lists, plus your review requests if enabled.
+      </SectionHeader>
+      <Card>
+        <StackedRow label="Authors" description="GitHub logins. Leave empty to include any author.">
+          <TagInput
+            values={config.authors}
+            placeholder="Add a GitHub login"
+            renderIcon={(login) => <Avatar login={login} url={`https://github.com/${login}.png?size=40`} size="xs" ringClass="ring-transparent" />}
+            onChange={(authors) => onChange({ ...config, authors })}
+          />
+        </StackedRow>
+        <StackedRow label="Repos" description="owner/name, or owner/* for every repo in an org. Leave empty to include any repo.">
+          <TagInput values={config.repos} placeholder="Add owner/name or owner/*" onChange={(repos) => onChange({ ...config, repos })} />
+        </StackedRow>
+      </Card>
+      <Card>
+        <Row label="Include my review requests" description="Also list any PR where my review is requested directly (not via a team) or that I have reviewed.">
+          <Switch
+            label="Include my review requests"
+            checked={config.includeReviewRequests}
+            onChange={(includeReviewRequests) => onChange({ ...config, includeReviewRequests })}
+          />
+        </Row>
+        <Row label="Refresh interval" description="How often Rally checks GitHub for changes.">
+          <span className="flex items-center gap-2 text-zinc-400">
+            <input
+              type="number"
+              min={1}
+              className={`${FIELD_CLASS} w-16 text-right`}
+              value={config.pollIntervalMinutes}
+              onChange={(e) => onChange({ ...config, pollIntervalMinutes: Math.max(1, Number(e.target.value)) })}
+            />
+            min
+          </span>
+        </Row>
+      </Card>
+    </>
+  )
+}
+
+function ReviewsSection({ config, health, onChange }: SectionProps) {
+  return (
+    <>
+      <SectionHeader title="Reviews">
+        How Rally runs Claude. Changes apply to the next Claude turn, including turns in reviews already in progress.
+      </SectionHeader>
+      <Card>
+        <StackedRow
+          label="Review skill"
+          description={
+            <>
+              The Claude Code skill a new review runs as <code className="text-zinc-300">/&lt;skill&gt; &lt;PR URL&gt;</code>. Empty means{' '}
+              <code className="text-zinc-300">{DEFAULT_CONFIG.reviewSkill}</code>.
+            </>
+          }
+        >
+          <div className={`${FIELD_CLASS} flex items-center font-mono focus-within:ring-violet-400/50`}>
+            <span className="text-zinc-500">/</span>
+            <input
+              className="flex-1 bg-transparent pl-0.5 outline-none placeholder:text-zinc-600"
+              value={config.reviewSkill}
+              placeholder={DEFAULT_CONFIG.reviewSkill}
+              onChange={(e) => onChange({ ...config, reviewSkill: e.target.value })}
+            />
+          </div>
+        </StackedRow>
+      </Card>
+      <ModelEffortCard
+        title="Review session"
+        description="The main Claude session that runs the skill and drafts the review."
+        model={config.reviewModel}
+        effort={config.reviewEffort}
+        modelDefault={systemDefault(health?.claudeDefaults.model)}
+        effortDefault={systemDefault(health?.claudeDefaults.effort)}
+        onModelChange={(reviewModel) => onChange({ ...config, reviewModel })}
+        onEffortChange={(reviewEffort) => onChange({ ...config, reviewEffort })}
+      />
+      <ModelEffortCard
+        title="Subagents"
+        description="Reviewer subagents the skill fans out to."
+        model={config.subagentModel}
+        effort={config.subagentEffort}
+        modelDefault={systemDefault('inherits')}
+        effortDefault={systemDefault(null)}
+        onModelChange={(subagentModel) => onChange({ ...config, subagentModel })}
+        onEffortChange={(subagentEffort) => onChange({ ...config, subagentEffort })}
+      />
+    </>
+  )
+}
+
+function AccountsSection({ health }: SectionProps) {
+  return (
+    <>
+      <SectionHeader title="Accounts">Rally signs in with your existing CLI logins.</SectionHeader>
+      <Card>
+        <Row label="GitHub" description="Read from the gh CLI.">
+          <GithubStatus health={health} />
+        </Row>
+        {health?.githubError && (
+          <div className="px-4 pb-3 font-mono text-xs text-rose-300/80">{health.githubError}</div>
+        )}
+        <Row label="Claude Code" description="Uses your Claude Code login. System defaults come from ~/.claude/settings.json.">
+          {health === null ? (
+            <StatusText tone="pending">Checking…</StatusText>
+          ) : (
+            <span className="text-right text-xs text-zinc-400">
+              Model <span className="text-zinc-200">{health.claudeDefaults.model ?? 'not set'}</span>
+              <br />
+              Effort <span className="text-zinc-200">{health.claudeDefaults.effort ?? 'not set'}</span>
+            </span>
+          )}
+        </Row>
+      </Card>
+    </>
+  )
+}
+
+function GithubStatus({ health }: { health: Health | null }) {
+  if (health === null) return <StatusText tone="pending">Checking…</StatusText>
+  if (health.githubLogin) return <StatusText tone="ok">Signed in as {health.githubLogin}</StatusText>
+  switch (health.githubFailure) {
+    case 'gh_missing':
+      return (
+        <StatusText tone="error">
+          gh CLI not found. Install it and run <code>gh auth login</code>.
+        </StatusText>
+      )
+    case 'signed_out':
+      return (
+        <StatusText tone="error">
+          Not signed in. Run <code>gh auth login</code>.
+        </StatusText>
+      )
+    default:
+      return <StatusText tone="error">Couldn't reach GitHub</StatusText>
+  }
+}
+
+const FIELD_CLASS = 'rounded-md bg-zinc-950/60 px-2.5 py-1.5 text-sm text-zinc-100 outline-none ring-1 ring-zinc-800 focus:ring-violet-400/50'
+
+function SectionHeader({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1 pb-1">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="text-sm text-zinc-400">{children}</p>
+    </div>
+  )
+}
+
+function Card({ title, description, children }: { title?: string; description?: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2">
+      {title && (
+        <div className="px-1">
+          <h3 className="text-sm font-medium text-zinc-200">{title}</h3>
+          {description && <p className="text-xs text-zinc-500">{description}</p>}
+        </div>
+      )}
+      <div className="divide-y divide-white/5 rounded-xl border border-white/5 bg-zinc-900/60">{children}</div>
+    </section>
+  )
+}
+
+function Row({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-6 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm text-zinc-100">{label}</div>
+        {description && <div className="text-xs text-zinc-500">{description}</div>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
+function StackedRow({ label, description, children }: { label: string; description: ReactNode; children: ReactNode }) {
+  return (
+    <div className="space-y-2 px-4 py-3">
+      <div>
+        <div className="text-sm text-zinc-100">{label}</div>
+        <div className="text-xs text-zinc-500">{description}</div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const STATUS_TONES = {
+  pending: { text: 'text-zinc-400', dot: 'bg-zinc-500' },
+  ok: { text: 'text-emerald-300', dot: 'bg-emerald-400' },
+  error: { text: 'text-rose-300', dot: 'bg-rose-400' },
+}
+
+function StatusText({ tone, children }: { tone: keyof typeof STATUS_TONES; children: ReactNode }) {
+  return (
+    <span className={`flex items-center gap-2 text-sm ${STATUS_TONES[tone].text}`}>
+      <span className={`h-2 w-2 rounded-full ${STATUS_TONES[tone].dot}`} />
+      {children}
+    </span>
+  )
+}
+
+interface ModelEffortCardProps {
+  title: string
+  description: string
+  model: ModelChoice | null
+  effort: EffortChoice | null
+  modelDefault: string
+  effortDefault: string
+  onModelChange(model: ModelChoice | null): void
+  onEffortChange(effort: EffortChoice | null): void
+}
+
+function ModelEffortCard({ title, description, model, effort, modelDefault, effortDefault, onModelChange, onEffortChange }: ModelEffortCardProps) {
+  return (
+    <Card title={title} description={description}>
+      <Row label="Model">
+        <ChoiceSelect labels={MODEL_LABELS} value={model} defaultLabel={modelDefault} onChange={onModelChange} />
+      </Row>
+      <Row label="Effort">
+        <ChoiceSelect labels={EFFORT_LABELS} value={effort} defaultLabel={effortDefault} onChange={onEffortChange} />
+      </Row>
+    </Card>
   )
 }
 
@@ -158,29 +376,50 @@ function systemDefault(value: string | null | undefined): string {
 }
 
 interface ChoiceSelectProps<T extends ModelChoice | EffortChoice> {
-  label: string
   labels: Record<T, string>
   value: T | null
   defaultLabel: string
   onChange(value: T | null): void
 }
 
-function ChoiceSelect<T extends ModelChoice | EffortChoice>({ label, labels, value, defaultLabel, onChange }: ChoiceSelectProps<T>) {
+function ChoiceSelect<T extends ModelChoice | EffortChoice>({ labels, value, defaultLabel, onChange }: ChoiceSelectProps<T>) {
   return (
-    <label className="space-y-1">
-      <span className="block text-xs font-medium text-zinc-400">{label}</span>
-      <select
-        className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5"
-        value={value ?? ''}
-        onChange={(e) => onChange((e.target.value || null) as T | null)}
-      >
-        <option value="">{defaultLabel}</option>
-        {(Object.keys(labels) as T[]).map((choice) => (
-          <option key={choice} value={choice}>
-            {labels[choice]}
-          </option>
-        ))}
-      </select>
-    </label>
+    <select className={`${FIELD_CLASS} w-56`} value={value ?? ''} onChange={(e) => onChange((e.target.value || null) as T | null)}>
+      <option value="">{defaultLabel}</option>
+      {(Object.keys(labels) as T[]).map((choice) => (
+        <option key={choice} value={choice}>
+          {labels[choice]}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+function PullRequestIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4m0 0 2.5-2.5M11 6l2.5 2.5" />
+    </svg>
+  )
+}
+
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
+      <path strokeLinejoin="round" d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7Z" />
+      <path strokeLinecap="round" d="M19 16v4M17 18h4" />
+    </svg>
+  )
+}
+
+function PersonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
+      <circle cx="12" cy="8" r="3.5" />
+      <path strokeLinecap="round" d="M5 20c.8-3.5 3.6-5.5 7-5.5s6.2 2 7 5.5" />
+    </svg>
   )
 }

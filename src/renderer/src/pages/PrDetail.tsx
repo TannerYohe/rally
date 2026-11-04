@@ -14,7 +14,7 @@ import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { useFollowActivity, usePrs, useReviewThreads, useSession } from '../lib/hooks'
 import { BUSY_STATUSES, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
-import { PHASE_THEME } from '../lib/theme'
+import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 import { concernRows, selectedThreadIds } from '../lib/threads'
 
 export function PrDetail() {
@@ -101,7 +101,7 @@ export function PrDetail() {
             Runs your review skill from Settings in a Claude session. Nothing is posted to GitHub until you submit.
           </p>
           <button
-            className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400"
+            className={`${PRIMARY_BUTTON_CLASS} px-4 py-2 text-sm`}
             onClick={start}
           >
             Start review
@@ -224,7 +224,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           </span>
           {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
           <button
-            className="ml-auto rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400"
+            className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`}
             onClick={onStartFollowUp}
           >
             Start follow-up review
@@ -301,7 +301,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           <div className="flex items-center justify-end gap-3">
             <span className="text-xs text-zinc-500">Enter to send · Shift+Enter for a new line</span>
             <button
-              className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white hover:from-sky-400 hover:to-violet-400 disabled:opacity-40"
+              className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
               disabled={!canSend}
               onClick={send}
             >

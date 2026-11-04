@@ -113,6 +113,10 @@ The tool policy is a guardrail against accidental writes and destructive command
 
 `src/main/claude/shellCommand.ts` parses comments, heredocs, substitutions, and redirects so the policy sees every command in a Bash call. Blocked calls appear in the activity timeline.
 
+### Skins
+
+Settings → Appearance switches the skin: **Classic**, **Centre Court** (tennis), **Special Stage** (rally motorsport), or **Pep Rally**. Picking a skin previews it, and Save stores it in `config.json` with the other settings; Discard, or leaving Settings without saving, reverts the preview. Components use the `ink`, `primary`, `secondary`, and `highlight` color scales from `src/renderer/src/index.css` instead of raw Tailwind palettes; `src/renderer/src/skins.css` remaps those scales per skin and adds an optional backdrop pattern and wordmark style. Status colors (success, error, warning) and the repo chips in `src/renderer/src/lib/theme.ts` stay on fixed palettes in every skin. To add a skin, add its id to the `SkinId` union in `src/shared/types.ts`, an entry in `SKINS` in `src/renderer/src/lib/skins.ts`, and a `:root[data-skin='<id>']` block in `skins.css` that defines every scale; `skins.test.ts` checks the block.
+
 ## Data
 
 Rally stores config, the PR cache, and summaries as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS), and each review session as its own file under `sessions/` there. Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.

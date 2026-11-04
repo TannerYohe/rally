@@ -35,7 +35,7 @@ export function PrDetail() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div>
-        <Link to="/" className="text-xs text-zinc-500 hover:text-zinc-300">
+        <Link to="/" className="text-xs text-ink-500 hover:text-ink-300">
           ← All PRs
         </Link>
         <div className="mt-3 flex items-start gap-4">
@@ -45,37 +45,37 @@ export function PrDetail() {
               <h1 className="min-w-0 flex-1 text-xl font-semibold">{pr?.title ?? key}</h1>
               {pr && <PhaseBadge phase={pr.phase} />}
             </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-400">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-400">
               <RepoChip repo={repo} number={number} />
               {pr && (
                 <>
                   <span>
-                    by <span className="text-zinc-200">{pr.author}</span>
+                    by <span className="text-ink-200">{pr.author}</span>
                   </span>
                   <span>opened {age(pr.createdAt)} ago</span>
                   <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
                 </>
               )}
-              <a className="text-sky-400 hover:text-sky-300" href={url} target="_blank" rel="noreferrer">
+              <a className="text-primary-400 hover:text-primary-300" href={url} target="_blank" rel="noreferrer">
                 Open on GitHub ↗
               </a>
             </div>
           </div>
         </div>
         {pr?.summary && (
-          <p className="mt-4 rounded-lg bg-violet-500/5 px-4 py-3 text-sm text-zinc-300 ring-1 ring-violet-500/20">
-            <span className="mr-2 text-violet-400">✦</span>
+          <p className="mt-4 rounded-lg bg-secondary-500/5 px-4 py-3 text-sm text-ink-300 ring-1 ring-secondary-500/20">
+            <span className="mr-2 text-secondary-400">✦</span>
             {pr.summary}
           </p>
         )}
       </div>
 
       {pr && (
-        <details className="rounded-xl border border-white/5 bg-zinc-900/40 p-4">
+        <details className="rounded-xl border border-white/5 bg-ink-900/40 p-4">
           <summary className="cursor-pointer text-sm font-semibold">Description and files</summary>
           <div className="mt-3 space-y-4">
             <Markdown>{pr.body || '_No description._'}</Markdown>
-            <ul className="space-y-0.5 font-mono text-xs text-zinc-400">
+            <ul className="space-y-0.5 font-mono text-xs text-ink-400">
               {pr.files.map((file) => (
                 <li key={file}>{file}</li>
               ))}
@@ -93,8 +93,8 @@ export function PrDetail() {
           onStartFollowUp={() => startFollowUp(session)}
         />
       ) : (
-        <div className="rounded-xl border border-dashed border-violet-500/30 bg-violet-500/5 p-8 text-center">
-          <p className="mb-3 text-sm text-zinc-400">
+        <div className="rounded-xl border border-dashed border-secondary-500/30 bg-secondary-500/5 p-8 text-center">
+          <p className="mb-3 text-sm text-ink-400">
             Runs your review skill from Settings in a Claude session. Nothing is posted to GitHub until you submit.
           </p>
           <button
@@ -146,18 +146,18 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
     <section className="space-y-4">
       <div className="flex items-center gap-3">
         <h2 className="text-lg font-semibold">Review</h2>
-        <span className={`text-sm ${session.status === 'error' ? 'text-rose-300' : 'text-zinc-400'}`}>
-          {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />}
+        <span className={`text-sm ${session.status === 'error' ? 'text-rose-300' : 'text-ink-400'}`}>
+          {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-primary-400" />}
           {SESSION_STATUS_LABELS[session.status]}
         </span>
         <div className="ml-auto flex gap-2">
           {busy && (
-            <button className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700" onClick={() => window.rally.cancelReview(session.id)}>
+            <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={() => window.rally.cancelReview(session.id)}>
               Cancel
             </button>
           )}
           {!busy && session.status !== 'submitted' && (
-            <button className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700" onClick={startOver}>
+            <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={startOver}>
               Start over
             </button>
           )}
@@ -186,7 +186,7 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
         </div>
       )}
 
-      <details className="rounded-xl border border-white/5 bg-zinc-900/40 p-4" open={busy || !drafts}>
+      <details className="rounded-xl border border-white/5 bg-ink-900/40 p-4" open={busy || !drafts}>
         <summary className="cursor-pointer text-sm font-semibold">Activity</summary>
         <div className="mt-3">
           <ProgressTimeline timeline={session.timeline} />
@@ -195,9 +195,9 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
 
       {drafts && (
         <>
-          <details className="rounded-xl border border-white/5 bg-zinc-900/40 p-4" open>
+          <details className="rounded-xl border border-white/5 bg-ink-900/40 p-4" open>
             <summary className="cursor-pointer text-sm font-semibold">
-              Report · <span className="font-normal text-zinc-400">{drafts.verdict}</span>
+              Report · <span className="font-normal text-ink-400">{drafts.verdict}</span>
             </summary>
             <div className="mt-3">
               <Markdown>{drafts.reportMarkdown}</Markdown>
@@ -213,8 +213,8 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
               onEdit={(id, edit) => setEdits(({ [id]: _removed, ...rest }) => (edit ? { ...rest, [id]: edit } : rest))}
             />
             {drafts.summaryBody && (
-              <div className="rounded-md border border-zinc-800 bg-zinc-900 p-3 text-sm">
-                <div className="mb-1 text-xs text-zinc-500">Review body</div>
+              <div className="rounded-md border border-ink-800 bg-ink-900 p-3 text-sm">
+                <div className="mb-1 text-xs text-ink-500">Review body</div>
                 {drafts.summaryBody}
               </div>
             )}
@@ -225,7 +225,7 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
       {session.status !== 'submitted' && (
         <div className="space-y-3">
           <textarea
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900 p-3 text-sm"
+            className="w-full rounded-md border border-ink-800 bg-ink-900 p-3 text-sm"
             rows={3}
             placeholder='Feedback for Claude, e.g. "drop 2, make 1 shorter, is finding 4 real?"'
             value={feedback}

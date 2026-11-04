@@ -9,16 +9,19 @@ import {
   type Health,
   type ModelChoice,
 } from '@shared/types'
+import logo from '../../../../resources/icon.svg'
 import { Avatar } from '../components/Avatar'
 import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
+import { SKIN_IDS, SKINS, parseSkinId, useSkinPreview } from '../lib/skins'
 import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
   'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
   reviews: { label: 'Reviews', icon: <SparkleIcon /> },
+  appearance: { label: 'Appearance', icon: <PaletteIcon /> },
   accounts: { label: 'Accounts', icon: <PersonIcon /> },
 }
 
@@ -32,11 +35,14 @@ export function Settings() {
 
   useEffect(() => {
     window.rally.getConfig().then((c) => {
-      setSavedConfig(c)
-      setConfig(c)
+      const loaded = { ...c, skin: parseSkinId(c.skin) }
+      setSavedConfig(loaded)
+      setConfig(loaded)
     })
     window.rally.getHealth().then(setHealth)
   }, [])
+
+  const markSkinSaved = useSkinPreview(config?.skin, savedConfig?.skin)
 
   const dirty = JSON.stringify(config) !== JSON.stringify(savedConfig)
   const blocker = useBlocker(({ nextLocation }) => blocksLeavingSettings(dirty, nextLocation.pathname))
@@ -57,6 +63,7 @@ export function Settings() {
     }
     setSaveError(null)
     setSavedConfig(config)
+    markSkinSaved(config.skin)
     setJustSaved(true)
     setTimeout(() => setJustSaved(false), 2000)
     return null
@@ -64,16 +71,16 @@ export function Settings() {
 
   return (
     <div className="flex h-full">
-      <nav className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-white/5 bg-zinc-950/40 p-3">
-        <Link to="/" className="mb-3 px-2.5 pt-1 text-xs text-zinc-500 hover:text-zinc-300">
+      <nav className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-white/5 bg-ink-950/40 p-3">
+        <Link to="/" className="mb-3 px-2.5 pt-1 text-xs text-ink-500 hover:text-ink-300">
           ← All PRs
         </Link>
-        <h1 className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Settings</h1>
+        <h1 className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-ink-500">Settings</h1>
         {SETTINGS_SECTIONS.map((id) => (
           <Link
             key={id}
             to={settingsPath(id)}
-            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition ${id === section ? 'bg-white/10 text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition ${id === section ? 'bg-white/10 text-white' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100'}`}
           >
             {SECTION_NAV[id].icon}
             {SECTION_NAV[id].label}
@@ -87,17 +94,17 @@ export function Settings() {
             <SectionBody section={section} config={config} health={health} onChange={edit} />
           </div>
         </div>
-        <div className="flex items-center gap-3 border-t border-white/5 bg-zinc-950/70 px-10 py-3 text-sm backdrop-blur">
+        <div className="flex items-center gap-3 border-t border-white/5 bg-ink-950/70 px-10 py-3 text-sm backdrop-blur">
           <SaveStatus error={saveError} dirty={dirty} justSaved={justSaved} />
           <button
-            className="ml-auto rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100 disabled:invisible"
+            className="ml-auto rounded-md px-3 py-1.5 text-ink-400 hover:text-ink-100 disabled:invisible"
             disabled={!dirty}
             onClick={() => edit(savedConfig)}
           >
             Discard
           </button>
           <button
-            className={`px-4 py-1.5 transition ${dirty ? PRIMARY_BUTTON_CLASS : 'rounded-md bg-zinc-800 font-medium text-zinc-400 hover:text-zinc-200'}`}
+            className={`px-4 py-1.5 transition ${dirty ? PRIMARY_BUTTON_CLASS : 'rounded-md bg-ink-800 font-medium text-ink-400 hover:text-ink-200'}`}
             onClick={save}
           >
             Save
@@ -135,6 +142,8 @@ function SectionBody({ section, ...props }: SectionProps & { section: SettingsSe
       return <PullRequestsSection {...props} />
     case 'reviews':
       return <ReviewsSection {...props} />
+    case 'appearance':
+      return <AppearanceSection {...props} />
     case 'accounts':
       return <AccountsSection {...props} />
   }
@@ -168,7 +177,7 @@ function PullRequestsSection({ config, onChange }: SectionProps) {
           />
         </Row>
         <Row label="Refresh interval" description="How often Rally checks GitHub for changes.">
-          <span className="flex items-center gap-2 text-zinc-400">
+          <span className="flex items-center gap-2 text-ink-400">
             <input
               type="number"
               min={1}
@@ -195,15 +204,15 @@ function ReviewsSection({ config, health, onChange }: SectionProps) {
           label="Review skill"
           description={
             <>
-              The Claude Code skill a new review runs as <code className="text-zinc-300">/&lt;skill&gt; &lt;PR URL&gt;</code>. Empty means{' '}
-              <code className="text-zinc-300">{DEFAULT_CONFIG.reviewSkill}</code>.
+              The Claude Code skill a new review runs as <code className="text-ink-300">/&lt;skill&gt; &lt;PR URL&gt;</code>. Empty means{' '}
+              <code className="text-ink-300">{DEFAULT_CONFIG.reviewSkill}</code>.
             </>
           }
         >
-          <div className={`${FIELD_CLASS} flex items-center font-mono focus-within:ring-violet-400/50`}>
-            <span className="text-zinc-500">/</span>
+          <div className={`${FIELD_CLASS} flex items-center font-mono focus-within:ring-secondary-400/50`}>
+            <span className="text-ink-500">/</span>
             <input
-              className="flex-1 bg-transparent pl-0.5 outline-none placeholder:text-zinc-600"
+              className="flex-1 bg-transparent pl-0.5 outline-none placeholder:text-ink-600"
               value={config.reviewSkill}
               placeholder={DEFAULT_CONFIG.reviewSkill}
               onChange={(e) => onChange({ ...config, reviewSkill: e.target.value })}
@@ -235,6 +244,39 @@ function ReviewsSection({ config, health, onChange }: SectionProps) {
   )
 }
 
+function AppearanceSection({ config, onChange }: SectionProps) {
+  return (
+    <>
+      <SectionHeader title="Appearance">A skin changes Rally's colors and backdrop. Picking one previews it until you save or discard.</SectionHeader>
+      <Card title="Skin">
+        <div role="radiogroup" aria-label="Skin" className="divide-y divide-white/5">
+          {SKIN_IDS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={id === config.skin}
+              onClick={() => onChange({ ...config, skin: id })}
+              className={`flex w-full items-center gap-4 px-4 py-3 text-left transition first:rounded-t-xl last:rounded-b-xl ${id === config.skin ? 'bg-white/5' : 'hover:bg-white/[0.03]'}`}
+            >
+              {SKINS[id].mark ? <span className="w-7 text-center text-2xl">{SKINS[id].mark}</span> : <img src={logo} alt="" className="h-7 w-7" />}
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-ink-100">{SKINS[id].name}</span>
+                <span className="block text-xs text-ink-500">{SKINS[id].tagline}</span>
+              </span>
+              <span
+                className={`flex h-4 w-4 items-center justify-center rounded-full ring-1 ${id === config.skin ? 'bg-secondary-500 ring-secondary-500' : 'ring-ink-600'}`}
+              >
+                {id === config.skin && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Card>
+    </>
+  )
+}
+
 function AccountsSection({ health }: SectionProps) {
   return (
     <>
@@ -250,10 +292,10 @@ function AccountsSection({ health }: SectionProps) {
           {health === null ? (
             <StatusText tone="pending">Checking…</StatusText>
           ) : (
-            <span className="text-right text-xs text-zinc-400">
-              Model <span className="text-zinc-200">{health.claudeDefaults.model ?? 'not set'}</span>
+            <span className="text-right text-xs text-ink-400">
+              Model <span className="text-ink-200">{health.claudeDefaults.model ?? 'not set'}</span>
               <br />
-              Effort <span className="text-zinc-200">{health.claudeDefaults.effort ?? 'not set'}</span>
+              Effort <span className="text-ink-200">{health.claudeDefaults.effort ?? 'not set'}</span>
             </span>
           )}
         </Row>
@@ -283,13 +325,13 @@ function GithubStatus({ health }: { health: Health | null }) {
   }
 }
 
-const FIELD_CLASS = 'rounded-md bg-zinc-950/60 px-2.5 py-1.5 text-sm text-zinc-100 outline-none ring-1 ring-zinc-800 focus:ring-violet-400/50'
+const FIELD_CLASS = 'rounded-md bg-ink-950/60 px-2.5 py-1.5 text-sm text-ink-100 outline-none ring-1 ring-ink-800 focus:ring-secondary-400/50'
 
 function SectionHeader({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-1 pb-1">
       <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="text-sm text-zinc-400">{children}</p>
+      <p className="text-sm text-ink-400">{children}</p>
     </div>
   )
 }
@@ -299,11 +341,11 @@ function Card({ title, description, children }: { title?: string; description?: 
     <section className="space-y-2">
       {title && (
         <div className="px-1">
-          <h3 className="text-sm font-medium text-zinc-200">{title}</h3>
-          {description && <p className="text-xs text-zinc-500">{description}</p>}
+          <h3 className="text-sm font-medium text-ink-200">{title}</h3>
+          {description && <p className="text-xs text-ink-500">{description}</p>}
         </div>
       )}
-      <div className="divide-y divide-white/5 rounded-xl border border-white/5 bg-zinc-900/60">{children}</div>
+      <div className="divide-y divide-white/5 rounded-xl border border-white/5 bg-ink-900/60">{children}</div>
     </section>
   )
 }
@@ -312,8 +354,8 @@ function Row({ label, description, children }: { label: string; description?: st
   return (
     <div className="flex items-center gap-6 px-4 py-3">
       <div className="min-w-0 flex-1">
-        <div className="text-sm text-zinc-100">{label}</div>
-        {description && <div className="text-xs text-zinc-500">{description}</div>}
+        <div className="text-sm text-ink-100">{label}</div>
+        {description && <div className="text-xs text-ink-500">{description}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -324,8 +366,8 @@ function StackedRow({ label, description, children }: { label: string; descripti
   return (
     <div className="space-y-2 px-4 py-3">
       <div>
-        <div className="text-sm text-zinc-100">{label}</div>
-        <div className="text-xs text-zinc-500">{description}</div>
+        <div className="text-sm text-ink-100">{label}</div>
+        <div className="text-xs text-ink-500">{description}</div>
       </div>
       {children}
     </div>
@@ -333,7 +375,7 @@ function StackedRow({ label, description, children }: { label: string; descripti
 }
 
 const STATUS_TONES = {
-  pending: { text: 'text-zinc-400', dot: 'bg-zinc-500' },
+  pending: { text: 'text-ink-400', dot: 'bg-ink-500' },
   ok: { text: 'text-emerald-300', dot: 'bg-emerald-400' },
   error: { text: 'text-rose-300', dot: 'bg-rose-400' },
 }
@@ -411,6 +453,20 @@ function SparkleIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
       <path strokeLinejoin="round" d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7Z" />
       <path strokeLinecap="round" d="M19 16v4M17 18h4" />
+    </svg>
+  )
+}
+
+function PaletteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
+      <path
+        strokeLinejoin="round"
+        d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8Z"
+      />
+      <circle cx="7.5" cy="11" r="1" fill="currentColor" />
+      <circle cx="10.5" cy="7" r="1" fill="currentColor" />
+      <circle cx="15" cy="7.5" r="1" fill="currentColor" />
     </svg>
   )
 }

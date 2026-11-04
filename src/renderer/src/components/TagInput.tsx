@@ -35,23 +35,23 @@ export function TagInput({ values, placeholder, renderIcon, onChange }: Props) {
   }
 
   return (
-    <div className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg bg-zinc-950/60 p-1.5 ring-1 ring-zinc-800 focus-within:ring-violet-400/50">
+    <div className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg bg-ink-950/60 p-1.5 ring-1 ring-ink-800 focus-within:ring-secondary-400/50">
       {values.map((value) => (
-        <span key={value} className="inline-flex items-center gap-1.5 rounded-full bg-zinc-800/80 py-0.5 pl-1 pr-1 font-mono text-xs text-zinc-200 ring-1 ring-white/5">
+        <span key={value} className="inline-flex items-center gap-1.5 rounded-full bg-ink-800/80 py-0.5 pl-1 pr-1 font-mono text-xs text-ink-200 ring-1 ring-white/5">
           {renderIcon ? renderIcon(value) : <span className="w-1" />}
           {value}
           <button
             type="button"
             aria-label={`Remove ${value}`}
             onClick={() => remove(value)}
-            className="flex h-4 w-4 items-center justify-center rounded-full text-zinc-500 hover:bg-white/10 hover:text-zinc-100"
+            className="flex h-4 w-4 items-center justify-center rounded-full text-ink-500 hover:bg-white/10 hover:text-ink-100"
           >
             ×
           </button>
         </span>
       ))}
       <input
-        className="min-w-40 flex-1 bg-transparent px-1.5 py-0.5 font-mono text-xs text-zinc-100 outline-none placeholder:font-sans placeholder:text-zinc-600"
+        className="min-w-40 flex-1 bg-transparent px-1.5 py-0.5 font-mono text-xs text-ink-100 outline-none placeholder:font-sans placeholder:text-ink-600"
         value={draft}
         placeholder={values.length ? 'Add another…' : placeholder}
         onChange={(e) => setDraft(e.target.value)}

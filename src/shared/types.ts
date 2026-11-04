@@ -69,6 +69,8 @@ export const EFFORT_LABELS: Record<EffortChoice, string> = {
   max: 'Max',
 }
 
+export type SkinId = 'classic' | 'tennis' | 'motorsport' | 'pep'
+
 export interface Config {
   authors: string[]
   repos: string[]
@@ -79,6 +81,7 @@ export interface Config {
   reviewEffort: EffortChoice | null
   subagentModel: ModelChoice | null
   subagentEffort: EffortChoice | null
+  skin: SkinId
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -91,6 +94,7 @@ export const DEFAULT_CONFIG: Config = {
   reviewEffort: null,
   subagentModel: null,
   subagentEffort: null,
+  skin: 'classic',
 }
 
 export interface PrListState {

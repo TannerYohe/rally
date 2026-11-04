@@ -114,12 +114,19 @@ class ReviewSessions extends EventEmitter {
   }
 
   async resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution> {
-    const { pr, resolvingThreads } = this.byId(sessionId)
+    const { pr, resolvingThreads, drafts } = this.byId(sessionId)
     if (resolvingThreads) throw new Error('Rally is already resolving threads for this review')
+    const concernThreadIds = new Set(priorConcernThreadIds(drafts))
+    const outside = threadIds.filter((id) => !concernThreadIds.has(id))
     this.patch(sessionId, () => ({ resolvingThreads: true }), true)
     let result: ThreadResolution
     try {
-      result = { at: now(), ...(await resolveOwnThreads(pr, threadIds)) }
+      const resolution = await resolveOwnThreads(
+        pr,
+        threadIds.filter((id) => concernThreadIds.has(id)),
+      )
+      const refused = outside.map((threadId) => ({ threadId, error: "Not one of this review's earlier comments" }))
+      result = { at: now(), resolved: resolution.resolved, failed: [...resolution.failed, ...refused] }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error('Resolving review threads failed', { pr: pr.url, error })

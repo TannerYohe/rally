@@ -1,7 +1,6 @@
-import { GraphqlResponseError } from '@octokit/graphql'
 import type { PrRef, ReviewThread, ThreadResolution } from '@shared/types'
 import { github } from './client'
-import { MAX_NODE_IDS } from './queries'
+import { fetchNodes } from './queries'
 
 const THREADS_QUERY = `
   query($ids: [ID!]!) {
@@ -29,10 +28,6 @@ export interface RawThread {
   comments: { nodes: { url: string; author: { login: string } | null }[] }
 }
 
-interface ThreadsResponse {
-  nodes: (RawThread | null)[]
-}
-
 const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 function isOnPr(thread: RawThread, pr: PrRef): boolean {
@@ -48,26 +43,11 @@ export function ownThreads(nodes: (RawThread | null)[], viewer: string, pr: PrRe
   })
 }
 
-async function threadNodes(ids: string[]): Promise<(RawThread | null)[]> {
-  const gh = await github()
-  const nodes: (RawThread | null)[] = []
-  for (let i = 0; i < ids.length; i += MAX_NODE_IDS) {
-    try {
-      const response = await gh.graphql<ThreadsResponse>(THREADS_QUERY, { ids: ids.slice(i, i + MAX_NODE_IDS) })
-      nodes.push(...response.nodes)
-    } catch (error) {
-      if (!(error instanceof GraphqlResponseError) || !error.data) throw error
-      nodes.push(...(error.data as ThreadsResponse).nodes)
-    }
-  }
-  return nodes
-}
-
 export async function fetchOwnThreads(pr: PrRef, threadIds: string[]): Promise<ReviewThread[]> {
   const ids = [...new Set(threadIds)]
   if (ids.length === 0) return []
   const gh = await github()
-  return ownThreads(await threadNodes(ids), gh.login, pr)
+  return ownThreads(await fetchNodes<RawThread>(gh, THREADS_QUERY, ids), gh.login, pr)
 }
 
 export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise<ThreadResolution> {

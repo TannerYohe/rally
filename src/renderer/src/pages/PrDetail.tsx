@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
+import { PriorConcernList } from '../components/PriorConcernList'
 import { Markdown } from '../components/Markdown'
 import { Avatar } from '../components/Avatar'
 import { DiffStat } from '../components/DiffStat'
@@ -11,9 +12,10 @@ import { ProgressTimeline } from '../components/ProgressTimeline'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
-import { useFollowActivity, usePrs, useSession } from '../lib/hooks'
+import { useFollowActivity, usePrs, useReviewThreads, useSession } from '../lib/hooks'
 import { BUSY_STATUSES, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
+import { concernRows, selectedThreadIds } from '../lib/threads'
 
 export function PrDetail() {
   const params = useParams()
@@ -129,6 +131,11 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const lastTurnAt = lastTurnStartedAt(session)
   const activity = useFollowActivity({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
+  const { threads, error: threadsError } = useReviewThreads(session)
+  const [resolveOverrides, setResolveOverrides] = useState<Record<string, boolean>>({})
+  const [resolving, setResolving] = useState(false)
+  const priorConcernRows = concernRows(drafts?.priorConcerns ?? [], threads)
+  const threadsToResolve = selectedThreadIds(priorConcernRows, resolveOverrides)
 
   const run = async (action: () => Promise<void>): Promise<boolean> => {
     setActionError(null)
@@ -153,7 +160,19 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     event.preventDefault()
     if (canSend) void send()
   }
-  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message, []))
+  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message, threadsToResolve))
+  const resolveSelected = async () => {
+    if (!window.confirm(`Resolve ${threadsToResolve.length} review thread(s) on GitHub?`)) return
+    setActionError(null)
+    setResolving(true)
+    try {
+      await window.rally.resolveThreads(session.id, threadsToResolve)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setResolving(false)
+    }
+  }
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)
   }
@@ -236,6 +255,20 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </div>
           </details>
 
+          {priorConcernRows.length > 0 && (
+            <PriorConcernList
+              rows={priorConcernRows}
+              overrides={resolveOverrides}
+              selectedCount={threadsToResolve.length}
+              resolution={session.threadResolution ?? null}
+              threadsError={threadsError}
+              disabled={busy || resolving}
+              submitted={session.status === 'submitted'}
+              onSelect={(threadId, selected) => setResolveOverrides((current) => ({ ...current, [threadId]: selected }))}
+              onResolveSelected={resolveSelected}
+            />
+          )}
+
           <div className="space-y-2">
             <h3 className="text-sm font-semibold">Draft comments</h3>
             <DraftList
@@ -275,7 +308,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               Send to Claude
             </button>
           </div>
-          {drafts && <SubmitBar disabled={busy} commentCount={keptComments} onSubmit={submit} />}
+          {drafts && <SubmitBar disabled={busy} commentCount={keptComments} threadCount={threadsToResolve.length} onSubmit={submit} />}
         </div>
       )}
     </section>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react'
-import type { PrListState, ReviewSession, TimelineEntry } from '@shared/types'
+import type { PrListState, ReviewSession, ReviewThread, TimelineEntry } from '@shared/types'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
 
@@ -86,4 +86,30 @@ export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityI
     },
     unfollow: () => setFollowing(false),
   }
+}
+
+interface ReviewThreadsState {
+  threads: ReviewThread[]
+  error: string | null
+}
+
+export function useReviewThreads(session: ReviewSession): ReviewThreadsState {
+  const threadIds = session.drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
+  const threadKey = threadIds.join(',')
+  const [state, setState] = useState<ReviewThreadsState>({ threads: [], error: null })
+  useEffect(() => {
+    if (!threadKey) {
+      setState({ threads: [], error: null })
+      return
+    }
+    let current = true
+    window.rally.getReviewThreads(session.id).then(
+      (threads) => current && setState({ threads, error: null }),
+      (error) => current && setState({ threads: [], error: error instanceof Error ? error.message : String(error) }),
+    )
+    return () => {
+      current = false
+    }
+  }, [session.id, threadKey, session.threadResolution])
+  return state
 }

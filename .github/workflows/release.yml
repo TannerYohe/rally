@@ -14,6 +14,8 @@ permissions:
 jobs:
   release:
     runs-on: macos-latest
+    outputs:
+      version: ${{ steps.semantic-release.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -25,6 +27,31 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npx semantic-release
+      - id: semantic-release
+        run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows:
+    needs: release
+    if: needs.release.outputs.version != ''
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm version "$VERSION" --no-git-tag-version
+      - run: npm run dist
+      - run: gh release upload "v$VERSION" dist/Rally-*-x64.exe dist/Rally-*-x64.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

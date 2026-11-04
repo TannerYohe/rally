@@ -240,6 +240,9 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash(`echo hi > ${gitBashHome}/.bashrc`)).toBe(false)
     expect(bash('echo hi > /c/Windows/x.txt')).toBe(false)
     expect(bash('echo hi > C:/Windows/x.txt')).toBe(false)
+    const gitBashTemp = tmpdir().replace(/^([A-Za-z]):\\/, '/$1/').replaceAll('\\', '/')
+    expect(bash(`echo hi > "${gitBashTemp}/review-pr-x/notes.md"`)).toBe(true)
+    expect(bash('echo hi > C:/tmp/x.txt')).toBe(false)
   })
 
   it('denies AskUserQuestion, Monitor, and unknown tools', () => {

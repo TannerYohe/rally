@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useBlocker, useParams, type Blocker } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
@@ -12,7 +12,7 @@ import {
 import logo from '../../../../resources/icon.svg'
 import { Avatar } from '../components/Avatar'
 import { TagInput } from '../components/TagInput'
-import { SKINS, saveSkin, useSkin } from '../lib/skins'
+import { SKINS, applySkin } from '../lib/skins'
 
 type SectionId = 'pull-requests' | 'reviews' | 'appearance' | 'accounts'
 
@@ -41,6 +41,18 @@ export function Settings() {
     })
     window.rally.getHealth().then(setHealth)
   }, [])
+
+  const savedSkin = useRef(saved?.skin)
+  savedSkin.current = saved?.skin
+  useEffect(() => {
+    if (config) applySkin(config.skin)
+  }, [config?.skin])
+  useEffect(
+    () => () => {
+      if (savedSkin.current) applySkin(savedSkin.current)
+    },
+    [],
+  )
 
   const dirty = JSON.stringify(config) !== JSON.stringify(saved)
   const blocker = useBlocker(({ nextLocation }) => dirty && !nextLocation.pathname.startsWith('/settings'))
@@ -167,7 +179,7 @@ function SectionBody({ section, ...props }: SectionProps & { section: SectionId 
     case 'reviews':
       return <ReviewsSection {...props} />
     case 'appearance':
-      return <AppearanceSection />
+      return <AppearanceSection {...props} />
     case 'accounts':
       return <AccountsSection {...props} />
   }
@@ -284,11 +296,10 @@ function ReviewsSection({ config, health, onChange }: SectionProps) {
   )
 }
 
-function AppearanceSection() {
-  const current = useSkin()
+function AppearanceSection({ config, onChange }: SectionProps) {
   return (
     <>
-      <SectionHeader title="Appearance">A skin changes Rally's colors and backdrop. It applies right away and doesn't need saving.</SectionHeader>
+      <SectionHeader title="Appearance">A skin changes Rally's colors and backdrop. Picking one previews it until you save or discard.</SectionHeader>
       <Card title="Skin">
         <div role="radiogroup" aria-label="Skin" className="divide-y divide-white/5">
           {SKINS.map((skin) => (
@@ -296,9 +307,9 @@ function AppearanceSection() {
               key={skin.id}
               type="button"
               role="radio"
-              aria-checked={skin.id === current.id}
-              onClick={() => saveSkin(skin.id)}
-              className={`flex w-full items-center gap-4 px-4 py-3 text-left transition first:rounded-t-xl last:rounded-b-xl ${skin.id === current.id ? 'bg-white/5' : 'hover:bg-white/[0.03]'}`}
+              aria-checked={skin.id === config.skin}
+              onClick={() => onChange({ ...config, skin: skin.id })}
+              className={`flex w-full items-center gap-4 px-4 py-3 text-left transition first:rounded-t-xl last:rounded-b-xl ${skin.id === config.skin ? 'bg-white/5' : 'hover:bg-white/[0.03]'}`}
             >
               {skin.mark ? <span className="w-7 text-center text-2xl">{skin.mark}</span> : <img src={logo} alt="" className="h-7 w-7" />}
               <span className="min-w-0 flex-1">
@@ -306,9 +317,9 @@ function AppearanceSection() {
                 <span className="block text-xs text-ink-500">{skin.tagline}</span>
               </span>
               <span
-                className={`flex h-4 w-4 items-center justify-center rounded-full ring-1 ${skin.id === current.id ? 'bg-secondary-500 ring-secondary-500' : 'ring-ink-600'}`}
+                className={`flex h-4 w-4 items-center justify-center rounded-full ring-1 ${skin.id === config.skin ? 'bg-secondary-500 ring-secondary-500' : 'ring-ink-600'}`}
               >
-                {skin.id === current.id && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                {skin.id === config.skin && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
               </span>
             </button>
           ))}

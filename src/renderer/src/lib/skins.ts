@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from 'react'
-
-export type SkinId = 'classic' | 'tennis' | 'motorsport' | 'pep'
+import type { SkinId } from '@shared/types'
 
 export interface Skin {
   id: SkinId
@@ -16,21 +15,14 @@ export const SKINS: Skin[] = [
   { id: 'pep', name: 'Pep Rally', mark: '📣', tagline: 'Navy bleachers, pom-poms, confetti.' },
 ]
 
-const STORAGE_KEY = 'rally.skin'
-
 const listeners = new Set<() => void>()
 
 export function findSkin(id: string | null | undefined): Skin {
   return SKINS.find((skin) => skin.id === id) ?? SKINS[0]
 }
 
-export function loadSkin(): void {
-  document.documentElement.dataset.skin = findSkin(localStorage.getItem(STORAGE_KEY)).id
-}
-
-export function saveSkin(id: SkinId): void {
-  localStorage.setItem(STORAGE_KEY, id)
-  document.documentElement.dataset.skin = id
+export function applySkin(id: string | null | undefined): void {
+  document.documentElement.dataset.skin = findSkin(id).id
   for (const listener of listeners) listener()
 }
 

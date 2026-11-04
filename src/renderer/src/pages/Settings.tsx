@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
@@ -15,7 +15,7 @@ import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
-import { SKIN_IDS, SKINS, applySkin } from '../lib/skins'
+import { SKIN_IDS, SKINS, parseSkinId, useSkinPreview } from '../lib/skins'
 import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
@@ -35,23 +35,14 @@ export function Settings() {
 
   useEffect(() => {
     window.rally.getConfig().then((c) => {
-      setSavedConfig(c)
-      setConfig(c)
+      const loaded = { ...c, skin: parseSkinId(c.skin) }
+      setSavedConfig(loaded)
+      setConfig(loaded)
     })
     window.rally.getHealth().then(setHealth)
   }, [])
 
-  const savedSkin = useRef(savedConfig?.skin)
-  savedSkin.current = savedConfig?.skin
-  useEffect(() => {
-    if (config) applySkin(config.skin)
-  }, [config?.skin])
-  useEffect(
-    () => () => {
-      if (savedSkin.current) applySkin(savedSkin.current)
-    },
-    [],
-  )
+  const markSkinSaved = useSkinPreview(config?.skin, savedConfig?.skin)
 
   const dirty = JSON.stringify(config) !== JSON.stringify(savedConfig)
   const blocker = useBlocker(({ nextLocation }) => blocksLeavingSettings(dirty, nextLocation.pathname))
@@ -72,6 +63,7 @@ export function Settings() {
     }
     setSaveError(null)
     setSavedConfig(config)
+    markSkinSaved(config.skin)
     setJustSaved(true)
     setTimeout(() => setJustSaved(false), 2000)
     return null

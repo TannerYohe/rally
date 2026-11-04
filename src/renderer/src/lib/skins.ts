@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { DEFAULT_CONFIG, type SkinId } from '@shared/types'
 
 export interface Skin {
@@ -30,6 +30,24 @@ export function applySkin(value: string | null | undefined): void {
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+/** Shows the draft skin while mounted and restores the saved skin on unmount; call the returned function after saving. */
+export function useSkinPreview(draft: SkinId | undefined, saved: SkinId | undefined): (skin: SkinId) => void {
+  const savedSkin = useRef(saved)
+  savedSkin.current = saved
+  useEffect(() => {
+    if (draft) applySkin(draft)
+  }, [draft])
+  useEffect(
+    () => () => {
+      if (savedSkin.current) applySkin(savedSkin.current)
+    },
+    [],
+  )
+  return (skin) => {
+    savedSkin.current = skin
+  }
 }
 
 export function useSkin(): Skin {

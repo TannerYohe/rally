@@ -27,6 +27,7 @@ export function Settings() {
   const [config, setConfig] = useState<Config | null>(null)
   const [health, setHealth] = useState<Health | null>(null)
   const [justSaved, setJustSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     window.rally.getConfig().then((c) => {
@@ -41,11 +42,18 @@ export function Settings() {
 
   if (!config || !savedConfig) return null
 
-  const save = async () => {
-    await window.rally.saveConfig(config)
+  const save = async (): Promise<boolean> => {
+    try {
+      await window.rally.saveConfig(config)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error))
+      return false
+    }
+    setSaveError(null)
     setSavedConfig(config)
     setJustSaved(true)
     setTimeout(() => setJustSaved(false), 2000)
+    return true
   }
 
   return (
@@ -74,14 +82,7 @@ export function Settings() {
           </div>
         </div>
         <div className="flex items-center gap-3 border-t border-white/5 bg-zinc-950/70 px-10 py-3 text-sm backdrop-blur">
-          {dirty ? (
-            <span className="flex items-center gap-2 text-amber-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-              Unsaved changes
-            </span>
-          ) : (
-            justSaved && <span className="text-emerald-300">Saved. Refreshing PRs…</span>
-          )}
+          <SaveStatus error={saveError} dirty={dirty} justSaved={justSaved} />
           <button
             className="ml-auto rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100 disabled:invisible"
             disabled={!dirty}
@@ -97,9 +98,23 @@ export function Settings() {
           </button>
         </div>
       </div>
-      {blocker.state === 'blocked' && <UnsavedChangesDialog blocker={blocker} onSave={save} />}
+      {blocker.state === 'blocked' && <UnsavedChangesDialog blocker={blocker} error={saveError} onSave={save} />}
     </div>
   )
+}
+
+function SaveStatus({ error, dirty, justSaved }: { error: string | null; dirty: boolean; justSaved: boolean }) {
+  if (error) return <span className="min-w-0 truncate text-rose-300" title={error}>Couldn't save: {error}</span>
+  if (dirty) {
+    return (
+      <span className="flex items-center gap-2 text-amber-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+        Unsaved changes
+      </span>
+    )
+  }
+  if (justSaved) return <span className="text-emerald-300">Saved. Refreshing PRs…</span>
+  return null
 }
 
 interface SectionProps {

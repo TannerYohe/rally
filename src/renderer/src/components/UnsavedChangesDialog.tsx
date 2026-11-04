@@ -1,7 +1,13 @@
 import { useEffect } from 'react'
 import type { Blocker } from 'react-router-dom'
 
-export function UnsavedChangesDialog({ blocker, onSave }: { blocker: Blocker; onSave(): Promise<void> }) {
+interface Props {
+  blocker: Blocker
+  error: string | null
+  onSave(): Promise<boolean>
+}
+
+export function UnsavedChangesDialog({ blocker, error, onSave }: Props) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && blocker.reset?.()
     window.addEventListener('keydown', onKeyDown)
@@ -9,8 +15,7 @@ export function UnsavedChangesDialog({ blocker, onSave }: { blocker: Blocker; on
   }, [blocker])
 
   const saveAndLeave = async () => {
-    await onSave()
-    blocker.proceed?.()
+    if (await onSave()) blocker.proceed?.()
   }
 
   return (
@@ -27,6 +32,7 @@ export function UnsavedChangesDialog({ blocker, onSave }: { blocker: Blocker; on
             Unsaved changes
           </h2>
           <p className="text-sm text-zinc-400">Save your settings before leaving?</p>
+          {error && <p className="text-sm text-rose-300">Couldn't save: {error}</p>}
         </div>
         <div className="flex items-center gap-2 text-sm">
           <button autoFocus className="rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100" onClick={() => blocker.reset?.()}>

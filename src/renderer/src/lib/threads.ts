@@ -1,6 +1,4 @@
-import type { ConcernStatus, PriorConcern, ReviewThread } from '@shared/types'
-
-const RESOLVE_BY_DEFAULT: ConcernStatus[] = ['addressed', 'moot', 'pushed_back_accept']
+import { RESOLVABLE_CONCERN_STATUSES, type PriorConcern, type ReviewThread } from '@shared/types'
 
 export interface ConcernRow {
   concern: PriorConcern
@@ -18,7 +16,7 @@ export function isResolvable(row: ConcernRow): row is ConcernRow & { thread: Rev
 
 export function isSelected(row: ConcernRow, overrides: Record<string, boolean>): boolean {
   if (!isResolvable(row)) return false
-  return overrides[row.thread.id] ?? (row.concern.status !== undefined && RESOLVE_BY_DEFAULT.includes(row.concern.status))
+  return overrides[row.thread.id] ?? (row.concern.status !== undefined && RESOLVABLE_CONCERN_STATUSES.includes(row.concern.status))
 }
 
 export function selectedThreadIds(rows: ConcernRow[], overrides: Record<string, boolean>): string[] {

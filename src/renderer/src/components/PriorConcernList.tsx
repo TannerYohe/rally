@@ -1,14 +1,11 @@
-import { CONCERN_STATUS_LABELS, type ConcernStatus, type ThreadResolution } from '@shared/types'
+import { CONCERN_STATUS_LABELS, RESOLVABLE_CONCERN_STATUSES, type ConcernStatus, type ThreadResolution } from '@shared/types'
 import type { ThreadResolutionState } from '../lib/hooks'
 import { isResolvable, isSelected, type ConcernRow } from '../lib/threads'
 
-const STATUS_STYLES: Record<ConcernStatus, string> = {
-  addressed: 'bg-emerald-500/15 text-emerald-300',
-  moot: 'bg-emerald-500/15 text-emerald-300',
-  pushed_back_accept: 'bg-emerald-500/15 text-emerald-300',
-  partly: 'bg-yellow-500/15 text-yellow-200',
-  not_addressed: 'bg-rose-500/15 text-rose-300',
-  pushed_back_hold: 'bg-rose-500/15 text-rose-300',
+function statusStyle(status: ConcernStatus): string {
+  if (RESOLVABLE_CONCERN_STATUSES.includes(status)) return 'bg-emerald-500/15 text-emerald-300'
+  if (status === 'partly') return 'bg-yellow-500/15 text-yellow-200'
+  return 'bg-rose-500/15 text-rose-300'
 }
 
 interface Props {
@@ -57,7 +54,7 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-semibold text-zinc-200">{row.concern.id}</span>
                 {row.concern.status && (
-                  <span className={`rounded px-1.5 py-0.5 ${STATUS_STYLES[row.concern.status]}`}>{CONCERN_STATUS_LABELS[row.concern.status]}</span>
+                  <span className={`rounded px-1.5 py-0.5 ${statusStyle(row.concern.status)}`}>{CONCERN_STATUS_LABELS[row.concern.status]}</span>
                 )}
                 <span className="truncate font-mono text-zinc-400">{row.concern.location}</span>
                 <span className="ml-auto flex gap-2">

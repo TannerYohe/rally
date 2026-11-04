@@ -141,6 +141,8 @@ export const CONCERN_STATUSES = ['addressed', 'partly', 'not_addressed', 'pushed
 
 export type ConcernStatus = (typeof CONCERN_STATUSES)[number]
 
+export const RESOLVABLE_CONCERN_STATUSES: ConcernStatus[] = ['addressed', 'moot', 'pushed_back_accept']
+
 export const CONCERN_STATUS_LABELS: Record<ConcernStatus, string> = {
   addressed: 'Addressed',
   partly: 'Partly addressed',

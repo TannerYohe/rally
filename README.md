@@ -115,7 +115,7 @@ The tool policy is a guardrail against accidental writes and destructive command
 
 ### Skins
 
-Settings → Appearance switches the skin: **Classic**, **Centre Court** (tennis), **Special Stage** (rally motorsport), or **Pep Rally**. Picking a skin previews it, and Save stores it in `config.json` with the other settings; Discard, or leaving Settings without saving, reverts the preview. Components use the `ink`, `primary`, `secondary`, and `highlight` color scales from `src/renderer/src/index.css` instead of raw Tailwind palettes; `src/renderer/src/skins.css` remaps those scales per skin and adds an optional backdrop pattern and wordmark style. To add a skin, add a `[data-skin='<id>']` block there and an entry in `src/renderer/src/lib/skins.ts`.
+Settings → Appearance switches the skin: **Classic**, **Centre Court** (tennis), **Special Stage** (rally motorsport), or **Pep Rally**. Picking a skin previews it, and Save stores it in `config.json` with the other settings; Discard, or leaving Settings without saving, reverts the preview. Components use the `ink`, `primary`, `secondary`, and `highlight` color scales from `src/renderer/src/index.css` instead of raw Tailwind palettes; `src/renderer/src/skins.css` remaps those scales per skin and adds an optional backdrop pattern and wordmark style. Status colors (success, error, warning) and the repo chips in `src/renderer/src/lib/theme.ts` stay on fixed palettes in every skin. To add a skin, add its id to the `SkinId` union in `src/shared/types.ts`, an entry in `SKINS` in `src/renderer/src/lib/skins.ts`, and a `:root[data-skin='<id>']` block in `skins.css` that defines every scale; `skins.test.ts` checks the block.
 
 ## Data
 

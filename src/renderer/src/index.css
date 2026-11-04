@@ -2,7 +2,7 @@
 @plugin "@tailwindcss/typography";
 @import "./skins.css";
 
-/* Components use these semantic scales instead of raw palette names so skins.css can remap them. */
+/* Semantic color scales that components use and skins.css remaps per skin. */
 @theme {
   --color-ink-50: var(--color-zinc-50);
   --color-ink-100: var(--color-zinc-100);

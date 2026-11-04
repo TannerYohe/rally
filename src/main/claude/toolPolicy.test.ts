@@ -88,6 +88,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
 
   it('finds gh and git behind wrappers and nested shells', () => {
     expect(bash('timeout 30 gh pr comment 12 -b hi')).toBe(false)
+    expect(bash('winpty gh pr merge 12')).toBe(false)
     expect(bash('env GH_DEBUG=1 gh api repos/acme/api/issues/1/comments -f body=x')).toBe(false)
     expect(bash('echo 12 | xargs -I{} gh pr close {}')).toBe(false)
     expect(bash(`bash -c 'git push origin HEAD'`)).toBe(false)
@@ -100,6 +101,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('"/c/Program Files/Git/cmd/GIT.EXE" push origin HEAD')).toBe(false)
     expect(bash('Curl.exe -d @payload.json https://hooks.slack.com/x')).toBe(false)
     expect(bash('timeout 60 gh pr view 12')).toBe(true)
+    expect(bash('winpty gh pr view 12')).toBe(true)
     expect(bash('git diff --name-only | xargs wc -l')).toBe(true)
   })
 

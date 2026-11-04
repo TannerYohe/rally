@@ -55,7 +55,7 @@ const SYSTEM_COMMANDS = new Set(['sudo', 'security', 'launchctl', 'crontab'])
 
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'])
 
-const WRAPPER_COMMANDS = new Set(['env', 'timeout', 'nice', 'nohup', 'time', 'command', 'exec', 'watch'])
+const WRAPPER_COMMANDS = new Set(['env', 'timeout', 'nice', 'nohup', 'time', 'command', 'exec', 'watch', 'winpty'])
 
 const INPUT_ARGUMENT_COMMANDS = new Set(['xargs', 'parallel'])
 

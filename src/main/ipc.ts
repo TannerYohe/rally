@@ -4,6 +4,7 @@ import type { Config, Health, PrRef, ReviewEvent } from '@shared/types'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { reviewSessions } from './claude/reviewSessions'
 import { github, resetGithubClient } from './github/client'
+import { classifyGithubFailure } from './github/failure'
 import { prList } from './prList'
 import { configFile } from './store'
 
@@ -15,10 +16,10 @@ async function health(): Promise<Health> {
   try {
     resetGithubClient()
     const gh = await github()
-    return { githubLogin: gh.login, githubError: null, claudeDefaults: readClaudeDefaults() }
+    return { githubLogin: gh.login, githubFailure: null, githubError: null, claudeDefaults: readClaudeDefaults() }
   } catch (error) {
     const githubError = error instanceof Error ? error.message : String(error)
-    return { githubLogin: null, githubError, claudeDefaults: readClaudeDefaults() }
+    return { githubLogin: null, githubFailure: classifyGithubFailure(error), githubError, claudeDefaults: readClaudeDefaults() }
   }
 }
 

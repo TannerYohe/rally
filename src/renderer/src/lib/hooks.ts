@@ -110,6 +110,6 @@ export function useReviewThreads(session: ReviewSession): ReviewThreadsState {
     return () => {
       current = false
     }
-  }, [session.id, threadKey, session.threadResolution])
+  }, [session.id, threadKey, session.threadResolution?.at])
   return state
 }

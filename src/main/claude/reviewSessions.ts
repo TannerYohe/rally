@@ -112,11 +112,11 @@ class ReviewSessions extends EventEmitter {
     const { pr } = this.byId(sessionId)
     let result: ThreadResolution
     try {
-      result = await resolveOwnThreads(pr, threadIds)
+      result = { at: now(), ...(await resolveOwnThreads(pr, threadIds)) }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error('Resolving review threads failed', { pr: pr.url, error })
-      result = { resolved: [], failed: threadIds.map((threadId) => ({ threadId, error: message })) }
+      result = { at: now(), resolved: [], failed: threadIds.map((threadId) => ({ threadId, error: message })) }
     }
     this.patch(sessionId, () => ({ threadResolution: result }), true)
     return result

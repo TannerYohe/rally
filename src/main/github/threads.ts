@@ -58,10 +58,10 @@ export async function fetchOwnThreads(pr: PrRef, threadIds: string[]): Promise<R
   return [...lookups.values()].flatMap((lookup) => (lookup.kind === 'own' ? [lookup.thread] : []))
 }
 
-export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise<ThreadResolution> {
+export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise<Omit<ThreadResolution, 'at'>> {
   const gh = await github()
   const lookups = await lookupThreads(pr, threadIds)
-  const result: ThreadResolution = { resolved: [], failed: [] }
+  const result: Omit<ThreadResolution, 'at'> = { resolved: [], failed: [] }
   const fail = (threadId: string, error: string) => {
     console.error('Resolving review thread failed', { pr: pr.url, threadId, error })
     result.failed.push({ threadId, error })

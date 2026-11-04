@@ -186,6 +186,7 @@ export interface ReviewThread {
 }
 
 export interface ThreadResolution {
+  at: string
   resolved: string[]
   failed: { threadId: string; error: string }[]
 }

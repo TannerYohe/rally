@@ -35,9 +35,11 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.getByPr(key))
   ipcMain.handle(IPC.startReview, (_event, pr: PrRef) => reviewSessions.start(pr))
   ipcMain.handle(IPC.sendFeedback, (_event, id: string, message: string) => reviewSessions.feedback(id, message))
-  ipcMain.handle(IPC.submitReview, (_event, id: string, event: ReviewEvent, notes: string) =>
-    reviewSessions.submit(id, event, notes),
+  ipcMain.handle(IPC.submitReview, (_event, id: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]) =>
+    reviewSessions.submit(id, event, notes, resolveThreadIds),
   )
+  ipcMain.handle(IPC.getReviewThreads, (_event, id: string) => reviewSessions.threads(id))
+  ipcMain.handle(IPC.resolveThreads, (_event, id: string, threadIds: string[]) => reviewSessions.resolveThreads(id, threadIds))
   ipcMain.handle(IPC.cancelReview, (_event, id: string) => reviewSessions.cancel(id))
   ipcMain.handle(IPC.discardSession, (_event, id: string) => reviewSessions.discard(id))
 

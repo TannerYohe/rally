@@ -9,11 +9,14 @@ import {
   type PrRef,
   type ReviewEvent,
   type ReviewSession,
+  type ReviewThread,
   type SessionStatus,
   type SubmittedReview,
+  type ThreadResolution,
   type TimelineEntry,
   type TurnMode,
 } from '@shared/types'
+import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList } from '../prList'
 import { configFile, sessionsDir } from '../store'
 import { claudeExecutable } from './executable'
@@ -47,6 +50,7 @@ function restoreSession(session: ReviewSession): ReviewSession {
 class ReviewSessions extends EventEmitter {
   private sessions: Map<string, ReviewSession>
   private controllers = new Map<string, AbortController>()
+  private threadsToResolveOnSubmit = new Map<string, string[]>()
   private pendingFlush: NodeJS.Timeout | null = null
   private dirty = new Set<string>()
 
@@ -91,10 +95,31 @@ class ReviewSessions extends EventEmitter {
     void this.runTurn(sessionId, message, 'refine')
   }
 
-  async submit(sessionId: string, event: ReviewEvent, notes: string): Promise<void> {
+  async submit(sessionId: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
     if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
+    this.threadsToResolveOnSubmit.set(sessionId, resolveThreadIds)
     void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
+  }
+
+  async threads(sessionId: string): Promise<ReviewThread[]> {
+    const session = this.byId(sessionId)
+    const threadIds = session.drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
+    return fetchOwnThreads(session.pr, threadIds)
+  }
+
+  async resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution> {
+    const { pr } = this.byId(sessionId)
+    let result: ThreadResolution
+    try {
+      result = await resolveOwnThreads(pr, threadIds)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('Resolving review threads failed', { pr: pr.url, error })
+      result = { resolved: [], failed: threadIds.map((threadId) => ({ threadId, error: message })) }
+    }
+    this.patch(sessionId, () => ({ threadResolution: result }), true)
+    return result
   }
 
   cancel(sessionId: string): void {
@@ -251,6 +276,7 @@ class ReviewSessions extends EventEmitter {
       )
     } finally {
       this.controllers.delete(sessionId)
+      this.threadsToResolveOnSubmit.delete(sessionId)
       this.patch(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()
     }
@@ -277,6 +303,8 @@ class ReviewSessions extends EventEmitter {
       return
     }
     this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
+    const threadIds = this.threadsToResolveOnSubmit.get(sessionId) ?? []
+    if (threadIds.length > 0) void this.resolveThreads(sessionId, threadIds)
     removeSessionDir(sessionId)
     const pr = this.find(sessionId)?.pr
     if (!pr) return

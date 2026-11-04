@@ -153,7 +153,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     event.preventDefault()
     if (canSend) void send()
   }
-  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message))
+  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message, []))
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)
   }

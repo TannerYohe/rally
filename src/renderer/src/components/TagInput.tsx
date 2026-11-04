@@ -30,7 +30,7 @@ export function TagInput({ values, placeholder, renderIcon, onChange }: Props) {
     const entries = splitEntries(e.clipboardData.getData('text'))
     if (entries.length > 1) {
       e.preventDefault()
-      add(entries)
+      add([...splitEntries(draft), ...entries])
     }
   }
 

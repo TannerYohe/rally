@@ -172,7 +172,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash(`find "${WORK}" -name "*.orig" -delete`)).toBe(true)
     expect(bash('find ~/src -name "*.orig" -exec rm {} \\;')).toBe(false)
     expect(bash('find ~/.. -name "*.orig" -exec rm {} \\;')).toBe(false)
-    expect(bash('find ~tanne -name "*.orig" -delete')).toBe(false)
+    expect(bash('find ~alice -name "*.orig" -delete')).toBe(false)
     expect(bash('rm -rf ~root')).toBe(false)
     expect(bash('rm -rf ~-')).toBe(false)
     expect(bash('rm -rf ~+')).toBe(false)

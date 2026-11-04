@@ -22,50 +22,60 @@ const RESOLVE_MUTATION = `
 
 export interface RawThread {
   id?: string
-  isResolved: boolean
-  isOutdated: boolean
-  pullRequest: { number: number; repository: { name: string; owner: { login: string } } }
-  comments: { nodes: { url: string; author: { login: string } | null }[] }
+  isResolved?: boolean
+  isOutdated?: boolean
+  pullRequest?: { number: number; repository: { name: string; owner: { login: string } } }
+  comments?: { nodes: { url: string; author: { login: string } | null }[] }
 }
+
+export type ThreadLookup = { kind: 'own'; thread: ReviewThread } | { kind: 'not_found' } | { kind: 'not_own' }
+
+const NOT_FOUND_ERROR = 'Review thread not found'
+const NOT_OWN_ERROR = 'Not a review thread you started on this PR'
 
 const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
-function isOnPr(thread: RawThread, pr: PrRef): boolean {
-  const { number, repository } = thread.pullRequest
-  return number === pr.number && sameLogin(repository.name, pr.repo) && sameLogin(repository.owner.login, pr.owner)
+export function lookupThread(node: RawThread | null, viewer: string, pr: PrRef): ThreadLookup {
+  if (!node) return { kind: 'not_found' }
+  const first = node.comments?.nodes?.[0]
+  const onPr = node.pullRequest
+  if (!node.id || !first?.author || !onPr) return { kind: 'not_own' }
+  const samePr = onPr.number === pr.number && sameLogin(onPr.repository.name, pr.repo) && sameLogin(onPr.repository.owner.login, pr.owner)
+  if (!samePr || !sameLogin(first.author.login, viewer)) return { kind: 'not_own' }
+  return { kind: 'own', thread: { id: node.id, url: first.url, isResolved: Boolean(node.isResolved), isOutdated: Boolean(node.isOutdated) } }
 }
 
-export function ownThreads(nodes: (RawThread | null)[], viewer: string, pr: PrRef): ReviewThread[] {
-  return nodes.flatMap((node) => {
-    const first = node?.comments.nodes[0]
-    if (!node?.id || !first?.author || !sameLogin(first.author.login, viewer) || !isOnPr(node, pr)) return []
-    return [{ id: node.id, url: first.url, isResolved: node.isResolved, isOutdated: node.isOutdated }]
-  })
+async function lookupThreads(pr: PrRef, threadIds: string[]): Promise<Map<string, ThreadLookup>> {
+  const ids = [...new Set(threadIds)]
+  if (ids.length === 0) return new Map()
+  const gh = await github()
+  const nodes = await fetchNodes<RawThread>(gh, THREADS_QUERY, ids)
+  return new Map(ids.map((id, index) => [id, lookupThread(nodes[index] ?? null, gh.login, pr)]))
 }
 
 export async function fetchOwnThreads(pr: PrRef, threadIds: string[]): Promise<ReviewThread[]> {
-  const ids = [...new Set(threadIds)]
-  if (ids.length === 0) return []
-  const gh = await github()
-  return ownThreads(await fetchNodes<RawThread>(gh, THREADS_QUERY, ids), gh.login, pr)
+  const lookups = await lookupThreads(pr, threadIds)
+  return [...lookups.values()].flatMap((lookup) => (lookup.kind === 'own' ? [lookup.thread] : []))
 }
 
 export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise<ThreadResolution> {
   const gh = await github()
-  const owned = new Map((await fetchOwnThreads(pr, threadIds)).map((thread) => [thread.id, thread]))
+  const lookups = await lookupThreads(pr, threadIds)
   const result: ThreadResolution = { resolved: [], failed: [] }
-  for (const threadId of new Set(threadIds)) {
-    const thread = owned.get(threadId)
-    if (!thread) {
-      result.failed.push({ threadId, error: 'Not a review thread you started on this PR' })
-    } else if (thread.isResolved) {
-      result.resolved.push(threadId)
-    } else {
+  const fail = (threadId: string, error: string) => {
+    console.error('Resolving review thread failed', { pr: pr.url, threadId, error })
+    result.failed.push({ threadId, error })
+  }
+  for (const [threadId, lookup] of lookups) {
+    if (lookup.kind === 'not_found') fail(threadId, NOT_FOUND_ERROR)
+    else if (lookup.kind === 'not_own') fail(threadId, NOT_OWN_ERROR)
+    else if (lookup.thread.isResolved) result.resolved.push(threadId)
+    else {
       try {
         await gh.graphql(RESOLVE_MUTATION, { threadId })
         result.resolved.push(threadId)
       } catch (error) {
-        result.failed.push({ threadId, error: error instanceof Error ? error.message : String(error) })
+        fail(threadId, error instanceof Error ? error.message : String(error))
       }
     }
   }

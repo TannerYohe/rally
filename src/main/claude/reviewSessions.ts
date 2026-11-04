@@ -46,8 +46,17 @@ function failedResolution(threadIds: string[], error: string): ThreadResolution 
   return { at: now(), resolved: [], failed: threadIds.map((threadId) => ({ threadId, error })) }
 }
 
+const INTERRUPTED_RESOLVE_ERROR = 'Rally closed before resolving this thread. Select it and use Resolve selected to retry.'
+
+function restoreThreadState(stored: ReviewSession): ReviewSession {
+  const pending = stored.threadsToResolveOnSubmit ?? []
+  if (!stored.resolvingThreads && pending.length === 0) return stored
+  const session = { ...stored, resolvingThreads: false, threadsToResolveOnSubmit: undefined }
+  return stored.submitted && pending.length > 0 ? { ...session, threadResolution: failedResolution(pending, INTERRUPTED_RESOLVE_ERROR) } : session
+}
+
 function restoreSession(stored: ReviewSession): ReviewSession {
-  const session = stored.resolvingThreads ? { ...stored, resolvingThreads: false } : stored
+  const session = restoreThreadState(stored)
   if (!ACTIVE_STATUSES.has(session.status)) return session
   if (session.submitted) return { ...session, status: 'submitted', error: null }
   return { ...session, status: 'error', error: 'Interrupted when Rally closed. Send feedback to resume.' }
@@ -56,7 +65,6 @@ function restoreSession(stored: ReviewSession): ReviewSession {
 class ReviewSessions extends EventEmitter {
   private sessions: Map<string, ReviewSession>
   private controllers = new Map<string, AbortController>()
-  private threadsToResolveOnSubmit = new Map<string, string[]>()
   private pendingFlush: NodeJS.Timeout | null = null
   private dirty = new Set<string>()
 
@@ -104,7 +112,7 @@ class ReviewSessions extends EventEmitter {
   async submit(sessionId: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
     if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
-    this.threadsToResolveOnSubmit.set(sessionId, resolveThreadIds)
+    this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
     void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
   }
 
@@ -291,7 +299,7 @@ class ReviewSessions extends EventEmitter {
       )
     } finally {
       this.controllers.delete(sessionId)
-      this.threadsToResolveOnSubmit.delete(sessionId)
+      this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }))
       this.patch(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()
     }
@@ -318,7 +326,7 @@ class ReviewSessions extends EventEmitter {
       return
     }
     this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
-    const threadIds = this.threadsToResolveOnSubmit.get(sessionId) ?? []
+    const threadIds = this.find(sessionId)?.threadsToResolveOnSubmit ?? []
     if (threadIds.length > 0) {
       this.resolveThreads(sessionId, threadIds).catch((error) => {
         const message = error instanceof Error ? error.message : String(error)

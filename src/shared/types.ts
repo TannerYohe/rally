@@ -222,6 +222,7 @@ export interface ReviewSession {
   submitted: SubmittedReview | null
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
+  threadsToResolveOnSubmit?: string[]
   createdAt: string
   updatedAt: string
 }

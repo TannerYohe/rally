@@ -43,7 +43,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/pr/:owner/:repo/:number" element={<PrDetail />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/:section?" element={<Settings />} />
           </Routes>
         </main>
       </div>

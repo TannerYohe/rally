@@ -12,7 +12,7 @@ import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime } from '../lib/format'
 import { usePrs, useSession } from '../lib/hooks'
-import { BUSY_STATUSES, lastTurnStartedAt, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { BUSY_STATUSES, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
 
 export function PrDetail() {
@@ -151,7 +151,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   useEffect(() => {
     if (!busy) setFollowActivity(false)
   }, [busy])
-  const prUpdatedSinceLastTurn = session.status !== 'submitted' && prUpdatedAt !== null && prUpdatedAt > lastTurnAt
+  const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
 
   const run = async (action: () => Promise<void>) => {
     setActionError(null)
@@ -192,7 +192,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         <span className="text-sm text-zinc-500" title={new Date(session.createdAt).toLocaleString()}>
           started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
         </span>
-        {prUpdatedSinceLastTurn && (
+        {prUpdatedAfterLastTurn && prUpdatedAt && (
           <span
             className="text-sm text-amber-300"
             title={`PR updated ${new Date(prUpdatedAt).toLocaleString()}, after Claude's last turn started at ${new Date(lastTurnAt).toLocaleString()}`}

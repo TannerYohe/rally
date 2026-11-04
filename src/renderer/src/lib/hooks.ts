@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { PrListState, ReviewSession } from '@shared/types'
+import { useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react'
+import type { PrListState, ReviewSession, TimelineEntry } from '@shared/types'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
 
@@ -33,4 +33,55 @@ export function usePersistentState<T>(key: string, fallback: T): [T, (value: T) 
     setValue(next)
   }
   return [value, update]
+}
+
+interface FollowActivityInput {
+  busy: boolean
+  hasDrafts: boolean
+  timeline: TimelineEntry[]
+}
+
+interface FollowActivity {
+  ref: RefObject<HTMLDetailsElement | null>
+  open: boolean
+  onToggle(event: SyntheticEvent<HTMLDetailsElement>): void
+  follow(): void
+}
+
+export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityInput): FollowActivity {
+  const ref = useRef<HTMLDetailsElement>(null)
+  const [pinned, setPinned] = useState(false)
+  const [following, setFollowing] = useState(false)
+  const autoOpen = busy || !hasDrafts || pinned
+  const [open, setOpen] = useState(autoOpen)
+
+  useEffect(() => setOpen(autoOpen), [autoOpen])
+
+  useEffect(() => {
+    if (following) ref.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }, [following, open, timeline])
+
+  useEffect(() => {
+    if (!following) return
+    const stopOnScrollUp = (event: WheelEvent) => {
+      if (event.deltaY < 0) setFollowing(false)
+    }
+    window.addEventListener('wheel', stopOnScrollUp)
+    return () => window.removeEventListener('wheel', stopOnScrollUp)
+  }, [following])
+
+  useEffect(() => {
+    if (!busy) setFollowing(false)
+  }, [busy])
+
+  return {
+    ref,
+    open,
+    onToggle: (event) => setOpen(event.currentTarget.open),
+    follow: () => {
+      setPinned(true)
+      setOpen(true)
+      setFollowing(true)
+    },
+  }
 }

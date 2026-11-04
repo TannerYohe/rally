@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
@@ -11,7 +11,7 @@ import { ProgressTimeline } from '../components/ProgressTimeline'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime } from '../lib/format'
-import { usePrs, useSession } from '../lib/hooks'
+import { useFollowActivity, usePrs, useSession } from '../lib/hooks'
 import { BUSY_STATUSES, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
 
@@ -127,30 +127,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const message = feedbackMessage(drafts, edits, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
   const lastTurnAt = lastTurnStartedAt(session)
-  const activityPanel = useRef<HTMLDetailsElement>(null)
-  const [activityPinned, setActivityPinned] = useState(false)
-  const [followActivity, setFollowActivity] = useState(false)
-  const activityAutoOpen = busy || !drafts || activityPinned
-  const [activityOpen, setActivityOpen] = useState(activityAutoOpen)
-
-  useEffect(() => setActivityOpen(activityAutoOpen), [activityAutoOpen])
-
-  useEffect(() => {
-    if (followActivity) activityPanel.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  }, [followActivity, activityOpen, session.timeline])
-
-  useEffect(() => {
-    if (!followActivity) return
-    const stopOnScrollUp = (event: WheelEvent) => {
-      if (event.deltaY < 0) setFollowActivity(false)
-    }
-    window.addEventListener('wheel', stopOnScrollUp)
-    return () => window.removeEventListener('wheel', stopOnScrollUp)
-  }, [followActivity])
-
-  useEffect(() => {
-    if (!busy) setFollowActivity(false)
-  }, [busy])
+  const activity = useFollowActivity({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
 
   const run = async (action: () => Promise<void>) => {
@@ -166,9 +143,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
 
   const canSend = !busy && Boolean(message)
   const send = () => {
-    setActivityPinned(true)
-    setActivityOpen(true)
-    setFollowActivity(true)
+    activity.follow()
     return run(() => window.rally.sendFeedback(session.id, message))
   }
   const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -237,10 +212,10 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       )}
 
       <details
-        ref={activityPanel}
+        ref={activity.ref}
         className="rounded-xl border border-white/5 bg-zinc-900/40 p-4"
-        open={activityOpen}
-        onToggle={(e) => setActivityOpen(e.currentTarget.open)}
+        open={activity.open}
+        onToggle={activity.onToggle}
       >
         <summary className="cursor-pointer text-sm font-semibold">Activity</summary>
         <div className="mt-3">

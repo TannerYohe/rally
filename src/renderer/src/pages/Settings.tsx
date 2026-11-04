@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useBlocker, useParams, type Blocker } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
   EFFORT_LABELS,
@@ -39,9 +39,11 @@ export function Settings() {
     window.rally.getHealth().then(setHealth)
   }, [])
 
+  const dirty = JSON.stringify(config) !== JSON.stringify(saved)
+  const blocker = useBlocker(({ nextLocation }) => dirty && !nextLocation.pathname.startsWith('/settings'))
+
   if (!config || !saved) return null
 
-  const dirty = JSON.stringify(config) !== JSON.stringify(saved)
   const save = async () => {
     await window.rally.saveConfig(config)
     setSaved(config)
@@ -95,6 +97,53 @@ export function Settings() {
             onClick={save}
           >
             Save
+          </button>
+        </div>
+      </div>
+      {blocker.state === 'blocked' && <UnsavedChangesDialog blocker={blocker} onSave={save} />}
+    </div>
+  )
+}
+
+function UnsavedChangesDialog({ blocker, onSave }: { blocker: Blocker; onSave(): Promise<void> }) {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && blocker.reset?.()
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [blocker])
+
+  const saveAndLeave = async () => {
+    await onSave()
+    blocker.proceed?.()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => blocker.reset?.()}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="unsaved-changes-title"
+        className="w-96 space-y-4 rounded-xl border border-white/10 bg-zinc-900 p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="space-y-1">
+          <h2 id="unsaved-changes-title" className="font-semibold">
+            Unsaved changes
+          </h2>
+          <p className="text-sm text-zinc-400">Save your settings before leaving?</p>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <button autoFocus className="rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100" onClick={() => blocker.reset?.()}>
+            Keep editing
+          </button>
+          <button className="ml-auto rounded-md px-3 py-1.5 text-rose-300 hover:bg-rose-500/10" onClick={() => blocker.proceed?.()}>
+            Discard
+          </button>
+          <button
+            className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-4 py-1.5 font-medium text-white hover:from-sky-400 hover:to-violet-400"
+            onClick={saveAndLeave}
+          >
+            Save and leave
           </button>
         </div>
       </div>

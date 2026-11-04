@@ -27,8 +27,8 @@ export class JsonFile<T> {
   }
 
   set(value: T): void {
-    this.value = value
     writeJson(this.path, value)
+    this.value = value
   }
 }
 

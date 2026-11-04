@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { JsonDir } from './jsonFile'
+import { JsonDir, JsonFile } from './jsonFile'
 
 describe('JsonDir', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rally-jsondir-'))
@@ -15,5 +15,16 @@ describe('JsonDir', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     expect(store.readAll()).toEqual([{ id: 1 }])
     expect(log).toHaveBeenCalledWith('Skipping unreadable JSON file', expect.objectContaining({ path: join(dir, 'broken.json') }))
+  })
+})
+
+describe('JsonFile', () => {
+  it('keeps the previous value when the write fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rally-jsonfile-'))
+    writeFileSync(join(dir, 'not-a-dir'), '')
+    const store = new JsonFile<{ n: number }>(join(dir, 'not-a-dir', 'config.json'), { n: 1 })
+    expect(() => store.set({ n: 2 })).toThrow()
+    expect(store.get()).toEqual({ n: 1 })
+    rmSync(dir, { recursive: true, force: true })
   })
 })

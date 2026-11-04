@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
@@ -139,7 +139,13 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     }
   }
 
+  const canSend = !busy && Boolean(message)
   const send = () => run(() => window.rally.sendFeedback(session.id, message))
+  const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (canSend) void send()
+  }
   const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message))
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)
@@ -242,11 +248,13 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             value={feedback}
             disabled={busy}
             onChange={(e) => setFeedback(e.target.value)}
+            onKeyDown={sendOnEnter}
           />
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-3">
+            <span className="text-xs text-zinc-500">Enter to send · Shift+Enter for a new line</span>
             <button
               className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white hover:from-sky-400 hover:to-violet-400 disabled:opacity-40"
-              disabled={busy || !message}
+              disabled={!canSend}
               onClick={send}
             >
               Send to Claude

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG } from '@shared/types'
 import indexCss from '../index.css?raw'
 import skinsCss from '../skins.css?raw'
-import { SKIN_IDS, parseSkinId } from './skins'
+import { SKIN_IDS, SKINS, parseSkinId } from './skins'
 
 describe('parseSkinId', () => {
   it('returns a known skin id', () => {
@@ -33,6 +33,6 @@ describe('skins.css', () => {
 
   it('only styles known skin ids', () => {
     const styledIds = [...skinsCss.matchAll(/data-skin='([a-z]+)'/g)].map((m) => m[1])
-    expect(styledIds.filter((id) => !SKIN_IDS.includes(id as never))).toEqual([])
+    expect(styledIds.filter((id) => !Object.hasOwn(SKINS, id))).toEqual([])
   })
 })

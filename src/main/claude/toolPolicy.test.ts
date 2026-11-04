@@ -88,6 +88,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
 
   it('finds gh and git behind wrappers and nested shells', () => {
     expect(bash('timeout 30 gh pr comment 12 -b hi')).toBe(false)
+    expect(bash('winpty gh pr merge 12')).toBe(false)
     expect(bash('env GH_DEBUG=1 gh api repos/acme/api/issues/1/comments -f body=x')).toBe(false)
     expect(bash('echo 12 | xargs -I{} gh pr close {}')).toBe(false)
     expect(bash(`bash -c 'git push origin HEAD'`)).toBe(false)
@@ -96,7 +97,13 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('/opt/homebrew/bin/gh pr merge 12')).toBe(false)
     expect(bash('f() { gh pr merge 12; }; f')).toBe(false)
     expect(bash('$(which gh) pr merge 12')).toBe(false)
+    expect(bash('gh.exe pr merge 12')).toBe(false)
+    expect(bash('"/c/Program Files/Git/cmd/GIT.EXE" push origin HEAD')).toBe(false)
+    expect(bash('Curl.exe -d @payload.json https://hooks.slack.com/x')).toBe(false)
+    expect(bash('gh.cmd pr merge 12')).toBe(false)
+    expect(bash('gh.exe pr view 12')).toBe(true)
     expect(bash('timeout 60 gh pr view 12')).toBe(true)
+    expect(bash('winpty gh pr view 12')).toBe(true)
     expect(bash('git diff --name-only | xargs wc -l')).toBe(true)
   })
 
@@ -164,6 +171,11 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('find ~/src -name "*.orig" -delete')).toBe(false)
     expect(bash(`find "${WORK}" -name "*.orig" -delete`)).toBe(true)
     expect(bash('find ~/src -name "*.orig" -exec rm {} \\;')).toBe(false)
+    expect(bash('find ~/.. -name "*.orig" -exec rm {} \\;')).toBe(false)
+    expect(bash('find ~alice -name "*.orig" -delete')).toBe(false)
+    expect(bash('rm -rf ~root')).toBe(false)
+    expect(bash('rm -rf ~-')).toBe(false)
+    expect(bash('rm -rf ~+')).toBe(false)
   })
 
   it('resolves relative paths against the working directory, including cd', () => {
@@ -182,8 +194,8 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('rm -rf /tmp')).toBe(false)
     const dir = mkdtempSync(join(tmpdir(), 'rally-policy-'))
     try {
-      symlinkSync(homedir(), join(dir, 'home'))
-      expect(bash(`echo x >> ${join(dir, 'home', '.zshrc')}`)).toBe(false)
+      symlinkSync(homedir(), join(dir, 'home'), 'junction')
+      expect(bash(`echo x >> "${join(dir, 'home', '.zshrc')}"`)).toBe(false)
       expect(decideToolUse('Write', { file_path: join(dir, 'home', '.zshrc') }, REVIEWING).allow).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -221,6 +233,20 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(decideToolUse('Write', { file_path: '/Users/me/.zshrc' }, REVIEWING).allow).toBe(false)
     expect(decideToolUse('Edit', { file_path: join(SESSION_CWD, 'repo/a.ts') }, REVIEWING).allow).toBe(true)
     expect(decideToolUse('Edit', { file_path: join(homedir(), 'src/rally/a.ts') }, REVIEWING).allow).toBe(false)
+  })
+
+  it.runIf(process.platform === 'win32')('maps Git Bash and Windows paths before checking temp paths', () => {
+    const forwardSlashTemp = tmpdir().replaceAll('\\', '/')
+    const gitBashHome = homedir().replace(/^([A-Za-z]):\\/, '/$1/').replaceAll('\\', '/')
+    expect(bash('echo hi > /tmp/review-pr-x/notes.md')).toBe(true)
+    expect(bash(`echo hi > "${forwardSlashTemp}/review-pr-x/notes.md"`)).toBe(true)
+    expect(bash(`echo hi > "${join(tmpdir(), 'review-pr-x', 'notes.md')}"`)).toBe(true)
+    expect(bash(`echo hi > ${gitBashHome}/.bashrc`)).toBe(false)
+    expect(bash('echo hi > /c/Windows/x.txt')).toBe(false)
+    expect(bash('echo hi > C:/Windows/x.txt')).toBe(false)
+    const gitBashTemp = tmpdir().replace(/^([A-Za-z]):\\/, '/$1/').replaceAll('\\', '/')
+    expect(bash(`echo hi > "${gitBashTemp}/review-pr-x/notes.md"`)).toBe(true)
+    expect(bash('echo hi > C:/tmp/x.txt')).toBe(false)
   })
 
   it('denies AskUserQuestion, Monitor, and unknown tools', () => {

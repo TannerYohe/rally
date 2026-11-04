@@ -31,15 +31,20 @@ npm install      # on macOS, postinstall renames the dev Electron.app to Rally f
 npm run dev      # launch with hot reload
 npm test         # unit tests
 npm run typecheck
-npm run dist     # package dist/Rally-<version>-arm64.zip and .dmg
+npm run dist     # package for the current OS (see below)
 npm run icons    # regenerate resources/icon.png from resources/icon.svg
 ```
+
+`npm run dist` builds for the OS it runs on, because npm installs the Agent SDK's Claude Code binary for that platform only:
+
+- macOS: `dist/Rally-<version>-arm64.zip` and `.dmg`
+- Windows: `dist/Rally-<version>-x64.exe` (per-user installer) and `.zip`. The Windows build is unsigned, so SmartScreen warns on first launch.
 
 `electron-builder.yml` configures packaging. The Claude Code binary from the Agent SDK's platform package is unpacked from `app.asar` so it can be spawned, and `src/main/claude/executable.ts` points the SDK at it.
 
 ## Releases
 
-Every push to `main` runs `.github/workflows/release.yml`: typecheck, tests, then [semantic-release](https://semantic-release.gitbook.io/). semantic-release reads the [Conventional Commits](https://www.conventionalcommits.org/) since the last `v*` tag to pick the next version, sets it in `package.json` in the CI checkout, runs `npm run dist`, and creates a GitHub release with the zip and dmg attached. Nothing is committed back to `main`, so `package.json` stays at `0.0.0-development` in the repo.
+Every push to `main` runs `.github/workflows/release.yml`: typecheck, tests, then [semantic-release](https://semantic-release.gitbook.io/). semantic-release reads the [Conventional Commits](https://www.conventionalcommits.org/) since the last `v*` tag to pick the next version, sets it in `package.json` in the CI checkout, runs `npm run dist`, and creates a GitHub release with the macOS zip and dmg attached. A second job then checks out the new tag on a Windows runner, builds the Windows installer and zip, and uploads them to the same release. If that job fails, the macOS release is already out; re-run the failed job to add the Windows files. Nothing is committed back to `main`, so `package.json` stays at `0.0.0-development` in the repo.
 
 | Commit | Release |
 |---|---|
@@ -100,7 +105,7 @@ Settings → Reviews picks the review skill, and the model and effort for the re
 
 The tool policy is a guardrail against accidental writes and destructive commands, not a sandbox; see the warning at the top. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
 
-- GitHub writes are blocked until the submit turn, and in that turn only review creation, review events, and thread replies are allowed, on any repo rather than only the PR under review. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`), `sh -c`, `eval`, and `find -exec`. `git push` is always blocked.
+- GitHub writes are blocked until the submit turn, and in that turn only review creation, review events, and thread replies are allowed, on any repo rather than only the PR under review. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`, `winpty`), `sh -c`, `eval`, and `find -exec`. On Windows, commands run through `cmd` or `powershell` are not checked. `git push` is always blocked.
 - Write, Edit, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, `find -delete`, output redirects) only land under the temp directory. Paths resolve against the working directory, including `cd`, with `..` and symlinks followed, and `$WORK` counts as temp only in the command that assigns it from `mktemp` or a temp path. Paths that `xargs` supplies are unknown, so file-writing commands behind `xargs` are blocked. Git commands that change a checkout, and `gh pr checkout`, only run in temp repos. `git config --global` is read-only.
 - `curl` and `wget` requests with a body or a non-GET method (`curl -d`, `curl -X POST`, `wget --post-data`) are blocked. This is not an exfiltration control: GET URLs, `WebFetch`, and interpreters can still send data out.
 - `ssh`/`scp`, live infrastructure CLIs (`kubectl`, `aws`, `gcloud`, `az`, `terraform`, `helm`), and `sudo` are blocked.

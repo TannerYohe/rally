@@ -293,7 +293,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               Send to Claude
             </button>
           </div>
-          {drafts && <SubmitBar disabled={busy} commentCount={keptComments} threadCount={threadResolution.selectedIds.length} onSubmit={submit} />}
+          {drafts && <SubmitBar disabled={busy || resolvingThreads} commentCount={keptComments} threadCount={threadResolution.selectedIds.length} onSubmit={submit} />}
         </div>
       )}
     </section>

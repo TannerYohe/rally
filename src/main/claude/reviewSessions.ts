@@ -42,6 +42,10 @@ function removeSessionDir(sessionId: string): void {
   }
 }
 
+function failedResolution(threadIds: string[], error: string): ThreadResolution {
+  return { at: now(), resolved: [], failed: threadIds.map((threadId) => ({ threadId, error })) }
+}
+
 function restoreSession(stored: ReviewSession): ReviewSession {
   const session = stored.resolvingThreads ? { ...stored, resolvingThreads: false } : stored
   if (!ACTIVE_STATUSES.has(session.status)) return session
@@ -119,7 +123,7 @@ class ReviewSessions extends EventEmitter {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error('Resolving review threads failed', { pr: pr.url, error })
-      result = { at: now(), resolved: [], failed: threadIds.map((threadId) => ({ threadId, error: message })) }
+      result = failedResolution(threadIds, message)
     }
     this.patch(sessionId, () => ({ threadResolution: result, resolvingThreads: false }), true)
     return result
@@ -308,7 +312,13 @@ class ReviewSessions extends EventEmitter {
     }
     this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
     const threadIds = this.threadsToResolveOnSubmit.get(sessionId) ?? []
-    if (threadIds.length > 0) void this.resolveThreads(sessionId, threadIds)
+    if (threadIds.length > 0) {
+      this.resolveThreads(sessionId, threadIds).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('Resolving review threads after submit failed', { sessionId, error })
+        this.patch(sessionId, () => ({ threadResolution: failedResolution(threadIds, message) }), true)
+      })
+    }
     removeSessionDir(sessionId)
     const pr = this.find(sessionId)?.pr
     if (!pr) return

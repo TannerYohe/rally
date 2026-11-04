@@ -20,3 +20,10 @@ mac:
       arch: arm64
     - target: dmg
       arch: arm64
+win:
+  icon: resources/icon.png
+  target:
+    - target: nsis
+      arch: x64
+    - target: zip
+      arch: x64

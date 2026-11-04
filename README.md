@@ -31,9 +31,14 @@ npm install      # on macOS, postinstall renames the dev Electron.app to Rally f
 npm run dev      # launch with hot reload
 npm test         # unit tests
 npm run typecheck
-npm run dist     # package dist/Rally-<version>-arm64.zip and .dmg
+npm run dist     # package for the current OS (see below)
 npm run icons    # regenerate resources/icon.png from resources/icon.svg
 ```
+
+`npm run dist` builds for the OS it runs on, because npm installs the Agent SDK's Claude Code binary for that platform only:
+
+- macOS: `dist/Rally-<version>-arm64.zip` and `.dmg`
+- Windows: `dist/Rally-<version>-x64.exe` (per-user installer) and `.zip`. The Windows build is unsigned, so SmartScreen warns on first launch.
 
 `electron-builder.yml` configures packaging. The Claude Code binary from the Agent SDK's platform package is unpacked from `app.asar` so it can be spawned, and `src/main/claude/executable.ts` points the SDK at it.
 

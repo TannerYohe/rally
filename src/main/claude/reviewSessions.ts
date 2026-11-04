@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
 import {
+  priorConcernThreadIds,
   prKey,
   type PrRef,
   type ReviewEvent,
@@ -104,8 +105,7 @@ class ReviewSessions extends EventEmitter {
 
   async threads(sessionId: string): Promise<ReviewThread[]> {
     const session = this.byId(sessionId)
-    const threadIds = session.drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
-    return fetchOwnThreads(session.pr, threadIds)
+    return fetchOwnThreads(session.pr, priorConcernThreadIds(session.drafts))
   }
 
   async resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution> {

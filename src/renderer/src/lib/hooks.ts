@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react'
-import type { PrListState, ReviewSession, ReviewThread, TimelineEntry } from '@shared/types'
+import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type TimelineEntry } from '@shared/types'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
 
@@ -94,8 +94,7 @@ interface ReviewThreadsState {
 }
 
 export function useReviewThreads(session: ReviewSession): ReviewThreadsState {
-  const threadIds = session.drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
-  const threadKey = threadIds.join(',')
+  const threadKey = priorConcernThreadIds(session.drafts).join(',')
   const [state, setState] = useState<ReviewThreadsState>({ threads: [], error: null })
   useEffect(() => {
     if (!threadKey) {

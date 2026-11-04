@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import type { Drafts, SubmittedReview } from '@shared/types'
+import { CONCERN_STATUSES, type Drafts, type SubmittedReview } from '@shared/types'
 
 export interface RallyToolHandlers {
   onDrafts(drafts: Drafts): void
@@ -46,7 +46,13 @@ export function createRallyServer(handlers: RallyToolHandlers) {
             location: z.string(),
             gist: z.string(),
             verdict: z.string().describe('One-line verdict with evidence, e.g. "addressed in abc1234"'),
-            status: z.enum(['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot']),
+            status: z
+              .enum(CONCERN_STATUSES)
+              .describe(
+                'addressed: a later commit fixes it. partly: some of it is still missing. not_addressed: the code still has the problem. ' +
+                  'pushed_back_accept: the author disagreed and their argument holds against the code, so the thread can be resolved. ' +
+                  'pushed_back_hold: the author disagreed and the concern still stands. moot: the code it was about is gone.',
+              ),
             thread_id: z
               .string()
               .nullable()

@@ -137,7 +137,9 @@ export interface DraftComment {
   replyToCommentId: number | null
 }
 
-export type ConcernStatus = 'addressed' | 'partly' | 'not_addressed' | 'pushed_back_accept' | 'pushed_back_hold' | 'moot'
+export const CONCERN_STATUSES = ['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot'] as const
+
+export type ConcernStatus = (typeof CONCERN_STATUSES)[number]
 
 export const CONCERN_STATUS_LABELS: Record<ConcernStatus, string> = {
   addressed: 'Addressed',
@@ -155,6 +157,10 @@ export interface PriorConcern {
   verdict: string
   status?: ConcernStatus
   threadId?: string | null
+}
+
+export function priorConcernThreadIds(drafts: Pick<Drafts, 'priorConcerns'> | null): string[] {
+  return drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
 }
 
 export interface Drafts {

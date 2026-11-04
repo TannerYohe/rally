@@ -452,6 +452,55 @@ function isInlineGraphql(query: string): boolean {
   return !query.startsWith('@') && query.includes('{')
 }
 
+const GRAPHQL_TOKEN = /\s+|,|#[^\n]*|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|\.\.\.|[_A-Za-z][_0-9A-Za-z]*|[^\s]/g
+const GRAPHQL_NAME = /^[_A-Za-z]/
+
+function graphqlTokens(query: string): string[] {
+  return (query.match(GRAPHQL_TOKEN) ?? []).filter((token) => !/^(\s+|,|#.*)$/.test(token))
+}
+
+function topLevelMutationFields(query: string): string[] | null {
+  const tokens = graphqlTokens(query)
+  const fields: string[] = []
+  let braces = 0
+  let parens = 0
+  let pendingMutation = false
+  let inMutation = false
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token === '(') parens++
+    else if (token === ')') parens--
+    else if (parens > 0) continue
+    else if (token === '{') {
+      braces++
+      if (braces === 1 && pendingMutation) inMutation = true
+      pendingMutation = false
+    } else if (token === '}') {
+      braces--
+      if (braces === 0) inMutation = false
+    } else if (braces === 0 && token === 'mutation') pendingMutation = true
+    else if (inMutation && braces === 1) {
+      if (token === '...') return null
+      if (token === '@') i++
+      else if (GRAPHQL_NAME.test(token)) {
+        const aliased = tokens[i + 1] === ':'
+        const field = aliased ? tokens[i + 2] : token
+        if (!field || !GRAPHQL_NAME.test(field)) return null
+        fields.push(field)
+        if (aliased) i += 2
+      }
+    }
+  }
+  return braces === 0 && parens === 0 ? fields : null
+}
+
+function onlySubmitMutations(queries: string[]): boolean {
+  const fields = queries.map(topLevelMutationFields)
+  if (fields.some((f) => f === null)) return false
+  const all = fields.flat() as string[]
+  return all.length > 0 && all.every((field) => SUBMIT_GRAPHQL_MUTATIONS.includes(field))
+}
+
 function decideGhApi(args: string[], segment: string, context: PolicyContext): ToolDecision {
   const endpoint = ghApiEndpoint(args)
   if (endpoint === 'graphql') {
@@ -459,7 +508,7 @@ function decideGhApi(args: string[], segment: string, context: PolicyContext): T
       return deny("Rally only inspects inline graphql queries. Pass the query text with `-f query='...'`.")
     }
     if (!/\bmutation\b/.test(segment)) return ALLOW
-    if (context.submitting && SUBMIT_GRAPHQL_MUTATIONS.some((m) => segment.includes(m))) return ALLOW
+    if (context.submitting && onlySubmitMutations(graphqlQueries(args))) return ALLOW
     return deny('GitHub mutations are blocked until the user submits the review from Rally.')
   }
 

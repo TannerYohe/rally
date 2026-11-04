@@ -79,6 +79,25 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash(merge, SUBMITTING)).toBe(false)
   })
 
+  it('blocks a disallowed mutation sent alongside an allowed one during submit', () => {
+    const withResolve = `gh api graphql -f query='mutation { submitPullRequestReview(input:{pullRequestReviewId:"x", event:COMMENT}) { clientMutationId } resolveReviewThread(input:{threadId:"y"}) { thread { id } } }'`
+    const withMerge = `gh api graphql -f query='mutation { addPullRequestReviewThread(input:{}) { clientMutationId } mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
+    expect(bash(withResolve, SUBMITTING)).toBe(false)
+    expect(bash(withMerge, SUBMITTING)).toBe(false)
+  })
+
+  it('does not count allowed names inside strings or nested selections', () => {
+    const inString = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"submitPullRequestReview"}) { clientMutationId } }'`
+    const aliasedMerge = `gh api graphql -f query='mutation { submitPullRequestReview: mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
+    expect(bash(inString, SUBMITTING)).toBe(false)
+    expect(bash(aliasedMerge, SUBMITTING)).toBe(false)
+  })
+
+  it('allows aliased and parameterized review mutations during submit', () => {
+    const withVariables = `gh api graphql -f query='mutation($id: ID!) { done: submitPullRequestReview(input:{pullRequestReviewId:$id, event:COMMENT}) { pullRequestReview { id } } }' -f id=x`
+    expect(bash(withVariables, SUBMITTING)).toBe(true)
+  })
+
   it('leaves resolving review threads to Rally even during submit', () => {
     const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
     expect(bash(resolve, SUBMITTING)).toBe(false)

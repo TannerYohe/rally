@@ -1,4 +1,5 @@
 import { CONCERN_STATUS_LABELS, type ConcernStatus, type ThreadResolution } from '@shared/types'
+import type { ThreadResolutionState } from '../lib/hooks'
 import { isResolvable, isSelected, type ConcernRow } from '../lib/threads'
 
 const STATUS_STYLES: Record<ConcernStatus, string> = {
@@ -11,20 +12,15 @@ const STATUS_STYLES: Record<ConcernStatus, string> = {
 }
 
 interface Props {
-  rows: ConcernRow[]
-  overrides: Record<string, boolean>
-  selectedCount: number
+  state: ThreadResolutionState
   resolution: ThreadResolution | null
-  threadsError: string | null
   disabled: boolean
   submitted: boolean
-  onSelect(threadId: string, selected: boolean): void
-  onResolveSelected(): void
 }
 
-function ThreadState({ row }: { row: ConcernRow }) {
+function ThreadState({ row, loaded }: { row: ConcernRow; loaded: boolean }) {
   if (!row.concern.threadId) return null
-  if (!row.thread) return <span className="text-zinc-500">not your thread</span>
+  if (!row.thread) return loaded ? <span className="text-zinc-500">not your thread</span> : null
   return (
     <>
       {row.thread.isResolved && <span className="text-emerald-300">resolved</span>}
@@ -36,8 +32,8 @@ function ThreadState({ row }: { row: ConcernRow }) {
   )
 }
 
-export function PriorConcernList(props: Props) {
-  const { rows, overrides, selectedCount, resolution, threadsError, disabled, submitted, onSelect, onResolveSelected } = props
+export function PriorConcernList({ state, resolution, disabled, submitted }: Props) {
+  const { rows, overrides, selectedIds, threadsLoaded, threadsError, resolveError, select, resolveSelected } = state
   const concernId = (threadId: string) => rows.find((row) => row.concern.threadId === threadId)?.concern.id ?? threadId
   return (
     <div className="space-y-2">
@@ -52,7 +48,7 @@ export function PriorConcernList(props: Props) {
                 aria-label={`Resolve ${row.concern.id}`}
                 checked={isSelected(row, overrides)}
                 disabled={disabled}
-                onChange={(e) => onSelect(row.thread.id, e.target.checked)}
+                onChange={(e) => select(row.thread.id, e.target.checked)}
               />
             ) : (
               <span className="w-[13px] shrink-0" />
@@ -65,7 +61,7 @@ export function PriorConcernList(props: Props) {
                 )}
                 <span className="truncate font-mono text-zinc-400">{row.concern.location}</span>
                 <span className="ml-auto flex gap-2">
-                  <ThreadState row={row} />
+                  <ThreadState row={row} loaded={threadsLoaded} />
                 </span>
               </div>
               <div className="text-zinc-200">{row.concern.gist}</div>
@@ -75,6 +71,7 @@ export function PriorConcernList(props: Props) {
         ))}
       </ul>
       {threadsError && <div className="text-sm text-rose-300">Couldn't load review threads: {threadsError}</div>}
+      {resolveError && <div className="text-sm text-rose-300">Couldn't resolve threads: {resolveError}</div>}
       {resolution && (
         <div className="space-y-1 text-sm">
           {resolution.resolved.length > 0 && <div className="text-emerald-300">Resolved {resolution.resolved.length} thread(s).</div>}
@@ -89,10 +86,10 @@ export function PriorConcernList(props: Props) {
         {!submitted && <span className="text-xs text-zinc-500">Selected threads are also resolved when you post and submit.</span>}
         <button
           className="rounded-md bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700 disabled:opacity-40"
-          disabled={disabled || selectedCount === 0}
-          onClick={onResolveSelected}
+          disabled={disabled || selectedIds.length === 0}
+          onClick={resolveSelected}
         >
-          Resolve selected ({selectedCount})
+          Resolve selected ({selectedIds.length})
         </button>
       </div>
     </div>

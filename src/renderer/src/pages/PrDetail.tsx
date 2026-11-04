@@ -12,10 +12,9 @@ import { ProgressTimeline } from '../components/ProgressTimeline'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
-import { useFollowActivity, usePrs, useReviewThreads, useSession } from '../lib/hooks'
+import { useFollowActivity, usePrs, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
-import { concernRows, selectedThreadIds } from '../lib/threads'
 
 export function PrDetail() {
   const params = useParams()
@@ -131,11 +130,8 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const lastTurnAt = lastTurnStartedAt(session)
   const activity = useFollowActivity({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
-  const { threads, error: threadsError } = useReviewThreads(session)
-  const [resolveOverrides, setResolveOverrides] = useState<Record<string, boolean>>({})
-  const resolvingThreads = session.resolvingThreads ?? false
-  const priorConcernRows = concernRows(drafts?.priorConcerns ?? [], threads)
-  const threadsToResolve = selectedThreadIds(priorConcernRows, resolveOverrides)
+  const threadResolution = useThreadResolution(session)
+  const resolvingThreads = threadResolution.resolving
 
   const run = async (action: () => Promise<void>): Promise<boolean> => {
     setActionError(null)
@@ -160,16 +156,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     event.preventDefault()
     if (canSend) void send()
   }
-  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message, threadsToResolve))
-  const resolveSelected = async () => {
-    if (!window.confirm(`Resolve ${threadsToResolve.length} review thread(s) on GitHub?`)) return
-    setActionError(null)
-    try {
-      await window.rally.resolveThreads(session.id, threadsToResolve)
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
-    }
-  }
+  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message, threadResolution.selectedIds))
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)
   }
@@ -258,17 +245,12 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </div>
           </details>
 
-          {priorConcernRows.length > 0 && (
+          {threadResolution.rows.length > 0 && (
             <PriorConcernList
-              rows={priorConcernRows}
-              overrides={resolveOverrides}
-              selectedCount={threadsToResolve.length}
+              state={threadResolution}
               resolution={session.threadResolution ?? null}
-              threadsError={threadsError}
               disabled={busy || resolvingThreads}
               submitted={session.status === 'submitted'}
-              onSelect={(threadId, selected) => setResolveOverrides((current) => ({ ...current, [threadId]: selected }))}
-              onResolveSelected={resolveSelected}
             />
           )}
 
@@ -311,7 +293,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               Send to Claude
             </button>
           </div>
-          {drafts && <SubmitBar disabled={busy} commentCount={keptComments} threadCount={threadsToResolve.length} onSubmit={submit} />}
+          {drafts && <SubmitBar disabled={busy} commentCount={keptComments} threadCount={threadResolution.selectedIds.length} onSubmit={submit} />}
         </div>
       )}
     </section>

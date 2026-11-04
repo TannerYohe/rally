@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react'
 import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type TimelineEntry } from '@shared/types'
+import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
 
@@ -89,26 +90,65 @@ export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityI
 }
 
 interface ReviewThreadsState {
+  key: string | null
   threads: ReviewThread[]
   error: string | null
 }
 
-export function useReviewThreads(session: ReviewSession): ReviewThreadsState {
+function useReviewThreads(session: ReviewSession): { threads: ReviewThread[]; loaded: boolean; error: string | null } {
   const threadKey = priorConcernThreadIds(session.drafts).join(',')
-  const [state, setState] = useState<ReviewThreadsState>({ threads: [], error: null })
+  const [state, setState] = useState<ReviewThreadsState>({ key: null, threads: [], error: null })
   useEffect(() => {
-    if (!threadKey) {
-      setState({ threads: [], error: null })
-      return
-    }
+    if (!threadKey) return
     let current = true
     window.rally.getReviewThreads(session.id).then(
-      (threads) => current && setState({ threads, error: null }),
-      (error) => current && setState({ threads: [], error: error instanceof Error ? error.message : String(error) }),
+      (threads) => current && setState({ key: threadKey, threads, error: null }),
+      (error) => current && setState({ key: threadKey, threads: [], error: error instanceof Error ? error.message : String(error) }),
     )
     return () => {
       current = false
     }
   }, [session.id, threadKey, session.threadResolution?.at])
-  return state
+  if (!threadKey) return { threads: [], loaded: true, error: null }
+  const loaded = state.key === threadKey
+  return { threads: loaded ? state.threads : [], loaded: loaded && !state.error, error: loaded ? state.error : null }
+}
+
+export interface ThreadResolutionState {
+  rows: ConcernRow[]
+  overrides: Record<string, boolean>
+  selectedIds: string[]
+  threadsLoaded: boolean
+  threadsError: string | null
+  resolveError: string | null
+  resolving: boolean
+  select(threadId: string, selected: boolean): void
+  resolveSelected(): Promise<void>
+}
+
+export function useThreadResolution(session: ReviewSession): ThreadResolutionState {
+  const { threads, loaded, error } = useReviewThreads(session)
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({})
+  const [resolveError, setResolveError] = useState<string | null>(null)
+  const rows = concernRows(session.drafts?.priorConcerns ?? [], threads)
+  const selectedIds = selectedThreadIds(rows, overrides)
+  return {
+    rows,
+    overrides,
+    selectedIds,
+    threadsLoaded: loaded,
+    threadsError: error,
+    resolveError,
+    resolving: session.resolvingThreads ?? false,
+    select: (threadId, selected) => setOverrides((current) => ({ ...current, [threadId]: selected })),
+    resolveSelected: async () => {
+      if (!window.confirm(`Resolve ${selectedIds.length} review thread(s) on GitHub?`)) return
+      setResolveError(null)
+      try {
+        await window.rally.resolveThreads(session.id, selectedIds)
+      } catch (failure) {
+        setResolveError(failure instanceof Error ? failure.message : String(failure))
+      }
+    },
+  }
 }

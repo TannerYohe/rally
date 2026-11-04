@@ -110,8 +110,11 @@ export interface ClaudeDefaults {
   effort: string | null
 }
 
+export type GithubFailure = 'gh_missing' | 'signed_out' | 'unreachable'
+
 export interface Health {
   githubLogin: string | null
+  githubFailure: GithubFailure | null
   githubError: string | null
   claudeDefaults: ClaudeDefaults
 }

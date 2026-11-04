@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useBlocker, useParams, type Blocker } from 'react-router-dom'
+import { Link, useBlocker, useParams } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
   EFFORT_LABELS,
@@ -11,39 +11,38 @@ import {
 } from '@shared/types'
 import logo from '../../../../resources/icon.svg'
 import { Avatar } from '../components/Avatar'
+import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
+import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
 import { SKINS, applySkin } from '../lib/skins'
+import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
-type SectionId = 'pull-requests' | 'reviews' | 'appearance' | 'accounts'
-
-const SECTIONS: { id: SectionId; label: string; icon: ReactNode }[] = [
-  { id: 'pull-requests', label: 'Pull requests', icon: <PullRequestIcon /> },
-  { id: 'reviews', label: 'Reviews', icon: <SparkleIcon /> },
-  { id: 'appearance', label: 'Appearance', icon: <PaletteIcon /> },
-  { id: 'accounts', label: 'Accounts', icon: <PersonIcon /> },
-]
-
-function sectionFromParam(param: string | undefined): SectionId {
-  return SECTIONS.find((s) => s.id === param)?.id ?? 'pull-requests'
+const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
+  'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
+  reviews: { label: 'Reviews', icon: <SparkleIcon /> },
+  appearance: { label: 'Appearance', icon: <PaletteIcon /> },
+  accounts: { label: 'Accounts', icon: <PersonIcon /> },
 }
 
 export function Settings() {
   const section = sectionFromParam(useParams().section)
-  const [saved, setSaved] = useState<Config | null>(null)
+  const [savedConfig, setSavedConfig] = useState<Config | null>(null)
   const [config, setConfig] = useState<Config | null>(null)
   const [health, setHealth] = useState<Health | null>(null)
   const [justSaved, setJustSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     window.rally.getConfig().then((c) => {
-      setSaved(c)
+      setSavedConfig(c)
       setConfig(c)
     })
     window.rally.getHealth().then(setHealth)
   }, [])
 
-  const savedSkin = useRef(saved?.skin)
-  savedSkin.current = saved?.skin
+  const savedSkin = useRef(savedConfig?.skin)
+  savedSkin.current = savedConfig?.skin
   useEffect(() => {
     if (config) applySkin(config.skin)
   }, [config?.skin])
@@ -54,16 +53,28 @@ export function Settings() {
     [],
   )
 
-  const dirty = JSON.stringify(config) !== JSON.stringify(saved)
-  const blocker = useBlocker(({ nextLocation }) => dirty && !nextLocation.pathname.startsWith('/settings'))
+  const dirty = JSON.stringify(config) !== JSON.stringify(savedConfig)
+  const blocker = useBlocker(({ nextLocation }) => blocksLeavingSettings(dirty, nextLocation.pathname))
 
-  if (!config || !saved) return null
+  if (!config || !savedConfig) return null
 
-  const save = async () => {
-    await window.rally.saveConfig(config)
-    setSaved(config)
+  const edit = (next: Config) => {
+    setConfig(next)
+    setSaveError(null)
+  }
+  const save = async (): Promise<string | null> => {
+    try {
+      await window.rally.saveConfig(config)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setSaveError(message)
+      return message
+    }
+    setSaveError(null)
+    setSavedConfig(config)
     setJustSaved(true)
     setTimeout(() => setJustSaved(false), 2000)
+    return null
   }
 
   return (
@@ -73,14 +84,14 @@ export function Settings() {
           ← All PRs
         </Link>
         <h1 className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-ink-500">Settings</h1>
-        {SECTIONS.map((s) => (
+        {SETTINGS_SECTIONS.map((id) => (
           <Link
-            key={s.id}
-            to={`/settings/${s.id}`}
-            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition ${s.id === section ? 'bg-white/10 text-white' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100'}`}
+            key={id}
+            to={settingsPath(id)}
+            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition ${id === section ? 'bg-white/10 text-white' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100'}`}
           >
-            {s.icon}
-            {s.label}
+            {SECTION_NAV[id].icon}
+            {SECTION_NAV[id].label}
           </Link>
         ))}
       </nav>
@@ -88,27 +99,20 @@ export function Settings() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="max-w-2xl space-y-5 px-10 py-8">
-            <SectionBody section={section} config={config} health={health} onChange={setConfig} />
+            <SectionBody section={section} config={config} health={health} onChange={edit} />
           </div>
         </div>
         <div className="flex items-center gap-3 border-t border-white/5 bg-ink-950/70 px-10 py-3 text-sm backdrop-blur">
-          {dirty ? (
-            <span className="flex items-center gap-2 text-amber-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-              Unsaved changes
-            </span>
-          ) : (
-            justSaved && <span className="text-emerald-300">Saved. Refreshing PRs…</span>
-          )}
+          <SaveStatus error={saveError} dirty={dirty} justSaved={justSaved} />
           <button
             className="ml-auto rounded-md px-3 py-1.5 text-ink-400 hover:text-ink-100 disabled:invisible"
             disabled={!dirty}
-            onClick={() => setConfig(saved)}
+            onClick={() => edit(savedConfig)}
           >
             Discard
           </button>
           <button
-            className={`rounded-md px-4 py-1.5 font-medium transition ${dirty ? 'bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-lg shadow-secondary-500/20 hover:from-primary-400 hover:to-secondary-400' : 'bg-ink-800 text-ink-400 hover:text-ink-200'}`}
+            className={`px-4 py-1.5 transition ${dirty ? PRIMARY_BUTTON_CLASS : 'rounded-md bg-ink-800 font-medium text-ink-400 hover:text-ink-200'}`}
             onClick={save}
           >
             Save
@@ -120,50 +124,18 @@ export function Settings() {
   )
 }
 
-function UnsavedChangesDialog({ blocker, onSave }: { blocker: Blocker; onSave(): Promise<void> }) {
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && blocker.reset?.()
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [blocker])
-
-  const saveAndLeave = async () => {
-    await onSave()
-    blocker.proceed?.()
+function SaveStatus({ error, dirty, justSaved }: { error: string | null; dirty: boolean; justSaved: boolean }) {
+  if (error) return <span className="min-w-0 truncate text-rose-300" title={error}>Couldn't save: {error}</span>
+  if (dirty) {
+    return (
+      <span className="flex items-center gap-2 text-amber-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+        Unsaved changes
+      </span>
+    )
   }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => blocker.reset?.()}>
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="unsaved-changes-title"
-        className="w-96 space-y-4 rounded-xl border border-white/10 bg-ink-900 p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="space-y-1">
-          <h2 id="unsaved-changes-title" className="font-semibold">
-            Unsaved changes
-          </h2>
-          <p className="text-sm text-ink-400">Save your settings before leaving?</p>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <button autoFocus className="rounded-md px-3 py-1.5 text-ink-400 hover:text-ink-100" onClick={() => blocker.reset?.()}>
-            Keep editing
-          </button>
-          <button className="ml-auto rounded-md px-3 py-1.5 text-rose-300 hover:bg-rose-500/10" onClick={() => blocker.proceed?.()}>
-            Discard
-          </button>
-          <button
-            className="rounded-md bg-gradient-to-r from-primary-500 to-secondary-500 px-4 py-1.5 font-medium text-white hover:from-primary-400 hover:to-secondary-400"
-            onClick={saveAndLeave}
-          >
-            Save and leave
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+  if (justSaved) return <span className="text-emerald-300">Saved. Refreshing PRs…</span>
+  return null
 }
 
 interface SectionProps {
@@ -172,7 +144,7 @@ interface SectionProps {
   onChange(config: Config): void
 }
 
-function SectionBody({ section, ...props }: SectionProps & { section: SectionId }) {
+function SectionBody({ section, ...props }: SectionProps & { section: SettingsSection }) {
   switch (section) {
     case 'pull-requests':
       return <PullRequestsSection {...props} />
@@ -256,42 +228,26 @@ function ReviewsSection({ config, health, onChange }: SectionProps) {
           </div>
         </StackedRow>
       </Card>
-      <Card title="Review session" description="The main Claude session that runs the skill and drafts the review.">
-        <Row label="Model">
-          <ChoiceSelect
-            labels={MODEL_LABELS}
-            value={config.reviewModel}
-            defaultLabel={systemDefault(health?.claudeDefaults.model)}
-            onChange={(reviewModel) => onChange({ ...config, reviewModel })}
-          />
-        </Row>
-        <Row label="Effort">
-          <ChoiceSelect
-            labels={EFFORT_LABELS}
-            value={config.reviewEffort}
-            defaultLabel={systemDefault(health?.claudeDefaults.effort)}
-            onChange={(reviewEffort) => onChange({ ...config, reviewEffort })}
-          />
-        </Row>
-      </Card>
-      <Card title="Subagents" description="Reviewer subagents the skill fans out to.">
-        <Row label="Model">
-          <ChoiceSelect
-            labels={MODEL_LABELS}
-            value={config.subagentModel}
-            defaultLabel="System default (inherits)"
-            onChange={(subagentModel) => onChange({ ...config, subagentModel })}
-          />
-        </Row>
-        <Row label="Effort">
-          <ChoiceSelect
-            labels={EFFORT_LABELS}
-            value={config.subagentEffort}
-            defaultLabel="System default"
-            onChange={(subagentEffort) => onChange({ ...config, subagentEffort })}
-          />
-        </Row>
-      </Card>
+      <ModelEffortCard
+        title="Review session"
+        description="The main Claude session that runs the skill and drafts the review."
+        model={config.reviewModel}
+        effort={config.reviewEffort}
+        modelDefault={systemDefault(health?.claudeDefaults.model)}
+        effortDefault={systemDefault(health?.claudeDefaults.effort)}
+        onModelChange={(reviewModel) => onChange({ ...config, reviewModel })}
+        onEffortChange={(reviewEffort) => onChange({ ...config, reviewEffort })}
+      />
+      <ModelEffortCard
+        title="Subagents"
+        description="Reviewer subagents the skill fans out to."
+        model={config.subagentModel}
+        effort={config.subagentEffort}
+        modelDefault={systemDefault('inherits')}
+        effortDefault={systemDefault(null)}
+        onModelChange={(subagentModel) => onChange({ ...config, subagentModel })}
+        onEffortChange={(subagentEffort) => onChange({ ...config, subagentEffort })}
+      />
     </>
   )
 }
@@ -335,29 +291,46 @@ function AccountsSection({ health }: SectionProps) {
       <SectionHeader title="Accounts">Rally signs in with your existing CLI logins.</SectionHeader>
       <Card>
         <Row label="GitHub" description="Read from the gh CLI.">
-          {health === null ? (
-            <StatusText tone="pending">Checking…</StatusText>
-          ) : health.githubLogin ? (
-            <StatusText tone="ok">Signed in as {health.githubLogin}</StatusText>
-          ) : (
-            <StatusText tone="error">
-              Not signed in. Run <code>gh auth login</code>.
-            </StatusText>
-          )}
+          <GithubStatus health={health} />
         </Row>
         {health?.githubError && (
           <div className="px-4 pb-3 font-mono text-xs text-rose-300/80">{health.githubError}</div>
         )}
         <Row label="Claude Code" description="Uses your Claude Code login. System defaults come from ~/.claude/settings.json.">
-          <span className="text-right text-xs text-ink-400">
-            Model <span className="text-ink-200">{health?.claudeDefaults.model ?? 'not set'}</span>
-            <br />
-            Effort <span className="text-ink-200">{health?.claudeDefaults.effort ?? 'not set'}</span>
-          </span>
+          {health === null ? (
+            <StatusText tone="pending">Checking…</StatusText>
+          ) : (
+            <span className="text-right text-xs text-ink-400">
+              Model <span className="text-ink-200">{health.claudeDefaults.model ?? 'not set'}</span>
+              <br />
+              Effort <span className="text-ink-200">{health.claudeDefaults.effort ?? 'not set'}</span>
+            </span>
+          )}
         </Row>
       </Card>
     </>
   )
+}
+
+function GithubStatus({ health }: { health: Health | null }) {
+  if (health === null) return <StatusText tone="pending">Checking…</StatusText>
+  if (health.githubLogin) return <StatusText tone="ok">Signed in as {health.githubLogin}</StatusText>
+  switch (health.githubFailure) {
+    case 'gh_missing':
+      return (
+        <StatusText tone="error">
+          gh CLI not found. Install it and run <code>gh auth login</code>.
+        </StatusText>
+      )
+    case 'signed_out':
+      return (
+        <StatusText tone="error">
+          Not signed in. Run <code>gh auth login</code>.
+        </StatusText>
+      )
+    default:
+      return <StatusText tone="error">Couldn't reach GitHub</StatusText>
+  }
 }
 
 const FIELD_CLASS = 'rounded-md bg-ink-950/60 px-2.5 py-1.5 text-sm text-ink-100 outline-none ring-1 ring-ink-800 focus:ring-secondary-400/50'
@@ -409,21 +382,6 @@ function StackedRow({ label, description, children }: { label: string; descripti
   )
 }
 
-function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange(checked: boolean): void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition ${checked ? 'bg-secondary-500' : 'bg-ink-700'}`}
-    >
-      <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${checked ? 'translate-x-4' : ''}`} />
-    </button>
-  )
-}
-
 const STATUS_TONES = {
   pending: { text: 'text-ink-400', dot: 'bg-ink-500' },
   ok: { text: 'text-emerald-300', dot: 'bg-emerald-400' },
@@ -436,6 +394,30 @@ function StatusText({ tone, children }: { tone: keyof typeof STATUS_TONES; child
       <span className={`h-2 w-2 rounded-full ${STATUS_TONES[tone].dot}`} />
       {children}
     </span>
+  )
+}
+
+interface ModelEffortCardProps {
+  title: string
+  description: string
+  model: ModelChoice | null
+  effort: EffortChoice | null
+  modelDefault: string
+  effortDefault: string
+  onModelChange(model: ModelChoice | null): void
+  onEffortChange(effort: EffortChoice | null): void
+}
+
+function ModelEffortCard({ title, description, model, effort, modelDefault, effortDefault, onModelChange, onEffortChange }: ModelEffortCardProps) {
+  return (
+    <Card title={title} description={description}>
+      <Row label="Model">
+        <ChoiceSelect labels={MODEL_LABELS} value={model} defaultLabel={modelDefault} onChange={onModelChange} />
+      </Row>
+      <Row label="Effort">
+        <ChoiceSelect labels={EFFORT_LABELS} value={effort} defaultLabel={effortDefault} onChange={onEffortChange} />
+      </Row>
+    </Card>
   )
 }
 

@@ -73,10 +73,15 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
   })
 
   it('allows only review mutations through graphql during submit', () => {
-    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
+    const submit = `gh api graphql -f query='mutation { submitPullRequestReview(input:{pullRequestReviewId:"x", event:COMMENT}) { pullRequestReview { id } } }'`
     const merge = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
-    expect(bash(resolve, SUBMITTING)).toBe(true)
+    expect(bash(submit, SUBMITTING)).toBe(true)
     expect(bash(merge, SUBMITTING)).toBe(false)
+  })
+
+  it('leaves resolving review threads to Rally even during submit', () => {
+    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
+    expect(bash(resolve, SUBMITTING)).toBe(false)
   })
 
   it('blocks unrelated writes even during submit', () => {

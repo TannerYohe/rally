@@ -125,7 +125,6 @@ const SUBMIT_GRAPHQL_MUTATIONS = [
   'addPullRequestReviewThreadReply',
   'addPullRequestReviewComment',
   'submitPullRequestReview',
-  'resolveReviewThread',
 ]
 
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]

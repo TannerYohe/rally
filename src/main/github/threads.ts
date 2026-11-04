@@ -30,6 +30,7 @@ export interface RawThread {
 
 export type ThreadLookup = { kind: 'own'; thread: ReviewThread } | { kind: 'not_found' } | { kind: 'not_own' }
 
+const GITHUB_TIMEOUT_MS = 15_000
 const NOT_FOUND_ERROR = 'Review thread not found'
 const NOT_OWN_ERROR = 'Not a review thread you started on this PR'
 
@@ -49,7 +50,7 @@ async function lookupThreads(pr: PrRef, threadIds: string[]): Promise<Map<string
   const ids = [...new Set(threadIds)]
   if (ids.length === 0) return new Map()
   const gh = await github()
-  const nodes = await fetchNodes<RawThread>(gh, THREADS_QUERY, ids)
+  const nodes = await fetchNodes<RawThread>(gh, THREADS_QUERY, ids, GITHUB_TIMEOUT_MS)
   return new Map(ids.map((id, index) => [id, lookupThread(nodes[index] ?? null, gh.login, pr)]))
 }
 
@@ -72,7 +73,7 @@ export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise
     else if (lookup.thread.isResolved) result.resolved.push(threadId)
     else {
       try {
-        await gh.graphql(RESOLVE_MUTATION, { threadId })
+        await gh.graphql(RESOLVE_MUTATION, { threadId, request: { signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS) } })
         result.resolved.push(threadId)
       } catch (error) {
         fail(threadId, error instanceof Error ? error.message : String(error))

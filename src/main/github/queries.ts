@@ -93,15 +93,17 @@ export function isReplyOnly(review: Pick<RawReview, 'state' | 'body'>, comments:
 
 type GithubClient = Awaited<ReturnType<typeof github>>
 
-export async function fetchNodes<T>(gh: GithubClient, query: string, ids: string[]): Promise<(T | null)[]> {
+export async function fetchNodes<T>(gh: GithubClient, query: string, ids: string[], timeoutMs?: number): Promise<(T | null)[]> {
   const nodes: (T | null)[] = []
   for (let i = 0; i < ids.length; i += MAX_NODE_IDS) {
+    const request = timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : undefined
     try {
-      const response = await gh.graphql<{ nodes: (T | null)[] }>(query, { ids: ids.slice(i, i + MAX_NODE_IDS) })
+      const response = await gh.graphql<{ nodes: (T | null)[] }>(query, { ids: ids.slice(i, i + MAX_NODE_IDS), request })
       nodes.push(...response.nodes)
     } catch (error) {
       const partial = error instanceof GraphqlResponseError ? (error.data as { nodes?: (T | null)[] } | undefined) : undefined
       if (!partial?.nodes) throw error
+      console.warn('GitHub node lookup returned partial errors', { errors: (error as GraphqlResponseError<unknown>).errors })
       nodes.push(...partial.nodes)
     }
   }

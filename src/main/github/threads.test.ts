@@ -70,6 +70,7 @@ describe('resolveOwnThreads', () => {
     threads = {}
     failingMutations = new Set()
     vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     mocks.graphql.mockReset()
     mocks.graphql.mockImplementation(async (query: string, variables: { ids?: string[]; threadId?: string }) => {
       if (variables.ids) return { nodes: variables.ids.map((id) => threads[id] ?? null) }
@@ -80,10 +81,11 @@ describe('resolveOwnThreads', () => {
 
   const mutatedIds = () => mocks.graphql.mock.calls.flatMap(([, variables]) => (variables.threadId ? [variables.threadId] : []))
 
-  it('resolves open threads the viewer started', async () => {
+  it('resolves open threads the viewer started, with a timeout on every GitHub call', async () => {
     threads.T1 = thread({ id: 'T1' })
     expect(await resolveOwnThreads(pr, ['T1'])).toEqual({ resolved: ['T1'], failed: [] })
     expect(mutatedIds()).toEqual(['T1'])
+    for (const [, variables] of mocks.graphql.mock.calls) expect(variables.request.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('refuses threads the viewer did not start and ids GitHub cannot find, without mutating', async () => {
@@ -129,5 +131,6 @@ describe('resolveOwnThreads', () => {
       resolved: ['T1'],
       failed: [{ threadId: 'missing', error: 'Review thread not found' }],
     })
+    expect(console.warn).toHaveBeenCalledWith('GitHub node lookup returned partial errors', expect.objectContaining({ errors: expect.any(Array) }))
   })
 })

@@ -13,12 +13,12 @@ const DIMENSIONS = {
   md: 'h-10 w-10 text-sm',
 }
 
-export function Avatar({ login, url, ringClass = 'ring-zinc-700', size = 'md' }: Props) {
+export function Avatar({ login, url, ringClass = 'ring-ink-700', size = 'md' }: Props) {
   const [failed, setFailed] = useState(false)
   const dimensions = DIMENSIONS[size]
   if (!url || failed) {
     return (
-      <span className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-sky-500 font-semibold uppercase text-white ring-2 ${ringClass} ${dimensions}`}>
+      <span className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-secondary-500 to-primary-500 font-semibold uppercase text-white ring-2 ${ringClass} ${dimensions}`}>
         {login.slice(0, 2)}
       </span>
     )

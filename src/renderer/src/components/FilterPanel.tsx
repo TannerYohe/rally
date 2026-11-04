@@ -26,7 +26,7 @@ export function FilterPanel({ prs, filters, onChange }: Props) {
   const repos = filterOptions(prs, repoName, filters.repos)
 
   return (
-    <div className="space-y-4 rounded-xl border border-white/5 bg-zinc-900/60 p-4">
+    <div className="space-y-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
       <FilterRow label="Author">
         {authors.map(({ value, count }) => {
           const selected = filters.authors.includes(value)
@@ -34,9 +34,9 @@ export function FilterPanel({ prs, filters, onChange }: Props) {
             <button
               key={value}
               onClick={() => onChange({ ...filters, authors: toggleValue(filters.authors, value) })}
-              className={`inline-flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2.5 text-xs ring-1 transition ${selected ? 'bg-sky-400/15 text-sky-100 ring-sky-400/50' : 'text-zinc-400 ring-zinc-800 hover:text-zinc-200 hover:ring-zinc-700'}`}
+              className={`inline-flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2.5 text-xs ring-1 transition ${selected ? 'bg-primary-400/15 text-primary-100 ring-primary-400/50' : 'text-ink-400 ring-ink-800 hover:text-ink-200 hover:ring-ink-700'}`}
             >
-              <Avatar login={value} url={avatars.get(value) ?? null} size="sm" ringClass={selected ? 'ring-sky-400/50' : 'ring-transparent'} />
+              <Avatar login={value} url={avatars.get(value) ?? null} size="sm" ringClass={selected ? 'ring-primary-400/50' : 'ring-transparent'} />
               {value}
               <span className="opacity-60">{count}</span>
             </button>
@@ -51,7 +51,7 @@ export function FilterPanel({ prs, filters, onChange }: Props) {
             <button
               key={value}
               onClick={() => onChange({ ...filters, repos: toggleValue(filters.repos, value) })}
-              className={`rounded-md px-2 py-0.5 font-mono text-[11px] ring-1 transition ${selected ? `${repoChipClass(value.split('/')[1])} ring-2` : 'text-zinc-400 ring-zinc-800 hover:text-zinc-200 hover:ring-zinc-700'}`}
+              className={`rounded-md px-2 py-0.5 font-mono text-[11px] ring-1 transition ${selected ? `${repoChipClass(value.split('/')[1])} ring-2` : 'text-ink-400 ring-ink-800 hover:text-ink-200 hover:ring-ink-700'}`}
             >
               {value.split('/')[1]}
               <span className="ml-1.5 opacity-60">{count}</span>
@@ -61,12 +61,12 @@ export function FilterPanel({ prs, filters, onChange }: Props) {
       </FilterRow>
 
       <FilterRow label="Status">
-        <div className="inline-flex rounded-lg bg-zinc-950 p-0.5 ring-1 ring-zinc-800">
+        <div className="inline-flex rounded-lg bg-ink-950 p-0.5 ring-1 ring-ink-800">
           {DRAFT_OPTIONS.map((option) => (
             <button
               key={option.value}
               onClick={() => onChange({ ...filters, draft: option.value })}
-              className={`rounded-md px-3 py-1 text-xs transition ${filters.draft === option.value ? 'bg-violet-500/20 text-violet-100' : 'text-zinc-400 hover:text-zinc-200'}`}
+              className={`rounded-md px-3 py-1 text-xs transition ${filters.draft === option.value ? 'bg-secondary-500/20 text-secondary-100' : 'text-ink-400 hover:text-ink-200'}`}
             >
               {option.label}
             </button>
@@ -80,7 +80,7 @@ export function FilterPanel({ prs, filters, onChange }: Props) {
 function FilterRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex gap-4">
-      <span className="w-14 shrink-0 pt-1 text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</span>
+      <span className="w-14 shrink-0 pt-1 text-xs font-medium uppercase tracking-wide text-ink-500">{label}</span>
       <div className="flex flex-wrap gap-1.5">{children}</div>
     </div>
   )

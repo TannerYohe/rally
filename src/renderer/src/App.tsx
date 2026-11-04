@@ -1,6 +1,7 @@
 import { createHashRouter, Link, NavLink, Outlet, RouterProvider } from 'react-router-dom'
 import logo from '../../../resources/icon.svg'
 import { SETTINGS_ROOT } from './lib/settingsSections'
+import { useSkin } from './lib/skins'
 import { Dashboard } from './pages/Dashboard'
 import { PrDetail } from './pages/PrDetail'
 import { Settings } from './pages/Settings'
@@ -19,21 +20,23 @@ function GearIcon() {
 }
 
 function Layout() {
+  const skin = useSkin()
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center border-b border-white/5 bg-zinc-950/70 px-6 py-2.5 backdrop-blur">
+      <header className="flex items-center border-b border-white/5 bg-ink-950/70 px-6 py-2.5 backdrop-blur">
         <Link to="/" className="flex items-center gap-2">
           <img src={logo} alt="" className="h-7 w-7" />
-          <span className="bg-gradient-to-r from-sky-400 via-violet-400 to-fuchsia-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
+          <span className="wordmark bg-gradient-to-r from-primary-400 via-secondary-400 to-highlight-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
             Rally
           </span>
+          {skin.mark && <span className="text-base">{skin.mark}</span>}
         </Link>
         <NavLink
           to={SETTINGS_ROOT}
           title="Settings"
           aria-label="Settings"
           className={({ isActive }) =>
-            `ml-auto rounded-md p-1.5 transition ${isActive ? 'bg-white/10 text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`
+            `ml-auto rounded-md p-1.5 transition ${isActive ? 'bg-white/10 text-white' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100'}`
           }
         >
           <GearIcon />

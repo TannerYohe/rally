@@ -28,18 +28,18 @@ export function UnsavedChangesDialog({ blocker, onSave }: Props) {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="unsaved-changes-title"
-        className="w-96 space-y-4 rounded-xl border border-white/10 bg-zinc-900 p-5 shadow-2xl"
+        className="w-96 space-y-4 rounded-xl border border-white/10 bg-ink-900 p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="space-y-1">
           <h2 id="unsaved-changes-title" className="font-semibold">
             Unsaved changes
           </h2>
-          <p className="text-sm text-zinc-400">Save your settings before leaving?</p>
+          <p className="text-sm text-ink-400">Save your settings before leaving?</p>
           {error && <p className="text-sm text-rose-300">Couldn't save: {error}</p>}
         </div>
         <div className="flex items-center gap-2 text-sm">
-          <button autoFocus className="rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100" onClick={() => blocker.reset?.()}>
+          <button autoFocus className="rounded-md px-3 py-1.5 text-ink-400 hover:text-ink-100" onClick={() => blocker.reset?.()}>
             Keep editing
           </button>
           <button className="ml-auto rounded-md px-3 py-1.5 text-rose-300 hover:bg-rose-500/10" onClick={() => blocker.proceed?.()}>

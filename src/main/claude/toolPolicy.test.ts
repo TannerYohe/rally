@@ -98,6 +98,17 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash(withVariables, SUBMITTING)).toBe(true)
   })
 
+  it('decides graphql mutations from the parsed query, not the raw command text', () => {
+    expect(bash(`gh api graphql -f query='mu''tation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`)).toBe(false)
+    expect(bash(`gh api graphql -f query="mu"tation' { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`, SUBMITTING)).toBe(false)
+  })
+
+  it('blocks graphql commands that use shell expansion', () => {
+    expect(bash(`Q='mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'; gh api graphql -f query="\${Q}"`)).toBe(false)
+    expect(bash('gh api graphql -f query="$(cat q.graphql)"')).toBe(false)
+    expect(bash("gh api graphql -f owner=acme -f query='query($owner: String!) { repository(owner: $owner, name: \"api\") { id } }'")).toBe(true)
+  })
+
   it('leaves resolving review threads to Rally even during submit', () => {
     const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
     expect(bash(resolve, SUBMITTING)).toBe(false)

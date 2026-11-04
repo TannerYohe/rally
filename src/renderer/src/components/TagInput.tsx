@@ -1,11 +1,5 @@
 import { useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react'
-
-function splitEntries(text: string): string[] {
-  return text
-    .split(/[\s,]+/)
-    .map((v) => v.trim())
-    .filter(Boolean)
-}
+import { addEntries, splitEntries } from '../lib/tagEntries'
 
 interface Props {
   values: string[]
@@ -18,8 +12,7 @@ export function TagInput({ values, placeholder, renderIcon, onChange }: Props) {
   const [draft, setDraft] = useState('')
 
   const add = (entries: string[]) => {
-    const next = [...values]
-    for (const entry of entries) if (!next.includes(entry)) next.push(entry)
+    const next = addEntries(values, entries)
     if (next.length !== values.length) onChange(next)
     setDraft('')
   }

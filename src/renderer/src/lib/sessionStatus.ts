@@ -17,10 +17,14 @@ export function lastTurnStartedAt(session: TurnTiming): string {
   return session.timeline.findLast((entry) => entry.kind === 'user' && entry.turn !== 'submit')?.at ?? session.createdAt
 }
 
+export function isSubmitted(session: Pick<ReviewSession, 'status' | 'submitted'>): boolean {
+  return session.submitted !== null || session.status === 'submitted'
+}
+
 export function prUpdatedSinceLastTurn(
   session: TurnTiming & Pick<ReviewSession, 'status' | 'submitted'>,
   prUpdatedAt: string | null,
 ): boolean {
-  if (session.submitted || session.status === 'submitted' || prUpdatedAt === null) return false
+  if (isSubmitted(session) || prUpdatedAt === null) return false
   return Date.parse(prUpdatedAt) > Date.parse(lastTurnStartedAt(session))
 }

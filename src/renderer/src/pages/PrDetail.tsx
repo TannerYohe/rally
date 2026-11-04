@@ -13,7 +13,7 @@ import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { useFollowActivity, usePrs, useSession, useThreadResolution } from '../lib/hooks'
-import { BUSY_STATUSES, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 export function PrDetail() {
@@ -124,6 +124,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const [feedback, setFeedback] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
   const busy = BUSY_STATUSES.includes(session.status)
+  const submitted = isSubmitted(session)
   const { drafts } = session
   const message = feedbackMessage(drafts, edits, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
@@ -186,7 +187,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               Cancel
             </button>
           )}
-          {!busy && session.status !== 'submitted' && (
+          {!busy && !submitted && (
             <button
               className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700 disabled:opacity-40"
               disabled={resolvingThreads}
@@ -250,7 +251,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               state={threadResolution}
               resolution={session.threadResolution ?? null}
               disabled={busy || resolvingThreads}
-              submitted={session.status === 'submitted'}
+              submitted={submitted}
             />
           )}
 
@@ -259,7 +260,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             <DraftList
               drafts={drafts}
               edits={edits}
-              disabled={busy || session.status === 'submitted'}
+              disabled={busy || submitted}
               onEdit={(id, edit) => setEdits(({ [id]: _removed, ...rest }) => (edit ? { ...rest, [id]: edit } : rest))}
             />
             {drafts.summaryBody && (
@@ -272,7 +273,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         </>
       )}
 
-      {session.status !== 'submitted' && (
+      {!submitted && (
         <div className="space-y-3">
           <textarea
             className="w-full rounded-md border border-zinc-800 bg-zinc-900 p-3 text-sm"

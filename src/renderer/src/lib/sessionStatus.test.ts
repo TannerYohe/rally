@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ReviewSession, TimelineEntry, TurnMode } from '@shared/types'
-import { lastTurnStartedAt, prUpdatedSinceLastTurn } from './sessionStatus'
+import { isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn } from './sessionStatus'
 
 const createdAt = '2026-11-04T18:00:00.000Z'
 const user = (id: string, at: string, turn?: TurnMode): TimelineEntry => ({ kind: 'user', id, text: id, at, turn })
@@ -57,5 +57,18 @@ describe('prUpdatedSinceLastTurn', () => {
     const timeline = [user('review', '2026-11-04T19:00:00.000Z', 'review'), user('submit', '2026-11-04T19:10:00.000Z', 'submit')]
     const submitted = { reviewId: 1, url: 'https://github.com/o/r/pull/1#review', event: 'COMMENT' as const }
     expect(prUpdatedSinceLastTurn(session({ timeline, status: 'error', submitted }), '2026-11-04T19:10:05Z')).toBe(false)
+  })
+})
+
+describe('isSubmitted', () => {
+  const submitted = { reviewId: 1, url: 'https://github.com/o/r/pull/1#review', event: 'COMMENT' as const }
+
+  it('is true when the status is submitted or a submitted review is recorded', () => {
+    expect(isSubmitted({ status: 'submitted', submitted })).toBe(true)
+    expect(isSubmitted({ status: 'error', submitted })).toBe(true)
+  })
+
+  it('is false before a review is submitted', () => {
+    expect(isSubmitted({ status: 'awaiting_feedback', submitted: null })).toBe(false)
   })
 })

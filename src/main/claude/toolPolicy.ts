@@ -338,12 +338,14 @@ function matchesFlag(arg: string, flag: string): boolean {
 }
 
 function requestMethod(args: string[], methodFlags: string[], bodyFlags: string[]): string {
+  let method: string | null = null
   for (let i = 0; i < args.length; i++) {
     const flag = methodFlags.find((f) => matchesFlag(args[i], f))
     if (!flag) continue
     const inline = args[i].slice(flag.length).replace(/^=/, '')
-    return (inline || args[i + 1] || '').toUpperCase()
+    method = (inline || args[++i] || '').toUpperCase()
   }
+  if (method !== null) return method
   return args.some((a) => bodyFlags.some((flag) => matchesFlag(a, flag))) ? 'POST' : 'GET'
 }
 

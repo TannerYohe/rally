@@ -44,6 +44,13 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api graphql --input "$WORK/mutation.json"')).toBe(false)
   })
 
+  it('uses the last method flag, as gh and curl do', () => {
+    expect(bash('gh api -X GET -X PUT repos/o/r/pulls/1/merge')).toBe(false)
+    expect(bash('gh api --method GET --method=DELETE repos/o/r/git/refs/heads/x')).toBe(false)
+    expect(bash('gh api -X PUT -X GET repos/o/r/pulls/1')).toBe(true)
+    expect(bash('curl -X GET -X POST https://api.github.com/repos/o/r/issues')).toBe(false)
+  })
+
   it('treats attached and = forms of gh api body flags as writes', () => {
     expect(bash('gh api repos/acme/api/issues/12/comments -fbody=hi')).toBe(false)
     expect(bash('gh api repos/acme/api/issues/12/comments --field=body=x')).toBe(false)

@@ -12,11 +12,11 @@ export function DiffStat({ additions, deletions, files }: { additions: number; d
         {Array.from({ length: BLOCKS }, (_, i) => (
           <span
             key={i}
-            className={`h-2 w-2 rounded-[2px] ${i < green ? 'bg-emerald-500' : i < green + red ? 'bg-rose-500' : 'bg-zinc-700'}`}
+            className={`h-2 w-2 rounded-[2px] ${i < green ? 'bg-emerald-500' : i < green + red ? 'bg-rose-500' : 'bg-ink-700'}`}
           />
         ))}
       </span>
-      <span className="text-zinc-500">
+      <span className="text-ink-500">
         {files} file{files === 1 ? '' : 's'}
       </span>
     </span>

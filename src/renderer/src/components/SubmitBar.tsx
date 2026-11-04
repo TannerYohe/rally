@@ -16,8 +16,8 @@ export function SubmitBar({ disabled, commentCount, onSubmit }: Props) {
     if (window.confirm(`Post ${commentCount} comment(s) and submit the review as "${label}"?`)) onSubmit(event)
   }
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-800 bg-zinc-900 p-3">
-      <span className="text-sm text-zinc-400">Submit as</span>
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-ink-800 bg-ink-900 p-3">
+      <span className="text-sm text-ink-400">Submit as</span>
       {EVENTS.map((option) => (
         <label key={option} className="flex items-center gap-1.5 text-sm">
           <input type="radio" name="event" checked={event === option} disabled={disabled} onChange={() => setEvent(option)} />

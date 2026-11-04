@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm'
 
 export function Markdown({ children }: { children: string }) {
   return (
-    <div className="prose prose-sm prose-invert max-w-none prose-pre:bg-zinc-900 prose-code:before:content-none prose-code:after:content-none">
+    <div className="prose prose-sm prose-invert max-w-none prose-pre:bg-ink-900 prose-code:before:content-none prose-code:after:content-none">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         disallowedElements={['img']}

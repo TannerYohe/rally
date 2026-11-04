@@ -10,11 +10,11 @@ interface PhaseTheme {
 
 export const PHASE_THEME: Record<Phase, PhaseTheme> = {
   in_progress: {
-    accent: 'bg-fuchsia-400',
-    badge: 'bg-fuchsia-400/10 text-fuchsia-300 ring-fuchsia-400/30',
-    dot: 'bg-fuchsia-400',
-    ring: 'ring-fuchsia-400/50',
-    chipActive: 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-400/40',
+    accent: 'bg-highlight-400',
+    badge: 'bg-highlight-400/10 text-highlight-300 ring-highlight-400/30',
+    dot: 'bg-highlight-400',
+    ring: 'ring-highlight-400/50',
+    chipActive: 'bg-highlight-400/15 text-highlight-200 ring-highlight-400/40',
   },
   awaiting_rereview: {
     accent: 'bg-amber-400',
@@ -24,18 +24,18 @@ export const PHASE_THEME: Record<Phase, PhaseTheme> = {
     chipActive: 'bg-amber-400/15 text-amber-200 ring-amber-400/40',
   },
   unreviewed: {
-    accent: 'bg-sky-400',
-    badge: 'bg-sky-400/10 text-sky-300 ring-sky-400/30',
-    dot: 'bg-sky-400',
-    ring: 'ring-sky-400/50',
-    chipActive: 'bg-sky-400/15 text-sky-200 ring-sky-400/40',
+    accent: 'bg-primary-400',
+    badge: 'bg-primary-400/10 text-primary-300 ring-primary-400/30',
+    dot: 'bg-primary-400',
+    ring: 'ring-primary-400/50',
+    chipActive: 'bg-primary-400/15 text-primary-200 ring-primary-400/40',
   },
   pending_changes: {
-    accent: 'bg-violet-400',
-    badge: 'bg-violet-400/10 text-violet-300 ring-violet-400/30',
-    dot: 'bg-violet-400',
-    ring: 'ring-violet-400/50',
-    chipActive: 'bg-violet-400/15 text-violet-200 ring-violet-400/40',
+    accent: 'bg-secondary-400',
+    badge: 'bg-secondary-400/10 text-secondary-300 ring-secondary-400/30',
+    dot: 'bg-secondary-400',
+    ring: 'ring-secondary-400/50',
+    chipActive: 'bg-secondary-400/15 text-secondary-200 ring-secondary-400/40',
   },
   approved: {
     accent: 'bg-emerald-400',

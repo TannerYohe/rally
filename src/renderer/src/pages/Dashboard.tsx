@@ -24,8 +24,8 @@ import { PHASE_THEME } from '../lib/theme'
 function ReviewStatusNote({ status }: { status: SessionStatus }) {
   const busy = BUSY_STATUSES.includes(status)
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[11px] ${status === 'error' ? 'text-rose-300' : 'text-fuchsia-300/80'}`}>
-      {busy && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-fuchsia-400" />}
+    <span className={`inline-flex items-center gap-1.5 text-[11px] ${status === 'error' ? 'text-rose-300' : 'text-highlight-300/80'}`}>
+      {busy && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-highlight-400" />}
       {SESSION_STATUS_LABELS[status]}
     </span>
   )
@@ -37,15 +37,15 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
     <li>
       <button
         onClick={onOpen}
-        className="group relative flex w-full gap-4 overflow-hidden rounded-xl border border-white/5 bg-zinc-900/60 p-4 pl-5 text-left transition hover:border-white/10 hover:bg-zinc-900"
+        className="group relative flex w-full gap-4 overflow-hidden rounded-xl border border-white/5 bg-ink-900/60 p-4 pl-5 text-left transition hover:border-white/10 hover:bg-ink-900"
       >
         <span className={`absolute inset-y-0 left-0 w-1 ${theme.accent}`} />
         <Avatar login={pr.author} url={pr.authorAvatarUrl} ringClass={theme.ring} />
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex items-start gap-3">
-            <h3 className="min-w-0 flex-1 truncate font-medium text-zinc-100 group-hover:text-white">
+            <h3 className="min-w-0 flex-1 truncate font-medium text-ink-100 group-hover:text-white">
               {pr.isDraft && (
-                <span className="mr-2 rounded bg-zinc-700/60 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-zinc-300">
+                <span className="mr-2 rounded bg-ink-700/60 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-ink-300">
                   Draft
                 </span>
               )}
@@ -56,24 +56,24 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
               {pr.phase === 'in_progress' && pr.reviewStatus && <ReviewStatusNote status={pr.reviewStatus} />}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-400">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
             <RepoChip repo={pr.repo} number={pr.number} />
             <span>
-              by <span className="text-zinc-200">{pr.author}</span>
+              by <span className="text-ink-200">{pr.author}</span>
             </span>
             <span title={pr.createdAt}>opened {age(pr.createdAt)} ago</span>
             <span title={pr.updatedAt}>updated {age(pr.updatedAt)} ago</span>
             <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
           </div>
-          <p className="line-clamp-2 text-sm text-zinc-400">
-            <span className="mr-1.5 text-violet-400">✦</span>
+          <p className="line-clamp-2 text-sm text-ink-400">
+            <span className="mr-1.5 text-secondary-400">✦</span>
             {pr.summary ??
               (pr.summaryError ? (
-                <span className="italic text-zinc-600" title={pr.summaryError}>
+                <span className="italic text-ink-600" title={pr.summaryError}>
                   Summary unavailable
                 </span>
               ) : (
-                <span className="italic text-zinc-600">Summarizing…</span>
+                <span className="italic text-ink-600">Summarizing…</span>
               ))}
           </p>
         </div>
@@ -83,7 +83,7 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
 }
 
 function EmptyState({ children }: { children: ReactNode }) {
-  return <div className="rounded-xl border border-dashed border-zinc-800 p-10 text-center text-sm text-zinc-400">{children}</div>
+  return <div className="rounded-xl border border-dashed border-ink-800 p-10 text-center text-sm text-ink-400">{children}</div>
 }
 
 function PrList({ prs, visible, refreshing, onOpen }: { prs: Pr[]; visible: Pr[]; refreshing: boolean; onOpen(pr: Pr): void }) {
@@ -91,7 +91,7 @@ function PrList({ prs, visible, refreshing, onOpen }: { prs: Pr[]; visible: Pr[]
     return (
       <EmptyState>
         No open PRs match. Add authors and repos in{' '}
-        <Link className="text-sky-400 underline" to="/settings">
+        <Link className="text-primary-400 underline" to="/settings">
           Settings
         </Link>
         .
@@ -147,14 +147,14 @@ export function Dashboard() {
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-semibold">
           Open PRs{' '}
-          <span className="text-zinc-500">
+          <span className="text-ink-500">
             {visible.length === prs.length ? prs.length : `${visible.length} of ${prs.length}`}
           </span>
         </h1>
-        <div className="ml-auto flex items-center gap-3 text-xs text-zinc-500">
+        <div className="ml-auto flex items-center gap-3 text-xs text-ink-500">
           {refreshedAt && <span>Updated {age(refreshedAt)} ago</span>}
           <button
-            className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-3 py-1.5 font-medium text-white shadow-lg shadow-violet-500/20 hover:from-sky-400 hover:to-violet-400 disabled:opacity-50"
+            className="rounded-md bg-gradient-to-r from-primary-500 to-secondary-500 px-3 py-1.5 font-medium text-white shadow-lg shadow-secondary-500/20 hover:from-primary-400 hover:to-secondary-400 disabled:opacity-50"
             disabled={refreshing}
             onClick={() => window.rally.refreshPrs()}
           >
@@ -171,9 +171,9 @@ export function Dashboard() {
             <button
               key={phase}
               onClick={() => togglePhase(phase)}
-              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ring-1 transition ${active ? theme.chipActive : 'text-zinc-500 ring-zinc-800 hover:text-zinc-300'}`}
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ring-1 transition ${active ? theme.chipActive : 'text-ink-500 ring-ink-800 hover:text-ink-300'}`}
             >
-              <span className={`h-2 w-2 rounded-full ${active ? theme.dot : 'bg-zinc-700'}`} />
+              <span className={`h-2 w-2 rounded-full ${active ? theme.dot : 'bg-ink-700'}`} />
               {PHASE_LABELS[phase]}
               <span className="font-semibold">{counts[phase]}</span>
             </button>
@@ -181,17 +181,17 @@ export function Dashboard() {
         })}
         <div className="ml-auto flex items-center gap-2">
           {activeCount > 0 && (
-            <button className="text-xs text-zinc-500 hover:text-zinc-300" onClick={() => setFilters({ ...DEFAULT_FILTERS, hiddenPhases: filters.hiddenPhases })}>
+            <button className="text-xs text-ink-500 hover:text-ink-300" onClick={() => setFilters({ ...DEFAULT_FILTERS, hiddenPhases: filters.hiddenPhases })}>
               Clear filters
             </button>
           )}
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ring-1 transition ${showFilters || activeCount ? 'bg-violet-500/15 text-violet-100 ring-violet-400/40' : 'text-zinc-400 ring-zinc-800 hover:text-zinc-200'}`}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ring-1 transition ${showFilters || activeCount ? 'bg-secondary-500/15 text-secondary-100 ring-secondary-400/40' : 'text-ink-400 ring-ink-800 hover:text-ink-200'}`}
           >
             <FunnelIcon />
             Filters
-            {activeCount > 0 && <span className="rounded-full bg-violet-400 px-1.5 text-[10px] font-semibold text-zinc-950">{activeCount}</span>}
+            {activeCount > 0 && <span className="rounded-full bg-secondary-400 px-1.5 text-[10px] font-semibold text-ink-950">{activeCount}</span>}
           </button>
           <SortControl sort={sort} onChange={setSort} />
         </div>

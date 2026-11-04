@@ -44,15 +44,15 @@ export function Settings() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <div>
-        <Link to="/" className="text-xs text-zinc-500 hover:text-zinc-300">
+        <Link to="/" className="text-xs text-ink-500 hover:text-ink-300">
           ← All PRs
         </Link>
         <h1 className="mt-2 text-xl font-semibold">Settings</h1>
       </div>
-      <section className="rounded-md border border-zinc-800 p-4 text-sm">
+      <section className="rounded-md border border-ink-800 p-4 text-sm">
         <h2 className="mb-2 font-semibold">GitHub</h2>
         {health === null ? (
-          <p className="text-zinc-400">Checking…</p>
+          <p className="text-ink-400">Checking…</p>
         ) : health.githubLogin ? (
           <p className="text-emerald-300">Signed in as {health.githubLogin} via the gh CLI.</p>
         ) : (
@@ -63,30 +63,30 @@ export function Settings() {
       <section className="grid grid-cols-2 gap-4">
         <label className="space-y-1 text-sm">
           <span className="font-semibold">Authors</span>
-          <span className="block text-xs text-zinc-500">GitHub logins, one per line. Empty means any author.</span>
-          <textarea className="h-48 w-full rounded border border-zinc-800 bg-zinc-900 p-2 font-mono" value={authors} onChange={(e) => setAuthors(e.target.value)} />
+          <span className="block text-xs text-ink-500">GitHub logins, one per line. Empty means any author.</span>
+          <textarea className="h-48 w-full rounded border border-ink-800 bg-ink-900 p-2 font-mono" value={authors} onChange={(e) => setAuthors(e.target.value)} />
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-semibold">Repos</span>
-          <span className="block text-xs text-zinc-500">owner/name or owner/* for a whole org, one per line. Empty means any repo.</span>
-          <textarea className="h-48 w-full rounded border border-zinc-800 bg-zinc-900 p-2 font-mono" value={repos} onChange={(e) => setRepos(e.target.value)} />
+          <span className="block text-xs text-ink-500">owner/name or owner/* for a whole org, one per line. Empty means any repo.</span>
+          <textarea className="h-48 w-full rounded border border-ink-800 bg-ink-900 p-2 font-mono" value={repos} onChange={(e) => setRepos(e.target.value)} />
         </label>
       </section>
 
-      <section className="space-y-3 rounded-md border border-zinc-800 p-4 text-sm">
+      <section className="space-y-3 rounded-md border border-ink-800 p-4 text-sm">
         <div>
           <h2 className="font-semibold">Reviews</h2>
-          <p className="text-xs text-zinc-500">Changes apply to the next Claude turn, including turns in reviews already in progress.</p>
+          <p className="text-xs text-ink-500">Changes apply to the next Claude turn, including turns in reviews already in progress.</p>
         </div>
         <label className="block space-y-1">
-          <span className="block text-xs font-medium text-zinc-400">Review skill</span>
+          <span className="block text-xs font-medium text-ink-400">Review skill</span>
           <input
-            className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono"
+            className="w-full rounded border border-ink-800 bg-ink-900 px-2 py-1.5 font-mono"
             value={config.reviewSkill}
             placeholder={DEFAULT_CONFIG.reviewSkill}
             onChange={(e) => setConfig({ ...config, reviewSkill: e.target.value })}
           />
-          <span className="block text-xs text-zinc-500">
+          <span className="block text-xs text-ink-500">
             The Claude Code skill a new review runs as <code>/&lt;skill&gt; &lt;PR URL&gt;</code>. Empty means <code>{DEFAULT_CONFIG.reviewSkill}</code>.
           </span>
         </label>
@@ -136,7 +136,7 @@ export function Settings() {
         <input
           type="number"
           min={1}
-          className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1"
+          className="w-16 rounded border border-ink-800 bg-ink-900 px-2 py-1"
           value={config.pollIntervalMinutes}
           onChange={(e) => setConfig({ ...config, pollIntervalMinutes: Math.max(1, Number(e.target.value)) })}
         />
@@ -144,7 +144,7 @@ export function Settings() {
       </label>
 
       <div className="flex items-center gap-3">
-        <button className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-500" onClick={save}>
+        <button className="rounded-md bg-primary-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-primary-500" onClick={save}>
           Save
         </button>
         {saved && <span className="text-sm text-emerald-300">Saved. Refreshing PRs…</span>}
@@ -168,9 +168,9 @@ interface ChoiceSelectProps<T extends ModelChoice | EffortChoice> {
 function ChoiceSelect<T extends ModelChoice | EffortChoice>({ label, labels, value, defaultLabel, onChange }: ChoiceSelectProps<T>) {
   return (
     <label className="space-y-1">
-      <span className="block text-xs font-medium text-zinc-400">{label}</span>
+      <span className="block text-xs font-medium text-ink-400">{label}</span>
       <select
-        className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5"
+        className="w-full rounded border border-ink-800 bg-ink-900 px-2 py-1.5"
         value={value ?? ''}
         onChange={(e) => onChange((e.target.value || null) as T | null)}
       >

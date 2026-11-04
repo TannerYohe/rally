@@ -1,28 +1,29 @@
 import { useSyncExternalStore } from 'react'
-import type { SkinId } from '@shared/types'
+import { DEFAULT_CONFIG, type SkinId } from '@shared/types'
 
 export interface Skin {
-  id: SkinId
   name: string
   mark: string | null
   tagline: string
 }
 
-export const SKINS: Skin[] = [
-  { id: 'classic', name: 'Classic', mark: null, tagline: 'Night sky, neon gradients.' },
-  { id: 'tennis', name: 'Centre Court', mark: '🎾', tagline: 'Grass court, optic-yellow ball, Wimbledon purple.' },
-  { id: 'motorsport', name: 'Special Stage', mark: '🏁', tagline: 'Gravel, livery orange, checkered flag.' },
-  { id: 'pep', name: 'Pep Rally', mark: '📣', tagline: 'Navy bleachers, pom-poms, confetti.' },
-]
+export const SKINS: Record<SkinId, Skin> = {
+  classic: { name: 'Classic', mark: null, tagline: 'Night sky, neon gradients.' },
+  tennis: { name: 'Centre Court', mark: '🎾', tagline: 'Grass court, optic-yellow ball, Wimbledon purple.' },
+  motorsport: { name: 'Special Stage', mark: '🏁', tagline: 'Gravel, livery orange, checkered flag.' },
+  pep: { name: 'Pep Rally', mark: '📣', tagline: 'Navy bleachers, pom-poms, confetti.' },
+}
+
+export const SKIN_IDS = Object.keys(SKINS) as SkinId[]
 
 const listeners = new Set<() => void>()
 
-export function findSkin(id: string | null | undefined): Skin {
-  return SKINS.find((skin) => skin.id === id) ?? SKINS[0]
+export function parseSkinId(value: string | null | undefined): SkinId {
+  return SKIN_IDS.find((id) => id === value) ?? DEFAULT_CONFIG.skin
 }
 
-export function applySkin(id: string | null | undefined): void {
-  document.documentElement.dataset.skin = findSkin(id).id
+export function applySkin(value: string | null | undefined): void {
+  document.documentElement.dataset.skin = parseSkinId(value)
   for (const listener of listeners) listener()
 }
 
@@ -32,5 +33,5 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useSkin(): Skin {
-  return useSyncExternalStore(subscribe, () => findSkin(document.documentElement.dataset.skin))
+  return SKINS[useSyncExternalStore(subscribe, () => parseSkinId(document.documentElement.dataset.skin))]
 }

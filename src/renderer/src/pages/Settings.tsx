@@ -15,7 +15,7 @@ import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
-import { SKINS, applySkin } from '../lib/skins'
+import { SKIN_IDS, SKINS, applySkin } from '../lib/skins'
 import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
@@ -258,24 +258,24 @@ function AppearanceSection({ config, onChange }: SectionProps) {
       <SectionHeader title="Appearance">A skin changes Rally's colors and backdrop. Picking one previews it until you save or discard.</SectionHeader>
       <Card title="Skin">
         <div role="radiogroup" aria-label="Skin" className="divide-y divide-white/5">
-          {SKINS.map((skin) => (
+          {SKIN_IDS.map((id) => (
             <button
-              key={skin.id}
+              key={id}
               type="button"
               role="radio"
-              aria-checked={skin.id === config.skin}
-              onClick={() => onChange({ ...config, skin: skin.id })}
-              className={`flex w-full items-center gap-4 px-4 py-3 text-left transition first:rounded-t-xl last:rounded-b-xl ${skin.id === config.skin ? 'bg-white/5' : 'hover:bg-white/[0.03]'}`}
+              aria-checked={id === config.skin}
+              onClick={() => onChange({ ...config, skin: id })}
+              className={`flex w-full items-center gap-4 px-4 py-3 text-left transition first:rounded-t-xl last:rounded-b-xl ${id === config.skin ? 'bg-white/5' : 'hover:bg-white/[0.03]'}`}
             >
-              {skin.mark ? <span className="w-7 text-center text-2xl">{skin.mark}</span> : <img src={logo} alt="" className="h-7 w-7" />}
+              {SKINS[id].mark ? <span className="w-7 text-center text-2xl">{SKINS[id].mark}</span> : <img src={logo} alt="" className="h-7 w-7" />}
               <span className="min-w-0 flex-1">
-                <span className="block text-sm text-ink-100">{skin.name}</span>
-                <span className="block text-xs text-ink-500">{skin.tagline}</span>
+                <span className="block text-sm text-ink-100">{SKINS[id].name}</span>
+                <span className="block text-xs text-ink-500">{SKINS[id].tagline}</span>
               </span>
               <span
-                className={`flex h-4 w-4 items-center justify-center rounded-full ring-1 ${skin.id === config.skin ? 'bg-secondary-500 ring-secondary-500' : 'ring-ink-600'}`}
+                className={`flex h-4 w-4 items-center justify-center rounded-full ring-1 ${id === config.skin ? 'bg-secondary-500 ring-secondary-500' : 'ring-ink-600'}`}
               >
-                {skin.id === config.skin && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                {id === config.skin && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
               </span>
             </button>
           ))}

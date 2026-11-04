@@ -10,7 +10,7 @@ import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
-import { age } from '../lib/format'
+import { age, clockTime } from '../lib/format'
 import { usePrs, useSession } from '../lib/hooks'
 import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
@@ -89,6 +89,7 @@ export function PrDetail() {
           key={session.id}
           session={session}
           needsRereview={pr?.phase === 'awaiting_rereview'}
+          prUpdatedAt={pr?.updatedAt ?? null}
           onDiscarded={() => setSession(null)}
           onStartFollowUp={() => startFollowUp(session)}
         />
@@ -112,11 +113,12 @@ export function PrDetail() {
 interface ReviewPanelProps {
   session: ReviewSession
   needsRereview: boolean
+  prUpdatedAt: string | null
   onDiscarded(): void
   onStartFollowUp(): void
 }
 
-function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: ReviewPanelProps) {
+function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStartFollowUp }: ReviewPanelProps) {
   const [edits, setEdits] = useState<DraftEdits>({})
   const [feedback, setFeedback] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -124,6 +126,7 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
   const { drafts } = session
   const message = feedbackMessage(drafts, edits, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
+  const prUpdatedSinceStart = session.status !== 'submitted' && prUpdatedAt !== null && prUpdatedAt > session.createdAt
 
   const run = async (action: () => Promise<void>) => {
     setActionError(null)
@@ -150,6 +153,14 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
           {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />}
           {SESSION_STATUS_LABELS[session.status]}
         </span>
+        <span className="text-sm text-zinc-500" title={new Date(session.createdAt).toLocaleString()}>
+          started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
+        </span>
+        {prUpdatedSinceStart && (
+          <span className="text-sm text-amber-300" title={`PR last updated ${new Date(prUpdatedAt).toLocaleString()}`}>
+            PR updated since start
+          </span>
+        )}
         <div className="ml-auto flex gap-2">
           {busy && (
             <button className="rounded-md bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700" onClick={() => window.rally.cancelReview(session.id)}>

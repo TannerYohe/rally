@@ -91,7 +91,7 @@ Rally doesn't include a review skill; bring your own. Install it where Claude Co
 
 On a PR's detail page, **Start review** opens a Claude Agent SDK session whose first prompt is `/<skill> <url>`. The page shows the session's activity: commands, subagents, and turn cost. An in-process MCP tool, `mcp__rally__publish_drafts`, carries the report and draft comments back to the app as structured data.
 
-You can edit or drop drafts inline, or type feedback, then click **Send to Claude** for another turn. Turns are unlimited, and every turn resumes the same SDK session, so a review survives an app restart.
+You can edit or drop drafts inline, or type feedback, then click **Send to Claude** for another turn. The review header shows when the session started and flags when the PR has been updated since. Turns are unlimited, and every turn resumes the same SDK session, so a review survives an app restart.
 
 **Post and submit** sends a final `SUBMIT` turn. In that turn Claude creates a pending review, posts any thread replies, submits the review with the event you picked (Comment, Approve, or Request changes), and confirms through `mcp__rally__review_submitted`. Rally then re-fetches the PR from GitHub to recompute its phase.
 

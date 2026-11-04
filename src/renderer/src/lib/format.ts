@@ -21,3 +21,10 @@ export function duration(ms: number): string {
   const seconds = Math.round(ms / 1000)
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
+
+export function clockTime(iso: string, now = new Date()): string {
+  const date = new Date(iso)
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (date.toDateString() === now.toDateString()) return time
+  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
+}

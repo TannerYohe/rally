@@ -1,5 +1,6 @@
 import { createHashRouter, Link, NavLink, Outlet, RouterProvider } from 'react-router-dom'
 import logo from '../../../resources/icon.svg'
+import { SETTINGS_ROOT } from './lib/settingsSections'
 import { Dashboard } from './pages/Dashboard'
 import { PrDetail } from './pages/PrDetail'
 import { Settings } from './pages/Settings'
@@ -28,7 +29,7 @@ function Layout() {
           </span>
         </Link>
         <NavLink
-          to="/settings"
+          to={SETTINGS_ROOT}
           title="Settings"
           aria-label="Settings"
           className={({ isActive }) =>
@@ -51,7 +52,7 @@ const router = createHashRouter([
     children: [
       { path: '/', element: <Dashboard /> },
       { path: '/pr/:owner/:repo/:number', element: <PrDetail /> },
-      { path: '/settings/:section?', element: <Settings /> },
+      { path: `${SETTINGS_ROOT}/:section?`, element: <Settings /> },
     ],
   },
 ])

@@ -1,5 +1,5 @@
 import { useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { addEntries, splitEntries } from '../lib/tagEntries'
+import { addEntries, entriesFromPaste, splitEntries } from '../lib/tagEntries'
 
 interface Props {
   values: string[]
@@ -27,10 +27,10 @@ export function TagInput({ values, placeholder, renderIcon, onChange }: Props) {
     }
   }
   const onPaste = (e: ClipboardEvent<HTMLInputElement>) => {
-    const entries = splitEntries(e.clipboardData.getData('text'))
-    if (entries.length > 1) {
+    const entries = entriesFromPaste(draft, e.clipboardData.getData('text'))
+    if (entries) {
       e.preventDefault()
-      add([...splitEntries(draft), ...entries])
+      add(entries)
     }
   }
 

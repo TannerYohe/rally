@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addEntries, splitEntries } from './tagEntries'
+import { addEntries, entriesFromPaste, splitEntries } from './tagEntries'
 
 describe('splitEntries', () => {
   it('splits on commas, spaces, and newlines', () => {
@@ -8,6 +8,21 @@ describe('splitEntries', () => {
 
   it('drops empty entries', () => {
     expect(splitEntries(' ,\n, ')).toEqual([])
+  })
+})
+
+describe('entriesFromPaste', () => {
+  it('keeps the typed draft ahead of a pasted list', () => {
+    expect(entriesFromPaste('alice', 'bob\ncarol')).toEqual(['alice', 'bob', 'carol'])
+  })
+
+  it('returns the pasted list when nothing is typed', () => {
+    expect(entriesFromPaste('', 'bob, carol')).toEqual(['bob', 'carol'])
+  })
+
+  it('returns null for a single entry so it pastes as text', () => {
+    expect(entriesFromPaste('ali', 'ce')).toBeNull()
+    expect(entriesFromPaste('', '  ')).toBeNull()
   })
 })
 

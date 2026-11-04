@@ -1,0 +1,199 @@
+/* Each skin remaps the semantic scales from index.css and sets an optional backdrop pattern and wordmark style. */
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--skin-pattern, none);
+  mask-image: var(--skin-pattern-mask, none);
+}
+
+.wordmark::after {
+  content: var(--skin-mark, none);
+  margin-left: 0.375rem;
+  -webkit-text-fill-color: initial;
+}
+
+:root[data-skin='tennis'] {
+  --skin-mark: '🎾';
+  --court-line: rgb(255 255 255 / 0.05);
+  --skin-pattern:
+    linear-gradient(var(--court-line), var(--court-line)) 12% 0 / 2px 100% no-repeat,
+    linear-gradient(var(--court-line), var(--court-line)) 88% 0 / 2px 100% no-repeat,
+    linear-gradient(var(--court-line), var(--court-line)) 50% 55% / 76% 2px no-repeat,
+    linear-gradient(var(--court-line), var(--court-line)) 50% 0 / 2px 55% no-repeat;
+
+  --color-ink-50: oklch(98.5% 0.004 130);
+  --color-ink-100: oklch(96.5% 0.008 135);
+  --color-ink-200: oklch(92% 0.014 140);
+  --color-ink-300: oklch(86.5% 0.022 145);
+  --color-ink-400: oklch(71% 0.035 150);
+  --color-ink-500: oklch(56% 0.04 152);
+  --color-ink-600: oklch(45% 0.042 154);
+  --color-ink-700: oklch(37.5% 0.042 155);
+  --color-ink-800: oklch(28.5% 0.04 156);
+  --color-ink-900: oklch(22% 0.036 157);
+  --color-ink-950: oklch(15.5% 0.03 158);
+
+  --color-primary-50: var(--color-lime-50);
+  --color-primary-100: var(--color-lime-100);
+  --color-primary-200: var(--color-lime-200);
+  --color-primary-300: var(--color-lime-300);
+  --color-primary-400: var(--color-lime-400);
+  --color-primary-500: var(--color-lime-500);
+  --color-primary-600: var(--color-lime-600);
+  --color-primary-700: var(--color-lime-700);
+  --color-primary-800: var(--color-lime-800);
+  --color-primary-900: var(--color-lime-900);
+  --color-primary-950: var(--color-lime-950);
+
+  --color-secondary-50: var(--color-violet-50);
+  --color-secondary-100: var(--color-violet-100);
+  --color-secondary-200: var(--color-violet-200);
+  --color-secondary-300: var(--color-violet-300);
+  --color-secondary-400: var(--color-violet-400);
+  --color-secondary-500: var(--color-violet-500);
+  --color-secondary-600: var(--color-violet-600);
+  --color-secondary-700: var(--color-violet-700);
+  --color-secondary-800: var(--color-violet-800);
+  --color-secondary-900: var(--color-violet-900);
+  --color-secondary-950: var(--color-violet-950);
+
+  --color-highlight-50: var(--color-sky-50);
+  --color-highlight-100: var(--color-sky-100);
+  --color-highlight-200: var(--color-sky-200);
+  --color-highlight-300: var(--color-sky-300);
+  --color-highlight-400: var(--color-sky-400);
+  --color-highlight-500: var(--color-sky-500);
+  --color-highlight-600: var(--color-sky-600);
+  --color-highlight-700: var(--color-sky-700);
+  --color-highlight-800: var(--color-sky-800);
+  --color-highlight-900: var(--color-sky-900);
+  --color-highlight-950: var(--color-sky-950);
+}
+
+:root[data-skin='motorsport'] {
+  --skin-mark: '🏁';
+  --skin-pattern: repeating-conic-gradient(rgb(255 255 255 / 0.04) 0 25%, transparent 0 50%) 0 0 / 28px 28px;
+  --skin-pattern-mask: linear-gradient(to bottom, black, transparent 240px);
+
+  --color-ink-50: var(--color-stone-50);
+  --color-ink-100: var(--color-stone-100);
+  --color-ink-200: var(--color-stone-200);
+  --color-ink-300: var(--color-stone-300);
+  --color-ink-400: var(--color-stone-400);
+  --color-ink-500: var(--color-stone-500);
+  --color-ink-600: var(--color-stone-600);
+  --color-ink-700: var(--color-stone-700);
+  --color-ink-800: var(--color-stone-800);
+  --color-ink-900: var(--color-stone-900);
+  --color-ink-950: var(--color-stone-950);
+
+  --color-primary-50: var(--color-orange-50);
+  --color-primary-100: var(--color-orange-100);
+  --color-primary-200: var(--color-orange-200);
+  --color-primary-300: var(--color-orange-300);
+  --color-primary-400: var(--color-orange-400);
+  --color-primary-500: var(--color-orange-500);
+  --color-primary-600: var(--color-orange-600);
+  --color-primary-700: var(--color-orange-700);
+  --color-primary-800: var(--color-orange-800);
+  --color-primary-900: var(--color-orange-900);
+  --color-primary-950: var(--color-orange-950);
+
+  --color-secondary-50: var(--color-blue-50);
+  --color-secondary-100: var(--color-blue-100);
+  --color-secondary-200: var(--color-blue-200);
+  --color-secondary-300: var(--color-blue-300);
+  --color-secondary-400: var(--color-blue-400);
+  --color-secondary-500: var(--color-blue-500);
+  --color-secondary-600: var(--color-blue-600);
+  --color-secondary-700: var(--color-blue-700);
+  --color-secondary-800: var(--color-blue-800);
+  --color-secondary-900: var(--color-blue-900);
+  --color-secondary-950: var(--color-blue-950);
+
+  --color-highlight-50: var(--color-red-50);
+  --color-highlight-100: var(--color-red-100);
+  --color-highlight-200: var(--color-red-200);
+  --color-highlight-300: var(--color-red-300);
+  --color-highlight-400: var(--color-red-400);
+  --color-highlight-500: var(--color-red-500);
+  --color-highlight-600: var(--color-red-600);
+  --color-highlight-700: var(--color-red-700);
+  --color-highlight-800: var(--color-red-800);
+  --color-highlight-900: var(--color-red-900);
+  --color-highlight-950: var(--color-red-950);
+}
+
+:root[data-skin='motorsport'] .wordmark {
+  font-style: italic;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+:root[data-skin='pep'] {
+  --skin-mark: '📣';
+  --skin-pattern:
+    radial-gradient(circle, color-mix(in oklab, var(--color-primary-400) 45%, transparent) 0 2.5px, transparent 3px) 0 0 / 97px 89px,
+    radial-gradient(circle, color-mix(in oklab, var(--color-secondary-400) 45%, transparent) 0 2px, transparent 2.5px) 31px 47px / 113px 101px,
+    radial-gradient(circle, color-mix(in oklab, var(--color-highlight-400) 45%, transparent) 0 2px, transparent 2.5px) 63px 13px / 131px 127px,
+    radial-gradient(circle, color-mix(in oklab, var(--color-amber-300) 40%, transparent) 0 1.5px, transparent 2px) 17px 71px / 79px 83px;
+  --skin-pattern-mask: linear-gradient(to bottom, black, transparent 70%);
+
+  --color-ink-50: oklch(98.4% 0.004 260);
+  --color-ink-100: oklch(96.5% 0.01 260);
+  --color-ink-200: oklch(92.5% 0.02 262);
+  --color-ink-300: oklch(86.5% 0.035 262);
+  --color-ink-400: oklch(71% 0.06 264);
+  --color-ink-500: oklch(56% 0.075 265);
+  --color-ink-600: oklch(45% 0.08 266);
+  --color-ink-700: oklch(37.5% 0.085 267);
+  --color-ink-800: oklch(29% 0.08 268);
+  --color-ink-900: oklch(22% 0.07 268);
+  --color-ink-950: oklch(15.5% 0.055 268);
+
+  --color-primary-50: var(--color-pink-50);
+  --color-primary-100: var(--color-pink-100);
+  --color-primary-200: var(--color-pink-200);
+  --color-primary-300: var(--color-pink-300);
+  --color-primary-400: var(--color-pink-400);
+  --color-primary-500: var(--color-pink-500);
+  --color-primary-600: var(--color-pink-600);
+  --color-primary-700: var(--color-pink-700);
+  --color-primary-800: var(--color-pink-800);
+  --color-primary-900: var(--color-pink-900);
+  --color-primary-950: var(--color-pink-950);
+
+  --color-secondary-50: var(--color-violet-50);
+  --color-secondary-100: var(--color-violet-100);
+  --color-secondary-200: var(--color-violet-200);
+  --color-secondary-300: var(--color-violet-300);
+  --color-secondary-400: var(--color-violet-400);
+  --color-secondary-500: var(--color-violet-500);
+  --color-secondary-600: var(--color-violet-600);
+  --color-secondary-700: var(--color-violet-700);
+  --color-secondary-800: var(--color-violet-800);
+  --color-secondary-900: var(--color-violet-900);
+  --color-secondary-950: var(--color-violet-950);
+
+  --color-highlight-50: var(--color-cyan-50);
+  --color-highlight-100: var(--color-cyan-100);
+  --color-highlight-200: var(--color-cyan-200);
+  --color-highlight-300: var(--color-cyan-300);
+  --color-highlight-400: var(--color-cyan-400);
+  --color-highlight-500: var(--color-cyan-500);
+  --color-highlight-600: var(--color-cyan-600);
+  --color-highlight-700: var(--color-cyan-700);
+  --color-highlight-800: var(--color-cyan-800);
+  --color-highlight-900: var(--color-cyan-900);
+  --color-highlight-950: var(--color-cyan-950);
+}
+
+:root[data-skin='pep'] .wordmark {
+  font-family: 'Arial Black', Impact, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

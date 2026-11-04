@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+@import "./skins.css";
 
 /* Components use these semantic scales instead of raw palette names so skins.css can remap them. */
 @theme {

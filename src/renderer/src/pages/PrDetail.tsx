@@ -130,21 +130,23 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const activity = useFollowActivity({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<void>): Promise<boolean> => {
     setActionError(null)
     try {
       await action()
       setEdits({})
       setFeedback('')
+      return true
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
+      return false
     }
   }
 
   const canSend = !busy && Boolean(message)
-  const send = () => {
+  const send = async () => {
     activity.follow()
-    return run(() => window.rally.sendFeedback(session.id, message))
+    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) activity.unfollow()
   }
   const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return

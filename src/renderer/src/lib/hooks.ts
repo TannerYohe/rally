@@ -46,6 +46,7 @@ interface FollowActivity {
   open: boolean
   onToggle(event: SyntheticEvent<HTMLDetailsElement>): void
   follow(): void
+  unfollow(): void
 }
 
 export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityInput): FollowActivity {
@@ -83,5 +84,6 @@ export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityI
       setOpen(true)
       setFollowing(true)
     },
+    unfollow: () => setFollowing(false),
   }
 }

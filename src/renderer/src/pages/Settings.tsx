@@ -43,18 +43,23 @@ export function Settings() {
 
   if (!config || !savedConfig) return null
 
-  const save = async (): Promise<boolean> => {
+  const edit = (next: Config) => {
+    setConfig(next)
+    setSaveError(null)
+  }
+  const save = async (): Promise<string | null> => {
     try {
       await window.rally.saveConfig(config)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error))
-      return false
+      const message = error instanceof Error ? error.message : String(error)
+      setSaveError(message)
+      return message
     }
     setSaveError(null)
     setSavedConfig(config)
     setJustSaved(true)
     setTimeout(() => setJustSaved(false), 2000)
-    return true
+    return null
   }
 
   return (
@@ -79,7 +84,7 @@ export function Settings() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="max-w-2xl space-y-5 px-10 py-8">
-            <SectionBody section={section} config={config} health={health} onChange={setConfig} />
+            <SectionBody section={section} config={config} health={health} onChange={edit} />
           </div>
         </div>
         <div className="flex items-center gap-3 border-t border-white/5 bg-zinc-950/70 px-10 py-3 text-sm backdrop-blur">
@@ -87,7 +92,7 @@ export function Settings() {
           <button
             className="ml-auto rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100 disabled:invisible"
             disabled={!dirty}
-            onClick={() => setConfig(savedConfig)}
+            onClick={() => edit(savedConfig)}
           >
             Discard
           </button>
@@ -99,7 +104,7 @@ export function Settings() {
           </button>
         </div>
       </div>
-      {blocker.state === 'blocked' && <UnsavedChangesDialog blocker={blocker} error={saveError} onSave={save} />}
+      {blocker.state === 'blocked' && <UnsavedChangesDialog blocker={blocker} onSave={save} />}
     </div>
   )
 }

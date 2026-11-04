@@ -1,14 +1,15 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { Blocker } from 'react-router-dom'
 import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 interface Props {
   blocker: Blocker
-  error: string | null
-  onSave(): Promise<boolean>
+  onSave(): Promise<string | null>
 }
 
-export function UnsavedChangesDialog({ blocker, error, onSave }: Props) {
+export function UnsavedChangesDialog({ blocker, onSave }: Props) {
+  const [error, setError] = useState<string | null>(null)
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && blocker.reset?.()
     window.addEventListener('keydown', onKeyDown)
@@ -16,7 +17,9 @@ export function UnsavedChangesDialog({ blocker, error, onSave }: Props) {
   }, [blocker])
 
   const saveAndLeave = async () => {
-    if (await onSave()) blocker.proceed?.()
+    const failure = await onSave()
+    if (failure) setError(failure)
+    else blocker.proceed?.()
   }
 
   return (

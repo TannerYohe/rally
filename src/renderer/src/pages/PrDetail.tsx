@@ -10,7 +10,7 @@ import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
-import { age, clockTime } from '../lib/format'
+import { age, clockTime, fullTime } from '../lib/format'
 import { useFollowActivity, usePrs, useSession } from '../lib/hooks'
 import { BUSY_STATUSES, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME } from '../lib/theme'
@@ -166,13 +166,13 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />}
           {SESSION_STATUS_LABELS[session.status]}
         </span>
-        <span className="text-sm text-zinc-500" title={new Date(session.createdAt).toLocaleString()}>
+        <span className="text-sm text-zinc-500" title={fullTime(session.createdAt)}>
           started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
         </span>
         {prUpdatedAfterLastTurn && prUpdatedAt && (
           <span
             className="text-sm text-amber-300"
-            title={`PR updated ${new Date(prUpdatedAt).toLocaleString()}, after Claude's last turn started at ${new Date(lastTurnAt).toLocaleString()}`}
+            title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last turn started at ${fullTime(lastTurnAt)}`}
           >
             PR updated since last turn
           </span>

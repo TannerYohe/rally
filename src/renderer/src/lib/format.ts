@@ -28,3 +28,7 @@ export function clockTime(iso: string, now = new Date()): string {
   if (date.toDateString() === now.toDateString()) return time
   return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
 }
+
+export function fullTime(iso: string): string {
+  return new Date(iso).toLocaleString()
+}

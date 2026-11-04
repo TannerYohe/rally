@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useBlocker, useParams, type Blocker } from 'react-router-dom'
+import { Link, useBlocker, useParams } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
   EFFORT_LABELS,
@@ -10,7 +10,9 @@ import {
   type ModelChoice,
 } from '@shared/types'
 import { Avatar } from '../components/Avatar'
+import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
@@ -96,52 +98,6 @@ export function Settings() {
         </div>
       </div>
       {blocker.state === 'blocked' && <UnsavedChangesDialog blocker={blocker} onSave={save} />}
-    </div>
-  )
-}
-
-function UnsavedChangesDialog({ blocker, onSave }: { blocker: Blocker; onSave(): Promise<void> }) {
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && blocker.reset?.()
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [blocker])
-
-  const saveAndLeave = async () => {
-    await onSave()
-    blocker.proceed?.()
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => blocker.reset?.()}>
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="unsaved-changes-title"
-        className="w-96 space-y-4 rounded-xl border border-white/10 bg-zinc-900 p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="space-y-1">
-          <h2 id="unsaved-changes-title" className="font-semibold">
-            Unsaved changes
-          </h2>
-          <p className="text-sm text-zinc-400">Save your settings before leaving?</p>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <button autoFocus className="rounded-md px-3 py-1.5 text-zinc-400 hover:text-zinc-100" onClick={() => blocker.reset?.()}>
-            Keep editing
-          </button>
-          <button className="ml-auto rounded-md px-3 py-1.5 text-rose-300 hover:bg-rose-500/10" onClick={() => blocker.proceed?.()}>
-            Discard
-          </button>
-          <button
-            className="rounded-md bg-gradient-to-r from-sky-500 to-violet-500 px-4 py-1.5 font-medium text-white hover:from-sky-400 hover:to-violet-400"
-            onClick={saveAndLeave}
-          >
-            Save and leave
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -351,21 +307,6 @@ function StackedRow({ label, description, children }: { label: string; descripti
       </div>
       {children}
     </div>
-  )
-}
-
-function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange(checked: boolean): void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition ${checked ? 'bg-violet-500' : 'bg-zinc-700'}`}
-    >
-      <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${checked ? 'translate-x-4' : ''}`} />
-    </button>
   )
 }
 

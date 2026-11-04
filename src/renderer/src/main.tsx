@@ -15,4 +15,5 @@ function render() {
 window.rally
   .getConfig()
   .then((config) => applySkin(config.skin))
+  .catch(() => applySkin(null))
   .finally(render)

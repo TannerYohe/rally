@@ -39,6 +39,10 @@ describe('feedbackMessage', () => {
     )
   })
 
+  it('ignores comment edits that only change surrounding whitespace', () => {
+    expect(feedbackMessage(drafts, { '2': { body: 'original 2\n' } }, undefined, '')).toBe('')
+  })
+
   it('ignores whitespace typed where no review body was drafted', () => {
     expect(feedbackMessage(drafts, {}, ' \n ', '')).toBe('')
   })

@@ -1,4 +1,4 @@
-import { summaryBodyEdited } from '../lib/feedback'
+import { bodyEdited } from '../lib/feedback'
 import { BodyTextarea } from './BodyTextarea'
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
 
 export function ReviewBodyEditor({ original, edit, disabled, onEdit }: Props) {
   const body = edit ?? original
-  const edited = summaryBodyEdited(original, edit)
+  const edited = bodyEdited(original, edit)
   return (
     <div className="rounded-xl border border-white/5 bg-ink-900/60 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs">

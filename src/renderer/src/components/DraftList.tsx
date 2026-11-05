@@ -1,5 +1,5 @@
 import type { DraftComment, Drafts, Severity } from '@shared/types'
-import type { DraftEdits } from '../lib/feedback'
+import { bodyEdited, type DraftEdits } from '../lib/feedback'
 import { BodyTextarea } from './BodyTextarea'
 
 const SEVERITY_STYLES: Record<Severity, string> = {
@@ -38,7 +38,7 @@ export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
         const edit = edits[comment.id]
         const dropped = edit?.dropped ?? false
         const body = edit?.body ?? comment.body
-        const edited = edit?.body !== undefined && edit.body !== comment.body
+        const edited = bodyEdited(comment.body, edit?.body)
         return (
           <li
             key={comment.id}

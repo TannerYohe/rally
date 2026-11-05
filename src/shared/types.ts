@@ -19,6 +19,18 @@ export interface MyReview {
   replyOnly: boolean
 }
 
+export type HideMode = 'snooze' | 'hide'
+
+export const HIDE_MODE_LABELS: Record<HideMode, string> = {
+  snooze: 'Snoozed until updated',
+  hide: 'Hidden',
+}
+
+export interface PrHide {
+  mode: HideMode
+  at: string
+}
+
 export interface Pr {
   id: string
   number: number
@@ -47,6 +59,7 @@ export interface Pr {
   reviewStatus: SessionStatus | null
   summary: string | null
   summaryError: string | null
+  hidden: PrHide | null
 }
 
 export type ModelChoice = 'opus' | 'opus[1m]' | 'sonnet' | 'sonnet[1m]' | 'haiku'

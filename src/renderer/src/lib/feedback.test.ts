@@ -47,6 +47,24 @@ describe('feedbackMessage', () => {
     expect(feedbackMessage(drafts, {}, ' \n ', '')).toBe('')
   })
 
+  describe('with a drafted review body', () => {
+    const withBody = { ...drafts, summaryBody: 'Nice work.' }
+
+    it('sends nothing when the body is untouched', () => {
+      expect(feedbackMessage(withBody, {}, undefined, '')).toBe('')
+    })
+
+    it('ignores an edit that only adds a trailing newline', () => {
+      expect(feedbackMessage(withBody, {}, 'Nice work.\n', '')).toBe('')
+    })
+
+    it('passes a rewrite as final wording', () => {
+      expect(feedbackMessage(withBody, {}, 'Nice work, one blocker.', '')).toBe(
+        'Edits I made in Rally:\n- I rewrote the review body; use this as final wording:\n  """Nice work, one blocker."""',
+      )
+    })
+  })
+
   it('asks to remove a review body cleared to whitespace', () => {
     expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, {}, '  ', '')).toBe('Edits I made in Rally:\n- Remove the review body.')
   })

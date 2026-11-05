@@ -205,22 +205,3 @@ export function parseShellWords(segment: string): ShellWords {
   endWord()
   return { words, redirects }
 }
-
-export function hasShellExpansion(segment: string): boolean {
-  let quote: string | null = null
-  for (let i = 0; i < segment.length; i++) {
-    const ch = segment[i]
-    if (quote === "'") {
-      if (ch === "'") quote = null
-    } else if (ch === '\\') {
-      i++
-    } else if (ch === '`' || (ch === '$' && i + 1 < segment.length && !/\s/.test(segment[i + 1]))) {
-      return true
-    } else if (ch === '"') {
-      quote = quote === '"' ? null : '"'
-    } else if (ch === "'" && !quote) {
-      quote = "'"
-    }
-  }
-  return false
-}

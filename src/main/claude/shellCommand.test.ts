@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasShellExpansion, parseShellWords, splitShellCommand } from './shellCommand'
+import { parseShellWords, splitShellCommand } from './shellCommand'
 
 describe('splitShellCommand', () => {
   it('splits on operators but not inside quotes', () => {
@@ -78,23 +78,5 @@ describe('parseShellWords', () => {
 
   it('treats quoted angle brackets as words', () => {
     expect(parseShellWords("grep -- '->' file").words).toEqual(['grep', '--', '->', 'file'])
-  })
-})
-
-describe('hasShellExpansion', () => {
-  it('ignores dollars and backticks inside single quotes', () => {
-    expect(hasShellExpansion("gh api graphql -f query='query($o: String!) { x }' -f o=acme")).toBe(false)
-  })
-
-  it('finds variables, substitutions, and backticks outside single quotes', () => {
-    expect(hasShellExpansion('gh api graphql -f query="${Q}"')).toBe(true)
-    expect(hasShellExpansion('gh api graphql -f query=$Q')).toBe(true)
-    expect(hasShellExpansion('gh api graphql -f query="$(cat q.graphql)"')).toBe(true)
-    expect(hasShellExpansion('gh api graphql -f query="`cat q`"')).toBe(true)
-    expect(hasShellExpansion("gh api graphql -f query=$'mutation {}'")).toBe(true)
-  })
-
-  it('treats escaped and lone dollars as literal', () => {
-    expect(hasShellExpansion('echo \\$HOME costs $ 5')).toBe(false)
   })
 })

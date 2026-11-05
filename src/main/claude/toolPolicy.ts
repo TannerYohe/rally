@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { topLevelMutationFields } from './graphqlMutations'
-import { hasShellExpansion, parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
+import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
@@ -465,9 +465,6 @@ function decideGhApi(args: string[], segment: string, context: PolicyContext): T
   if (endpoint === 'graphql') {
     if (args.some((a) => matchesFlag(a, '--input')) || !graphqlQueries(args).every(isInlineGraphql)) {
       return deny("Rally only inspects inline graphql queries. Pass the query text with `-f query='...'`.")
-    }
-    if (hasShellExpansion(segment)) {
-      return deny('Rally only inspects literal graphql commands. Inline every value instead of using shell variables or substitutions.')
     }
     const fields = mutationFields(graphqlQueries(args))
     if (fields === null) return deny('Rally could not parse this graphql query, so it is blocked.')

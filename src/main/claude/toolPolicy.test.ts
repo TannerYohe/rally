@@ -76,6 +76,15 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api repos/acme/other/pulls/12/reviews --method POST --input x.json', SUBMITTING)).toBe(false)
     expect(bash('gh api repos/acme/api/pulls/13/reviews/99/events --method POST -f event=COMMENT', SUBMITTING)).toBe(false)
     expect(bash('gh api repos/ACME/Api/pulls/12/reviews/99 --method DELETE', SUBMITTING)).toBe(true)
+    expect(bash('gh api repos/other/api/pulls/12/reviews --method POST --input x.json', SUBMITTING)).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/13/reviews/99 --method DELETE', SUBMITTING)).toBe(false)
+  })
+
+  it('only allows each review write on the path shape it belongs to', () => {
+    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method POST -f body=x', SUBMITTING)).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/12/reviews --method DELETE', SUBMITTING)).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/12/reviews/99/events --method DELETE', SUBMITTING)).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method PUT -f body=x', SUBMITTING)).toBe(false)
   })
 
   it('blocks review paths with query or fragment characters that gh would cut the path at', () => {

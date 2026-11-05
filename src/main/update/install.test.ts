@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('node:child_process', () => ({ execFile: mocks.execFile, spawn: mocks.spawn }))
 
 const {
+  handOffInstall,
   handOffMacInstall,
   handOffWindowsInstall,
   installBlocker,
@@ -21,6 +22,7 @@ const {
   macPreviousAppPath,
   macSwapArgs,
   WINDOWS_INSTALL_SCRIPT,
+  windowsInstallArgs,
 } = await import('./install')
 
 const release: ReleaseInfo = {
@@ -171,34 +173,63 @@ describe('handOffMacInstall', () => {
   })
 })
 
-describe('handOffWindowsInstall', () => {
-  let workDir: string
+describe('windowsInstallArgs', () => {
+  const decode = (args: string[]) => Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le')
 
+  it('runs the script as an encoded command, which execution policy does not apply to', () => {
+    const args = windowsInstallArgs('C:\\Temp\\Rally.exe', 'C:\\data\\update.log')
+    expect(args.slice(0, -1)).toEqual(['-NoProfile', '-NonInteractive', '-EncodedCommand'])
+    expect(decode(args)).toBe(`& {${WINDOWS_INSTALL_SCRIPT}} -Installer 'C:\\Temp\\Rally.exe' -Log 'C:\\data\\update.log'`)
+  })
+
+  it('doubles single quotes in paths', () => {
+    expect(decode(windowsInstallArgs("C:\\Users\\o'brien\\Rally.exe", 'C:\\log'))).toContain("-Installer 'C:\\Users\\o''brien\\Rally.exe'")
+  })
+})
+
+describe('handOffWindowsInstall', () => {
   beforeEach(() => {
-    workDir = mkdtempSync(join(tmpdir(), 'rally-handoff-test-'))
     mocks.spawn.mockReset()
   })
 
-  afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true })
-  })
-
-  it('writes the install script and runs it with the installer and log', async () => {
+  it('starts PowerShell with the encoded install command', async () => {
     stubSpawn()
-    const downloadPath = join(workDir, 'Rally-1.7.0-x64.exe')
-    await handOffWindowsInstall({ downloadPath, workDir, exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' })
-    const script = join(workDir, 'install.ps1')
-    expect(readFileSync(script, 'utf8')).toBe(WINDOWS_INSTALL_SCRIPT)
+    const handOff = { downloadPath: 'C:\\Temp\\Rally.exe', workDir: 'C:\\Temp', exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' }
+    await handOffWindowsInstall(handOff)
     expect(mocks.spawn).toHaveBeenCalledWith(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, downloadPath, 'C:\\data\\update.log'],
-      expect.objectContaining({ detached: true }),
+      windowsInstallArgs('C:\\Temp\\Rally.exe', 'C:\\data\\update.log'),
+      expect.objectContaining({ detached: true, windowsHide: true }),
     )
   })
 
   it('fails when PowerShell cannot start', async () => {
     stubSpawn('error')
-    const handOff = { downloadPath: 'x.exe', workDir, exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' }
+    const handOff = { downloadPath: 'x.exe', workDir: 'C:\\Temp', exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' }
     await expect(handOffWindowsInstall(handOff)).rejects.toThrow('spawn EACCES')
+  })
+})
+
+describe('handOffInstall', () => {
+  let dataDir: string
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'rally-handoff-test-'))
+    mocks.spawn.mockReset()
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+  })
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', platform)
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  it('logs the hand-off before starting the installer, even if it never starts', async () => {
+    stubSpawn('error')
+    const logPath = join(dataDir, 'update.log')
+    const handOff = { downloadPath: join(dataDir, 'Rally-1.7.0-x64.exe'), workDir: dataDir, exePath: 'C:\\Rally\\Rally.exe', dataDir, logPath }
+    await expect(handOffInstall(handOff)).rejects.toThrow('spawn EACCES')
+    expect(readFileSync(logPath, 'utf8')).toMatch(new RegExp(`^\\S+ handing off .*Rally-1\\.7\\.0-x64\\.exe\\n$`))
   })
 })

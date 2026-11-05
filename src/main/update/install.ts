@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { accessSync, constants, existsSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, appendFileSync, constants, existsSync, rmSync } from 'node:fs'
 import { join, posix } from 'node:path'
 import { promisify } from 'node:util'
 import type { ReleaseInfo } from '@shared/types'
@@ -9,7 +9,6 @@ const run = promisify(execFile)
 const MAC_APP_NAME = 'Rally.app'
 const INSTALL_LOG = 'update.log'
 const MAC_SYSTEM_ENV = { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }
-const WINDOWS_SCRIPT_NAME = 'install.ps1'
 
 export const MAC_SWAP_SCRIPT = `
 pid=$1 new_app=$2 current_app=$3 previous_app=$4 work_dir=$5 data_dir=$6 log=$7
@@ -46,6 +45,15 @@ try {
   "installer failed to start: $_" | Add-Content -LiteralPath $Log
 }
 `
+
+function powershellString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+export function windowsInstallArgs(installer: string, logPath: string): string[] {
+  const command = `& {${WINDOWS_INSTALL_SCRIPT}} -Installer ${powershellString(installer)} -Log ${powershellString(logPath)}`
+  return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')]
+}
 
 export function macBundlePath(exePath: string): string {
   return posix.resolve(exePath, '../../..')
@@ -145,13 +153,12 @@ export async function handOffMacInstall({ downloadPath, workDir, exePath, dataDi
   await spawnDetached('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'rally-update', ...args], MAC_SYSTEM_ENV)
 }
 
-export async function handOffWindowsInstall({ downloadPath, workDir, logPath }: HandOff): Promise<void> {
-  const script = join(workDir, WINDOWS_SCRIPT_NAME)
-  writeFileSync(script, WINDOWS_INSTALL_SCRIPT)
-  await spawnDetached('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, downloadPath, logPath])
+export async function handOffWindowsInstall({ downloadPath, logPath }: HandOff): Promise<void> {
+  await spawnDetached('powershell.exe', windowsInstallArgs(downloadPath, logPath))
 }
 
 export async function handOffInstall(handOff: HandOff): Promise<void> {
+  appendFileSync(handOff.logPath, `${new Date().toISOString()} handing off ${handOff.downloadPath}\n`)
   switch (process.platform) {
     case 'darwin':
       return handOffMacInstall(handOff)

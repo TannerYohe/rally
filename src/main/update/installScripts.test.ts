@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs, WINDOWS_INSTALL_SCRIPT } from './install'
+import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs, windowsInstallArgs } from './install'
 
 describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
   let root: string
@@ -117,15 +117,15 @@ describe.runIf(process.platform === 'win32')('WINDOWS_INSTALL_SCRIPT', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it("runs the installer silently and logs its exit code", () => {
-    const script = join(root, 'install.ps1')
-    const installer = join(root, 'fake-installer.cmd')
-    const log = join(root, 'update.log')
-    writeFileSync(script, WINDOWS_INSTALL_SCRIPT)
+  it('runs the installer silently and logs its exit code, with quotes and spaces in the paths', () => {
+    const dir = join(root, "o'brien files")
+    mkdirSync(dir)
+    const installer = join(dir, 'fake-installer.cmd')
+    const log = join(dir, 'update.log')
     writeFileSync(installer, '@echo %* > "%~dp0args.txt"\r\n@exit /b 3\r\n')
-    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installer, log])
+    const result = spawnSync('powershell.exe', windowsInstallArgs(installer, log))
     expect(result.status).toBe(0)
-    expect(readFileSync(join(root, 'args.txt'), 'utf8').trim()).toBe('/S --force-run')
+    expect(readFileSync(join(dir, 'args.txt'), 'utf8').trim()).toBe('/S --force-run')
     expect(readFileSync(log, 'utf8')).toContain('installer exited with code 3')
   })
 })

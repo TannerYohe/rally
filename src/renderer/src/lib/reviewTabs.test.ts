@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { automaticReviewTab, isReviewTabEmpty, selectedReviewTab } from './reviewTabs'
+import { automaticReviewTab, emptyReviewTabs, selectedReviewTab } from './reviewTabs'
 
 describe('automaticReviewTab', () => {
   it('shows Activity while Claude is working', () => {
@@ -25,19 +25,12 @@ describe('selectedReviewTab', () => {
   })
 })
 
-describe('isReviewTabEmpty', () => {
-  it('never marks Activity empty', () => {
-    expect(isReviewTabEmpty('activity', { hasDrafts: false, threadCount: 0 })).toBe(false)
-  })
-
-  it('marks Report and Drafts empty until drafts exist', () => {
-    expect(isReviewTabEmpty('report', { hasDrafts: false, threadCount: 0 })).toBe(true)
-    expect(isReviewTabEmpty('drafts', { hasDrafts: false, threadCount: 0 })).toBe(true)
-    expect(isReviewTabEmpty('drafts', { hasDrafts: true, threadCount: 0 })).toBe(false)
+describe('emptyReviewTabs', () => {
+  it('marks Report and Drafts empty until drafts exist, and never Activity', () => {
+    expect(emptyReviewTabs({ hasDrafts: false, threadCount: 1 })).toEqual({ activity: false, report: true, threads: false, drafts: true })
   })
 
   it('marks Threads empty when there are no earlier comments', () => {
-    expect(isReviewTabEmpty('threads', { hasDrafts: true, threadCount: 0 })).toBe(true)
-    expect(isReviewTabEmpty('threads', { hasDrafts: true, threadCount: 2 })).toBe(false)
+    expect(emptyReviewTabs({ hasDrafts: true, threadCount: 0 })).toEqual({ activity: false, report: false, threads: true, drafts: false })
   })
 })

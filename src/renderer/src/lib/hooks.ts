@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type TimelineEntry } from '@shared/types'
+import { selectedReviewTab, type ReviewTab } from './reviewTabs'
 import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
@@ -36,36 +37,34 @@ export function usePersistentState<T>(key: string, fallback: T): [T, (value: T) 
   return [value, update]
 }
 
-interface FollowActivityInput {
+interface ReviewTabInput {
   busy: boolean
   hasDrafts: boolean
   timeline: TimelineEntry[]
 }
 
-interface FollowActivity {
-  ref: RefObject<HTMLDetailsElement | null>
-  open: boolean
-  onToggle(event: SyntheticEvent<HTMLDetailsElement>): void
+interface ReviewTabState {
+  tab: ReviewTab
+  activityRef: RefObject<HTMLDivElement | null>
+  select(tab: ReviewTab): void
   follow(): void
   unfollow(): void
 }
 
-export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityInput): FollowActivity {
-  const ref = useRef<HTMLDetailsElement>(null)
-  const [pinned, setPinned] = useState(false)
+export function useReviewTab({ busy, hasDrafts, timeline }: ReviewTabInput): ReviewTabState {
+  const activityRef = useRef<HTMLDivElement>(null)
+  const [chosen, setChosen] = useState<ReviewTab | null>(null)
   const [following, setFollowing] = useState(false)
-  const autoOpen = busy || !hasDrafts || pinned
-  const [open, setOpen] = useState(autoOpen)
-
-  useEffect(() => setOpen(autoOpen), [autoOpen])
+  const tab = selectedReviewTab(chosen, { busy, hasDrafts })
 
   useEffect(() => {
-    if (busy) setOpen(true)
+    setChosen(null)
+    if (!busy) setFollowing(false)
   }, [busy])
 
   useEffect(() => {
-    if (following) ref.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  }, [following, open, timeline])
+    if (following && tab === 'activity') activityRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }, [following, tab, timeline])
 
   useEffect(() => {
     if (!following) return
@@ -76,17 +75,15 @@ export function useFollowActivity({ busy, hasDrafts, timeline }: FollowActivityI
     return () => window.removeEventListener('wheel', stopOnScrollUp)
   }, [following])
 
-  useEffect(() => {
-    if (!busy) setFollowing(false)
-  }, [busy])
-
   return {
-    ref,
-    open,
-    onToggle: (event) => setOpen(event.currentTarget.open),
+    tab,
+    activityRef,
+    select: (next) => {
+      setChosen(next)
+      if (next !== 'activity') setFollowing(false)
+    },
     follow: () => {
-      setPinned(true)
-      setOpen(true)
+      setChosen('activity')
       setFollowing(true)
     },
     unfollow: () => setFollowing(false),

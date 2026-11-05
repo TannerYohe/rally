@@ -27,14 +27,6 @@ interface EmptyTabInput {
   threadCount: number
 }
 
-export function isReviewTabEmpty(tab: ReviewTab, { hasDrafts, threadCount }: EmptyTabInput): boolean {
-  switch (tab) {
-    case 'activity':
-      return false
-    case 'report':
-    case 'drafts':
-      return !hasDrafts
-    case 'threads':
-      return threadCount === 0
-  }
+export function emptyReviewTabs({ hasDrafts, threadCount }: EmptyTabInput): Record<ReviewTab, boolean> {
+  return { activity: false, report: !hasDrafts, threads: threadCount === 0, drafts: !hasDrafts }
 }

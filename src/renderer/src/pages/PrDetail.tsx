@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
@@ -9,11 +9,13 @@ import { DiffStat } from '../components/DiffStat'
 import { PhaseBadge } from '../components/PhaseBadge'
 import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
+import { ReviewTabBar, reviewPanelId, reviewTabId } from '../components/ReviewTabBar'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
-import { useFollowActivity, usePrs, useSession, useThreadResolution } from '../lib/hooks'
+import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { emptyReviewTabs, type ReviewTab } from '../lib/reviewTabs'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 export function PrDetail() {
@@ -129,10 +131,21 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const message = feedbackMessage(drafts, edits, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
   const lastTurnAt = lastTurnStartedAt(session)
-  const activity = useFollowActivity({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
+  const reviewTab = useReviewTab({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
   const threadResolution = useThreadResolution(session)
   const resolvingThreads = threadResolution.resolving
+  const emptyTabs = emptyReviewTabs({ hasDrafts: Boolean(drafts), threadCount: threadResolution.rows.length })
+  const tabBadges: Record<ReviewTab, ReactNode> = {
+    activity: busy && <span className="h-2 w-2 animate-pulse rounded-full bg-primary-400" />,
+    report: drafts && (
+      <span className="max-w-48 truncate text-xs font-normal text-ink-400" title={drafts.verdict}>
+        {drafts.verdict}
+      </span>
+    ),
+    threads: threadResolution.rows.length > 0 && <TabCount count={threadResolution.selectedIds.length} />,
+    drafts: drafts && <TabCount count={keptComments} />,
+  }
 
   const run = async (action: () => Promise<void>): Promise<boolean> => {
     setActionError(null)
@@ -149,8 +162,8 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
 
   const canSend = !busy && Boolean(message)
   const send = async () => {
-    activity.follow()
-    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) activity.unfollow()
+    reviewTab.follow()
+    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) reviewTab.unfollow()
   }
   const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
@@ -223,40 +236,44 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         </div>
       )}
 
-      <details
-        ref={activity.ref}
-        className="rounded-xl border border-white/5 bg-ink-900/40 p-4"
-        open={activity.open}
-        onToggle={activity.onToggle}
-      >
-        <summary className="cursor-pointer text-sm font-semibold">Activity</summary>
-        <div className="mt-3">
+      <ReviewTabBar tab={reviewTab.tab} badges={tabBadges} empty={emptyTabs} onSelect={reviewTab.select} />
+
+      <TabPanel id="activity" selected={reviewTab.tab}>
+        <div ref={reviewTab.activityRef}>
           <ProgressTimeline timeline={session.timeline} />
         </div>
-      </details>
+      </TabPanel>
 
-      {drafts && (
-        <>
-          <details className="rounded-xl border border-white/5 bg-ink-900/40 p-4" open>
-            <summary className="cursor-pointer text-sm font-semibold">
-              Report · <span className="font-normal text-ink-400">{drafts.verdict}</span>
-            </summary>
-            <div className="mt-3">
-              <Markdown>{drafts.reportMarkdown}</Markdown>
+      <TabPanel id="report" selected={reviewTab.tab}>
+        {drafts ? (
+          <div className="space-y-3">
+            <div className="text-sm">
+              <span className="text-ink-500">Verdict · </span>
+              <span className="text-ink-200">{drafts.verdict}</span>
             </div>
-          </details>
+            <Markdown>{drafts.reportMarkdown}</Markdown>
+          </div>
+        ) : (
+          <EmptyTab>Claude hasn't published a report yet.</EmptyTab>
+        )}
+      </TabPanel>
 
-          {threadResolution.rows.length > 0 && (
-            <PriorConcernList
-              state={threadResolution}
-              resolution={session.threadResolution ?? null}
-              disabled={busy || resolvingThreads}
-              submitted={submitted}
-            />
-          )}
+      <TabPanel id="threads" selected={reviewTab.tab}>
+        {threadResolution.rows.length > 0 ? (
+          <PriorConcernList
+            state={threadResolution}
+            resolution={session.threadResolution ?? null}
+            disabled={busy || resolvingThreads}
+            submitted={submitted}
+          />
+        ) : (
+          <EmptyTab>No earlier comments. Threads appear in follow-up reviews.</EmptyTab>
+        )}
+      </TabPanel>
 
+      <TabPanel id="drafts" selected={reviewTab.tab}>
+        {drafts ? (
           <div className="space-y-2">
-            <h3 className="text-sm font-semibold">Draft comments</h3>
             <DraftList
               drafts={drafts}
               edits={edits}
@@ -270,8 +287,10 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               </div>
             )}
           </div>
-        </>
-      )}
+        ) : (
+          <EmptyTab>Claude hasn't drafted any comments yet.</EmptyTab>
+        )}
+      </TabPanel>
 
       {!submitted && (
         <div className="space-y-3">
@@ -299,4 +318,20 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       )}
     </section>
   )
+}
+
+function TabPanel({ id, selected, children }: { id: ReviewTab; selected: ReviewTab; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={reviewPanelId(id)} aria-labelledby={reviewTabId(id)} hidden={id !== selected}>
+      {children}
+    </div>
+  )
+}
+
+function TabCount({ count }: { count: number }) {
+  return <span className="rounded-full bg-white/10 px-1.5 text-xs font-normal text-ink-200">{count}</span>
+}
+
+function EmptyTab({ children }: { children: ReactNode }) {
+  return <p className="py-6 text-center text-sm text-ink-500">{children}</p>
 }

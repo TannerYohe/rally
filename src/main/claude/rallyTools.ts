@@ -4,7 +4,6 @@ import { CONCERN_STATUSES, type Drafts, type SubmittedReview } from '@shared/typ
 
 export interface RallyToolHandlers {
   onDrafts(drafts: Drafts): void
-  onPendingReview(reviewId: number): void
   onSubmitted(review: SubmittedReview): void
 }
 
@@ -22,13 +21,11 @@ const commentSchema = z.object({
 
 const PUBLISH_DRAFTS = 'publish_drafts'
 const REVIEW_SUBMITTED = 'review_submitted'
-const PENDING_REVIEW_CREATED = 'pending_review_created'
 
 export const RALLY_SERVER = 'rally'
 export const RALLY_TOOL_PREFIX = `mcp__${RALLY_SERVER}__`
 export const PUBLISH_DRAFTS_TOOL = `${RALLY_TOOL_PREFIX}${PUBLISH_DRAFTS}`
 export const REVIEW_SUBMITTED_TOOL = `${RALLY_TOOL_PREFIX}${REVIEW_SUBMITTED}`
-export const PENDING_REVIEW_CREATED_TOOL = `${RALLY_TOOL_PREFIX}${PENDING_REVIEW_CREATED}`
 
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] })
 
@@ -109,15 +106,5 @@ export function createRallyServer(handlers: RallyToolHandlers) {
     },
   )
 
-  const pendingReviewCreated = tool(
-    PENDING_REVIEW_CREATED,
-    'Tell Rally the id of the pending review you just created in a SUBMIT turn, so Rally can clean it up if the turn is interrupted.',
-    { review_id: z.number().int() },
-    async (args) => {
-      handlers.onPendingReview(args.review_id)
-      return ok('Rally recorded the pending review.')
-    },
-  )
-
-  return createSdkMcpServer({ name: RALLY_SERVER, version: '1.0.0', tools: [publishDrafts, pendingReviewCreated, reviewSubmitted] })
+  return createSdkMcpServer({ name: RALLY_SERVER, version: '1.0.0', tools: [publishDrafts, reviewSubmitted] })
 }

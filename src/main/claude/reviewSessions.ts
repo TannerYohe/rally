@@ -112,12 +112,12 @@ class ReviewSessions extends EventEmitter {
 
   async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
-    const { drafts, pr, submitted, pendingReviewId } = this.byId(sessionId)
+    const { drafts, pr, submitted } = this.byId(sessionId)
     if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
     if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
     const notes = feedbackMessage(drafts, changes.edits, changes.summaryBodyEdit, changes.instructions)
     this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
-    void this.runTurn(sessionId, submitPrompt(pr, event, notes, pendingReviewId ?? null), 'submit')
+    void this.runTurn(sessionId, submitPrompt(pr, event, notes), 'submit')
   }
 
   async threads(sessionId: string): Promise<ReviewThread[]> {
@@ -257,11 +257,10 @@ class ReviewSessions extends EventEmitter {
 
     const rallyServer = createRallyServer({
       onDrafts: (drafts) => this.patch(sessionId, () => ({ drafts }), true),
-      onPendingReview: (reviewId) => this.patch(sessionId, () => ({ pendingReviewId: reviewId }), true),
       onSubmitted: (review) => {
         submitted = review
         prList.recordRallyReview(this.byId(sessionId).prKey, review.reviewId)
-        this.patch(sessionId, () => ({ submitted: review, pendingReviewId: null }), true)
+        this.patch(sessionId, () => ({ submitted: review }), true)
       },
     })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Drafts } from '@shared/types'
+import type { Drafts } from './types'
 import { feedbackMessage } from './feedback'
 
 const drafts: Drafts = {

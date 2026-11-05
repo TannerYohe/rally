@@ -1,4 +1,4 @@
-import type { Drafts } from '@shared/types'
+import type { Drafts } from './types'
 
 export interface DraftEdit {
   body?: string

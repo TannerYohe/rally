@@ -4,6 +4,7 @@ import { PHASE_LABELS, PHASE_ORDER, type Phase, type Pr, type SessionStatus } fr
 import { Avatar } from '../components/Avatar'
 import { BusyDot } from '../components/BusyDot'
 import { DiffStat } from '../components/DiffStat'
+import { FailedInstallBanner } from '../components/FailedInstallBanner'
 import { FilterPanel } from '../components/FilterPanel'
 import { HideControls } from '../components/HideControls'
 import { PhaseBadge } from '../components/PhaseBadge'
@@ -214,6 +215,8 @@ export function Dashboard() {
       </div>
 
       {showFilters && <FilterPanel prs={prs} filters={filters} onChange={setFilters} />}
+
+      <FailedInstallBanner />
 
       {error && <div className="rounded-lg bg-rose-950/80 px-4 py-2 text-sm text-rose-200 ring-1 ring-rose-500/30">GitHub refresh failed: {error}</div>}
 

@@ -1,5 +1,6 @@
-import type { PrRef, ReviewThread, ThreadResolution } from '@shared/types'
-import { github } from './client'
+import { isSamePr, type PrRef, type ReviewThread, type ThreadResolution } from '@shared/types'
+import { errorMessage } from '@shared/errors'
+import { github, GITHUB_TIMEOUT_MS } from './client'
 import { fetchNodes } from './queries'
 
 const THREADS_QUERY = `
@@ -30,7 +31,6 @@ export interface RawThread {
 
 export type ThreadLookup = { kind: 'own'; thread: ReviewThread } | { kind: 'not_found' } | { kind: 'not_own' }
 
-const GITHUB_TIMEOUT_MS = 15_000
 const NOT_FOUND_ERROR = 'Review thread not found'
 const NOT_OWN_ERROR = 'Not a review thread you started on this PR'
 
@@ -41,7 +41,7 @@ export function lookupThread(node: RawThread | null, viewer: string, pr: PrRef):
   const first = node.comments?.nodes?.[0]
   const onPr = node.pullRequest
   if (!node.id || !first?.author || !onPr) return { kind: 'not_own' }
-  const samePr = onPr.number === pr.number && sameLogin(onPr.repository.name, pr.repo) && sameLogin(onPr.repository.owner.login, pr.owner)
+  const samePr = isSamePr({ owner: onPr.repository.owner.login, repo: onPr.repository.name, number: onPr.number }, pr)
   if (!samePr || !sameLogin(first.author.login, viewer)) return { kind: 'not_own' }
   return { kind: 'own', thread: { id: node.id, url: first.url, isResolved: Boolean(node.isResolved), isOutdated: Boolean(node.isOutdated) } }
 }
@@ -76,7 +76,7 @@ export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise
         await gh.graphql(RESOLVE_MUTATION, { threadId, request: { signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS) } })
         result.resolved.push(threadId)
       } catch (error) {
-        fail(threadId, error instanceof Error ? error.message : String(error))
+        fail(threadId, errorMessage(error))
       }
     }
   }

@@ -1,15 +1,20 @@
 import { EventEmitter } from 'node:events'
-import { headKey, prKey, type HideMode, type Pr, type PrListState, type SessionStatus, type StoredHide } from '@shared/types'
+import { headKey, prKey, type HideMode, type MyReview, type Pr, type PrListState, type SessionStatus, type StoredHide } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { buildSearchQueries } from './github/search'
-import { keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
-import { configFile, headsSeenFile, hiddenPrsFile, prCacheFile, summariesFile } from './store'
+import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
+import { configFile, headsSeenFile, hiddenPrsFile, prCacheFile, rallyReviewsFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
 type ReviewStatusLookup = (key: string) => SessionStatus | null
+
+function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
+  return reviews.map((r) => (r.replyOnly && r.databaseId !== null && rallyReviewIds.includes(r.databaseId) ? { ...r, replyOnly: false } : r))
+}
 
 class PrList extends EventEmitter {
   private state: PrListState
@@ -21,7 +26,7 @@ class PrList extends EventEmitter {
   constructor() {
     super()
     const cache = prCacheFile.get()
-    this.state = { prs: this.withHidden(cache.prs, false), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
+    this.state = { prs: this.withHidden(cache.prs), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
   }
 
   get(): PrListState {
@@ -41,11 +46,17 @@ class PrList extends EventEmitter {
 
   setReviewStatusLookup(lookup: ReviewStatusLookup): void {
     this.reviewStatusOf = lookup
-    this.reapplyReviewStatus()
+    this.reapplyPhases()
   }
 
-  reapplyReviewStatus(): void {
-    const prs = this.withHidden(this.withReviewStatus(this.state.prs), false)
+  recordRallyReview(key: string, reviewId: number): void {
+    const recorded = rallyReviewsFile.get()
+    const ids = recorded[key] ?? []
+    if (!ids.includes(reviewId)) rallyReviewsFile.set({ ...recorded, [key]: [...ids, reviewId] })
+  }
+
+  reapplyPhases(): void {
+    const prs = this.withHidden(this.withPhases(this.state.prs, false))
     const changed = prs.some(
       (pr, i) =>
         pr.phase !== this.state.prs[i].phase ||
@@ -65,7 +76,7 @@ class PrList extends EventEmitter {
       prCacheFile.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
     } catch (error) {
-      this.update({ refreshing: false, error: error instanceof Error ? error.message : String(error) })
+      this.update({ refreshing: false, error: errorMessage(error) })
     }
   }
 
@@ -92,28 +103,35 @@ class PrList extends EventEmitter {
   }
 
   private reapplyHidden(): void {
-    this.update({ prs: this.withHidden(this.state.prs, false) })
+    this.update({ prs: this.withHidden(this.state.prs) })
   }
 
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
-    return this.withHidden(this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, prune), prune)), prune)
+    this.syncHides(prs, prune)
+    return this.withHidden(this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune), prune))
   }
 
-  private withHidden(prs: Omit<Pr, 'hidden'>[], prune: boolean): Pr[] {
+  private syncHides(prs: GithubPr[], prune: boolean): void {
     const now = new Date().toISOString()
     const stored = hiddenPrsFile.get()
     const listed = new Set(prs.map((pr) => pr.id))
     const kept: Record<string, StoredHide> = Object.fromEntries(
       Object.entries(stored).filter(([id, hide]) => !listed.has(id) && (!prune || keepsUnlistedHide(hide, now))),
     )
-    const result = prs.map((pr) => {
+    for (const pr of prs) {
       const hide = stored[pr.id] && refreshHide(stored[pr.id], pr, now)
       if (hide) kept[pr.id] = hide
-      const shown = !hide || pr.phase === 'in_progress'
+    }
+    if (JSON.stringify(kept) !== JSON.stringify(stored)) hiddenPrsFile.set(kept)
+  }
+
+  private withHidden(prs: Omit<Pr, 'hidden'>[]): Pr[] {
+    const stored = hiddenPrsFile.get()
+    return prs.map((pr) => {
+      const hide = stored[pr.id]
+      const shown = !hide || !isHideActive(hide, pr) || pr.phase === 'in_progress'
       return { ...pr, hidden: shown ? null : { mode: hide.mode, at: hide.at } }
     })
-    hiddenPrsFile.set(kept)
-    return result
   }
 
   private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {
@@ -131,11 +149,18 @@ class PrList extends EventEmitter {
     return result
   }
 
-  private withReviewStatus(prs: Omit<Pr, 'phase' | 'reviewStatus' | 'hidden'>[]): Omit<Pr, 'hidden'>[] {
+  private withPhases(prs: Omit<Pr, 'phase' | 'reviewStatus' | 'hidden'>[], prune: boolean): Omit<Pr, 'hidden'>[] {
+    const rallyReviews = rallyReviewsFile.get()
+    if (prune) {
+      const current = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
+      rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviews).filter(([key]) => current.has(key))))
+    }
     return prs.map((pr) => {
-      const reviewStatus = this.reviewStatusOf(prKey(pr.owner, pr.repo, pr.number))
+      const key = prKey(pr.owner, pr.repo, pr.number)
+      const reviewStatus = this.reviewStatusOf(key)
       const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'
-      return { ...pr, reviewStatus, phase: computePhase({ ...pr, reviewInProgress }) }
+      const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviews[key] ?? [])
+      return { ...pr, reviewStatus, phase: computePhase({ ...pr, myReviews, reviewInProgress }) }
     })
   }
 
@@ -168,7 +193,7 @@ class PrList extends EventEmitter {
           this.summaryErrors.delete(key)
           this.patchByHead(key, { summary, summaryError: null })
         } catch (error) {
-          const summaryError = error instanceof Error ? error.message : String(error)
+          const summaryError = errorMessage(error)
           this.summaryErrors.set(key, summaryError)
           this.patchByHead(key, { summaryError })
           console.error('PR summary failed', { pr: pr.url, error })

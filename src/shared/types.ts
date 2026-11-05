@@ -13,6 +13,7 @@ export const PHASE_LABELS: Record<Phase, string> = {
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
 
 export interface MyReview {
+  databaseId: number | null
   state: ReviewState
   submittedAt: string | null
   commitOid: string | null
@@ -252,10 +253,53 @@ export interface ReviewSession {
   updatedAt: string
 }
 
+export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {
+  return a.number === b.number && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+}
+
 export function prKey(owner: string, repo: string, number: number): string {
   return `${owner}/${repo}#${number}`
 }
 
 export function headKey(pr: { id: string; headRefOid: string }): string {
   return `${pr.id}:${pr.headRefOid}`
+}
+
+export interface AppInfo {
+  version: string
+  electron: string
+  chrome: string
+  node: string
+  platform: string
+  userDataDir: string
+}
+
+export interface ReleaseAsset {
+  name: string
+  url: string
+  size: number
+}
+
+export interface ReleaseInfo {
+  version: string
+  url: string
+  notes: string
+  publishedAt: string | null
+  asset: ReleaseAsset | null
+  assetProblem: string | null
+}
+
+export type UpdateState =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'check_failed'; error: string }
+  | { status: 'up_to_date'; checkedAt: string }
+  | { status: 'available'; release: ReleaseInfo; installBlocker: string | null }
+  | { status: 'downloading'; release: ReleaseInfo; received: number; total: number }
+  | { status: 'installing'; release: ReleaseInfo }
+  | { status: 'install_failed'; release: ReleaseInfo; error: string }
+
+export interface InstallAttempt {
+  version: string
+  logPath: string
 }

@@ -4,6 +4,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
+import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, type DraftChanges } from '@shared/feedback'
 import {
   priorConcernThreadIds,
   prKey,
@@ -17,6 +18,7 @@ import {
   type TimelineEntry,
   type TurnMode,
 } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList } from '../prList'
 import { configFile, sessionsDir } from '../store'
@@ -53,6 +55,10 @@ function restoreThreadState(stored: ReviewSession): ReviewSession {
   if (!stored.resolvingThreads && pending.length === 0) return stored
   const session = { ...stored, resolvingThreads: false, threadsToResolveOnSubmit: undefined }
   return stored.submitted && pending.length > 0 ? { ...session, threadResolution: failedResolution(pending, INTERRUPTED_RESOLVE_ERROR) } : session
+}
+
+function lastSubmitAttemptAt(timeline: TimelineEntry[]): string | null {
+  return timeline.findLast((entry) => entry.kind === 'user' && entry.turn === 'submit')?.at ?? null
 }
 
 function restoreSession(stored: ReviewSession): ReviewSession {
@@ -109,11 +115,15 @@ class ReviewSessions extends EventEmitter {
     void this.runTurn(sessionId, message, 'refine')
   }
 
-  async submit(sessionId: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]): Promise<void> {
+  async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
-    if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
+    const { drafts, pr, submitted, timeline } = this.byId(sessionId)
+    if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
+    if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
+    const notes = feedbackMessage(drafts, changes)
     this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
-    void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
+    const context = { viewer: prList.get().viewer, earlierAttemptAt: lastSubmitAttemptAt(timeline) }
+    void this.runTurn(sessionId, submitPrompt(pr, event, notes, context), 'submit')
   }
 
   async threads(sessionId: string): Promise<ReviewThread[]> {
@@ -136,7 +146,7 @@ class ReviewSessions extends EventEmitter {
       const refused = outside.map((threadId) => ({ threadId, error: "Not one of this review's earlier comments" }))
       result = { at: now(), resolved: resolution.resolved, failed: [...resolution.failed, ...refused] }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       console.error('Resolving review threads failed', { pr: pr.url, error })
       result = failedResolution(threadIds, message)
     }
@@ -226,8 +236,9 @@ class ReviewSessions extends EventEmitter {
     const cwd = sessionDir(sessionId)
     mkdirSync(cwd, { recursive: true })
 
+    const { pr } = this.byId(sessionId)
     const decide = (toolName: string, input: unknown) =>
-      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { submitting, cwd })
+      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { submitting, cwd, pr })
 
     const preToolUse: HookCallback = async (input) => {
       if (input.hook_event_name !== 'PreToolUse') return {}
@@ -254,6 +265,7 @@ class ReviewSessions extends EventEmitter {
       onDrafts: (drafts) => this.patch(sessionId, () => ({ drafts }), true),
       onSubmitted: (review) => {
         submitted = review
+        prList.recordRallyReview(this.byId(sessionId).prKey, review.reviewId)
         this.patch(sessionId, () => ({ submitted: review }), true)
       },
     })
@@ -293,7 +305,7 @@ class ReviewSessions extends EventEmitter {
         sessionId,
         () => ({
           status: cancelled ? 'cancelled' : 'error',
-          error: cancelled ? null : error instanceof Error ? error.message : String(error),
+          error: cancelled ? null : errorMessage(error),
         }),
         true,
       )
@@ -332,7 +344,7 @@ class ReviewSessions extends EventEmitter {
     else {
       this.resolveThreads(sessionId, threadIds)
         .catch((error) => {
-          const message = error instanceof Error ? error.message : String(error)
+          const message = errorMessage(error)
           console.error('Resolving review threads after submit failed', { sessionId, error })
           this.patch(sessionId, () => ({ threadResolution: failedResolution(threadIds, message) }), true)
         })

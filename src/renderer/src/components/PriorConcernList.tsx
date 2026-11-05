@@ -1,6 +1,7 @@
 import { CONCERN_STATUS_LABELS, RESOLVABLE_CONCERN_STATUSES, type ConcernStatus, type ThreadResolution } from '@shared/types'
 import type { ThreadResolutionState } from '../lib/hooks'
 import { isResolvable, isSelected, type ConcernRow } from '../lib/threads'
+import { SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 function statusStyle(status: ConcernStatus): string {
   if (RESOLVABLE_CONCERN_STATUSES.includes(status)) return 'bg-emerald-500/15 text-emerald-300'
@@ -81,7 +82,7 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
       <div className="flex items-center justify-end gap-3">
         {!submitted && <span className="text-xs text-ink-500">Selected threads are also resolved when you post and submit.</span>}
         <button
-          className="rounded-md bg-ink-800 px-3 py-1.5 text-sm hover:bg-ink-700 disabled:opacity-40"
+          className={SECONDARY_BUTTON_CLASS}
           disabled={disabled || selectedIds.length === 0}
           onClick={resolveSelected}
         >

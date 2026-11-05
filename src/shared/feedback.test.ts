@@ -1,0 +1,96 @@
+import { describe, expect, it } from 'vitest'
+import type { Drafts } from './types'
+import { feedbackMessage, isEmptyCommentReview, type DraftChanges } from './feedback'
+
+const drafts: Drafts = {
+  mode: 'full',
+  verdict: 'Needs changes',
+  reportMarkdown: '',
+  summaryBody: '',
+  priorConcerns: [],
+  comments: ['1', '2', '3'].map((id) => ({
+    id,
+    kind: 'inline' as const,
+    path: 'a.rb',
+    line: 1,
+    startLine: null,
+    side: 'RIGHT' as const,
+    severity: 'medium' as const,
+    body: `original ${id}`,
+    replyToCommentId: null,
+  })),
+}
+
+describe('feedbackMessage', () => {
+  it('lists rewrites and drops before free text', () => {
+    const message = feedbackMessage(drafts, { edits: { '1': { body: 'shorter' }, '3': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'make 2 a nitpick' })
+    expect(message).toBe(
+      'Edits I made in Rally:\n- I rewrote #1; use this as final wording:\n  """shorter"""\n- Drop #3.\n\nmake 2 a nitpick',
+    )
+  })
+
+  it('ignores edits that match the original body', () => {
+    expect(feedbackMessage(drafts, { edits: { '2': { body: 'original 2' } }, summaryBodyEdit: '', instructions: '' })).toBe('')
+  })
+
+  it('lists a review body rewrite first', () => {
+    expect(feedbackMessage(drafts, { edits: { '3': { dropped: true } }, summaryBodyEdit: 'Looks close.', instructions: '' })).toBe(
+      'Edits I made in Rally:\n- I rewrote the review body; use this as final wording:\n  """Looks close."""\n- Drop #3.',
+    )
+  })
+
+  it('ignores comment edits that only change surrounding whitespace', () => {
+    expect(feedbackMessage(drafts, { edits: { '2': { body: 'original 2\n' } }, summaryBodyEdit: undefined, instructions: '' })).toBe('')
+  })
+
+  it('ignores whitespace typed where no review body was drafted', () => {
+    expect(feedbackMessage(drafts, { edits: {}, summaryBodyEdit: ' \n ', instructions: '' })).toBe('')
+  })
+
+  describe('with a drafted review body', () => {
+    const withBody = { ...drafts, summaryBody: 'Nice work.' }
+
+    it('sends nothing when the body is untouched', () => {
+      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdit: undefined, instructions: '' })).toBe('')
+    })
+
+    it('ignores an edit that only adds a trailing newline', () => {
+      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdit: 'Nice work.\n', instructions: '' })).toBe('')
+    })
+
+    it('passes a rewrite as final wording', () => {
+      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdit: 'Nice work, one blocker.', instructions: '' })).toBe(
+        'Edits I made in Rally:\n- I rewrote the review body; use this as final wording:\n  """Nice work, one blocker."""',
+      )
+    })
+  })
+
+  it('asks to remove a review body cleared to whitespace', () => {
+    expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, { edits: {}, summaryBodyEdit: '  ', instructions: '' })).toBe('Edits I made in Rally:\n- Remove the review body.')
+  })
+})
+
+describe('isEmptyCommentReview', () => {
+  const unchanged: DraftChanges = { edits: {}, summaryBodyEdit: undefined, instructions: '' }
+  const dropAll: DraftChanges = { ...unchanged, edits: { '1': { dropped: true }, '2': { dropped: true }, '3': { dropped: true } } }
+
+  it('is true for a Comment with every draft dropped, no body, and no instructions', () => {
+    expect(isEmptyCommentReview('COMMENT', drafts, dropAll)).toBe(true)
+  })
+
+  it('is false while a draft is kept, a body is set, or the user gave instructions', () => {
+    expect(isEmptyCommentReview('COMMENT', drafts, unchanged)).toBe(false)
+    expect(isEmptyCommentReview('COMMENT', drafts, { ...dropAll, summaryBodyEdit: 'Thanks.' })).toBe(false)
+    expect(isEmptyCommentReview('COMMENT', drafts, { ...dropAll, instructions: 'Add a short thank-you.' })).toBe(false)
+  })
+
+  it('uses the edited body over the published one', () => {
+    expect(isEmptyCommentReview('COMMENT', { ...drafts, summaryBody: 'Nice.' }, dropAll)).toBe(false)
+    expect(isEmptyCommentReview('COMMENT', { ...drafts, summaryBody: 'Nice.' }, { ...dropAll, summaryBodyEdit: ' ' })).toBe(true)
+  })
+
+  it('is false for Approve and Request changes', () => {
+    expect(isEmptyCommentReview('APPROVE', drafts, dropAll)).toBe(false)
+    expect(isEmptyCommentReview('REQUEST_CHANGES', drafts, dropAll)).toBe(false)
+  })
+})

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
       summariesFile: file<Record<string, string>>({}),
       headsSeenFile: file<Record<string, string>>({}),
       hiddenPrsFile: file<Record<string, unknown>>({}),
+      rallyReviewsFile: file<Record<string, number[]>>({}),
     },
     searchPrs: vi.fn(),
     fetchPr: vi.fn(),
@@ -61,6 +62,8 @@ describe('prList', () => {
     mocks.summarizePr.mockReset()
     mocks.store.hiddenPrsFile.set({})
     mocks.summarizePr.mockResolvedValue('A summary')
+    mocks.store.rallyReviewsFile.set({})
+    prList.setReviewStatusLookup(() => null)
   })
 
   it('prunes summaries for old heads and closed PRs on a full refresh', async () => {
@@ -158,5 +161,39 @@ describe('prList', () => {
     await prList.refresh()
     await vi.waitFor(() => expect(prList.get().prs[0].summary).toBe('A summary'))
     expect(prList.get().prs[0].summaryError).toBeNull()
+  })
+  it('counts a reply-only review Rally submitted, even after its session is gone', async () => {
+    const reply = { databaseId: 42, state: 'COMMENTED' as const, submittedAt: '2026-10-03T00:00:00Z', commitOid: 'new', replyOnly: true }
+    const earlier = { ...reply, databaseId: 41, submittedAt: '2026-10-01T00:00:00Z', commitOid: 'old', replyOnly: false }
+    mocks.store.headsSeenFile.set({ 'pr1:new': '2026-10-02T00:00:00Z' })
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ myReviews: [earlier, reply] })] })
+    await prList.refresh()
+    expect(prList.get().prs[0].phase).toBe('awaiting_rereview')
+
+    prList.recordRallyReview('acme/api#1', 42)
+    prList.reapplyPhases()
+    expect(prList.get().prs[0].phase).toBe('pending_changes')
+
+    await prList.refresh()
+    expect(prList.get().prs[0].phase).toBe('pending_changes')
+    expect(prList.get().prs[0].myReviews[1].replyOnly).toBe(true)
+    expect(mocks.store.rallyReviewsFile.get()).toEqual({ 'acme/api#1': [42] })
+  })
+
+  it('keeps ignoring a reply-only review that Rally did not submit', async () => {
+    const reply = { databaseId: 42, state: 'COMMENTED' as const, submittedAt: '2026-10-03T00:00:00Z', commitOid: 'new', replyOnly: true }
+    const earlier = { ...reply, databaseId: 41, submittedAt: '2026-10-01T00:00:00Z', commitOid: 'old', replyOnly: false }
+    mocks.store.headsSeenFile.set({ 'pr1:new': '2026-10-02T00:00:00Z' })
+    mocks.store.rallyReviewsFile.set({ 'acme/api#1': [7] })
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ myReviews: [earlier, reply] })] })
+    await prList.refresh()
+    expect(prList.get().prs[0].phase).toBe('awaiting_rereview')
+  })
+
+  it('forgets Rally review ids for PRs that left the list on a full refresh', async () => {
+    mocks.store.rallyReviewsFile.set({ 'acme/api#1': [42], 'acme/api#9': [7] })
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    expect(mocks.store.rallyReviewsFile.get()).toEqual({ 'acme/api#1': [42] })
   })
 })

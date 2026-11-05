@@ -1,5 +1,5 @@
 import type { DraftComment, Drafts, Severity } from '@shared/types'
-import { bodyEdited, type DraftEdits } from '../lib/feedback'
+import { bodyEdited, type DraftEdits } from '@shared/feedback'
 import { BodyTextarea } from './BodyTextarea'
 
 const SEVERITY_STYLES: Record<Severity, string> = {

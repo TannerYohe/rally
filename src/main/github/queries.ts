@@ -13,7 +13,7 @@ const PR_FIELDS = `
     repository { name owner { login } }
     files(first: 100) { nodes { path } }
     reviewRequests(first: 50) { nodes { requestedReviewer { ... on User { login } } } }
-    reviews(author: $viewer, last: ${MY_REVIEW_WINDOW}) { nodes { id state submittedAt body commit { oid } } }
+    reviews(author: $viewer, last: ${MY_REVIEW_WINDOW}) { nodes { id databaseId state submittedAt body commit { oid } } }
     timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
       nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
     }
@@ -48,6 +48,7 @@ const MAX_NODE_IDS = 100
 
 interface RawReview {
   id: string
+  databaseId: number | null
   state: ReviewState
   submittedAt: string | null
   body: string
@@ -131,6 +132,7 @@ interface SearchResponse {
 
 function toPr(raw: RawPr, viewer: string, replyOnly: Set<string>): GithubPr {
   const myReviews: MyReview[] = raw.reviews.nodes.map((r) => ({
+    databaseId: r.databaseId,
     state: r.state,
     submittedAt: r.submittedAt,
     commitOid: r.commit?.oid ?? null,

@@ -1,7 +1,7 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 import type { TimelineEntry } from '@shared/types'
-import { closeOpenEntries, reduceTimeline } from './timeline'
+import { bashStepLabel, closeOpenEntries, reduceTimeline } from './timeline'
 
 const AT = '2026-11-02T00:00:00Z'
 
@@ -39,6 +39,12 @@ describe('reduceTimeline', () => {
     expect(timeline).toEqual([
       { kind: 'step', id: 't1', label: 'Fetching PR metadata', detail: 'gh pr view 1 -R a/b --json title', done: true, at: AT },
     ])
+  })
+
+  it('labels the graphql thread reply as posting rather than querying', () => {
+    const reply = `gh api graphql -f review=PRR_1 -f thread=PRRT_1 -f body='ok' -f query='mutation($review: ID!) { addPullRequestReviewThreadReply(input: {}) { comment { id } } }'`
+    expect(bashStepLabel(reply, undefined)).toBe('Posting thread reply')
+    expect(bashStepLabel(`gh api graphql -f query='query { viewer { login } }'`, undefined)).toBe('Querying review threads')
   })
 
   it('falls back to the bash description for unknown commands', () => {

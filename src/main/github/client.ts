@@ -5,6 +5,8 @@ import { Octokit } from '@octokit/rest'
 
 const run = promisify(execFile)
 
+export const GITHUB_TIMEOUT_MS = 15_000
+
 let cached: { token: string; graphql: typeof graphql; rest: Octokit; login: string } | null = null
 
 export async function github() {

@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type RefObject } from 'react'
-import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type TimelineEntry } from '@shared/types'
+import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type InstallAttempt, type TimelineEntry, type UpdateState } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTab } from './reviewTabs'
 import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
@@ -12,6 +13,27 @@ export function usePrs(): PrListState {
     return window.rally.onPrsChanged(setState)
   }, [])
   return state
+}
+
+export function useUpdateState(): UpdateState {
+  const [state, setState] = useState<UpdateState>({ status: 'idle' })
+  useEffect(() => {
+    window.rally.getUpdateState().then(setState)
+    return window.rally.onUpdateChanged(setState)
+  }, [])
+  return state
+}
+
+export function useFailedInstall(): [InstallAttempt | null, () => void] {
+  const [attempt, setAttempt] = useState<InstallAttempt | null>(null)
+  useEffect(() => {
+    window.rally.getFailedInstall().then(setAttempt)
+  }, [])
+  const dismiss = () => {
+    setAttempt(null)
+    void window.rally.dismissFailedInstall()
+  }
+  return [attempt, dismiss]
 }
 
 export function useSession(prKey: string): [ReviewSession | null, (session: ReviewSession | null) => void] {
@@ -94,7 +116,7 @@ function useReviewThreads(session: ReviewSession): { threads: ReviewThread[]; lo
     let current = true
     window.rally.getReviewThreads(session.id).then(
       (threads) => current && setState({ key: threadKey, threads, error: null }),
-      (error) => current && setState({ key: threadKey, threads: [], error: error instanceof Error ? error.message : String(error) }),
+      (error) => current && setState({ key: threadKey, threads: [], error: errorMessage(error) }),
     )
     return () => {
       current = false
@@ -138,7 +160,7 @@ export function useThreadResolution(session: ReviewSession): ThreadResolutionSta
       try {
         await window.rally.resolveThreads(session.id, selectedIds)
       } catch (failure) {
-        setResolveError(failure instanceof Error ? failure.message : String(failure))
+        setResolveError(errorMessage(failure))
       }
     },
   }

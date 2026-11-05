@@ -1,6 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { TimelineEntry } from '@shared/types'
-import { PUBLISH_DRAFTS_TOOL, REVIEW_SUBMITTED_TOOL } from './rallyTools'
+import { PENDING_REVIEW_CREATED_TOOL, PUBLISH_DRAFTS_TOOL, REVIEW_SUBMITTED_TOOL } from './rallyTools'
 
 const QUIET_TOOLS = new Set(['Read', 'Grep', 'Glob', 'ToolSearch', 'TodoWrite'])
 
@@ -24,6 +24,7 @@ const TOOL_LABELS: Record<string, string> = {
   Skill: 'Loading skill',
   Write: 'Writing file',
   [PUBLISH_DRAFTS_TOOL]: 'Publishing drafts to Rally',
+  [PENDING_REVIEW_CREATED_TOOL]: 'Recording pending review',
   [REVIEW_SUBMITTED_TOOL]: 'Confirming submission',
   mcp__claude_ai_Atlassian__getJiraIssue: 'Fetching Jira ticket',
   mcp__claude_ai_Slack__slack_search_public_and_private: 'Searching Slack',

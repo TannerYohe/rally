@@ -5,8 +5,8 @@ import { decideToolUse } from './toolPolicy'
 
 const pr = { owner: 'acme', repo: 'api', number: 12, url: 'https://github.com/acme/api/pull/12' }
 
-function submitCommands(): string[] {
-  return submitPrompt(pr, 'COMMENT', '')
+function submitCommands(stalePendingReviewId: number | null = null): string[] {
+  return submitPrompt(pr, 'COMMENT', '', stalePendingReviewId)
     .split('\n')
     .flatMap((line) => line.match(/gh api .*$/) ?? [])
     .map((command) => command.replace(/<[^>]+>/g, '1'))
@@ -38,7 +38,7 @@ describe('reviewPrompt', () => {
 
 describe('submitPrompt', () => {
   it('spells out every GitHub call without relying on the review skill', () => {
-    const prompt = submitPrompt(pr, 'APPROVE', '')
+    const prompt = submitPrompt(pr, 'APPROVE', '', null)
     expect(prompt).toContain('gh api repos/acme/api/pulls/12/reviews --method POST --input')
     expect(prompt).toContain('gh api graphql --paginate -f owner=acme -f repo=api -F number=12 -f query=')
     expect(prompt).toContain('addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review')
@@ -47,7 +47,7 @@ describe('submitPrompt', () => {
   })
 
   it('routes thread replies through the pending review instead of the standalone replies endpoint', () => {
-    const prompt = submitPrompt(pr, 'COMMENT', '')
+    const prompt = submitPrompt(pr, 'COMMENT', '', null)
     expect(prompt).not.toMatch(/gh api \S*\/replies/)
   })
 
@@ -68,6 +68,18 @@ describe('submitPrompt', () => {
     expect(threads).toContain('reviewThreads(first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor }')
   })
 
+  it('asks Claude to report the pending review it creates', () => {
+    expect(submitPrompt(pr, 'COMMENT', '', null)).toContain('call mcp__rally__pending_review_created with the id right away')
+  })
+
+  it('deletes a pending review left by an interrupted submit before creating a new one', () => {
+    const [first] = submitCommands(77)
+    expect(first).toBe('gh api repos/acme/api/pulls/12/reviews/77 --method DELETE')
+    expect(bashStepLabel(first, undefined)).toBe('Deleting pending review')
+    expect(decideToolUse('Bash', { command: first }, { submitting: true, cwd: '/tmp/rally/session', pr })).toEqual({ allow: true })
+    expect(submitPrompt(pr, 'COMMENT', '', null)).not.toContain('interrupted')
+  })
+
   it('passes exactly the variables each graphql command declares', () => {
     const graphqlCommands = submitCommands().filter((command) => command.startsWith('gh api graphql'))
     expect(graphqlCommands).toHaveLength(2)
@@ -77,6 +89,6 @@ describe('submitPrompt', () => {
   })
 
   it('includes final edits from the user', () => {
-    expect(submitPrompt(pr, 'COMMENT', ' drop 2 ')).toContain('Apply these final edits from the user before posting:\ndrop 2\n')
+    expect(submitPrompt(pr, 'COMMENT', ' drop 2 ', null)).toContain('Apply these final edits from the user before posting:\ndrop 2\n')
   })
 })

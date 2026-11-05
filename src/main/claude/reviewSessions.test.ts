@@ -52,7 +52,7 @@ const mocks = vi.hoisted(() => ({
   resolveOwnThreads: vi.fn(),
   query: vi.fn(),
   recordRallyReview: vi.fn(),
-  handlers: null as null | { onSubmitted(review: SubmittedReview): void },
+  handlers: null as null | { onPendingReview(reviewId: number): void; onSubmitted(review: SubmittedReview): void },
 }))
 
 vi.mock('../store', () => ({
@@ -70,7 +70,8 @@ vi.mock('./rallyTools', () => ({
   RALLY_TOOL_PREFIX: 'mcp__rally__',
   PUBLISH_DRAFTS_TOOL: 'mcp__rally__publish_drafts',
   REVIEW_SUBMITTED_TOOL: 'mcp__rally__review_submitted',
-  createRallyServer: (handlers: { onSubmitted(review: SubmittedReview): void }) => {
+  PENDING_REVIEW_CREATED_TOOL: 'mcp__rally__pending_review_created',
+  createRallyServer: (handlers: { onPendingReview(reviewId: number): void; onSubmitted(review: SubmittedReview): void }) => {
     mocks.handlers = handlers
     return {}
   },
@@ -89,14 +90,16 @@ mocks.stored = [
   storedSession(10, { drafts: { ...drafts(['T1']), summaryBody: '  ' } }),
   storedSession(11, { drafts: { ...drafts(['T1']), summaryBody: '', comments: [THREAD_REPLY] } }),
   storedSession(12, { drafts: { ...drafts(['T1']), comments: [THREAD_REPLY] } }),
+  storedSession(13),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
 
 const session = (number: number) => reviewSessions.getByPr(`acme/api#${number}`)!
 
-function turn(options: { submits: boolean }) {
+function turn(options: { submits: boolean; pendingReviewId?: number }) {
   return async function* () {
+    if (options.pendingReviewId) mocks.handlers?.onPendingReview(options.pendingReviewId)
     if (options.submits) mocks.handlers?.onSubmitted(SUBMITTED)
     yield { type: 'result', subtype: 'success', is_error: false }
   }
@@ -218,6 +221,21 @@ describe('submit', () => {
     const { prompt } = mocks.query.mock.calls[0][0] as { prompt: string }
     expect(prompt).toContain('- Remove the review body.\n- Drop #1.\n\nAdd a thank-you body.')
     await vi.waitFor(() => expect(session(12).status).toBe('error'))
+  })
+
+  it('deletes the pending review an interrupted submit left behind on the next submit, then forgets it', async () => {
+    mocks.query.mockImplementation(turn({ submits: false, pendingReviewId: 55 }))
+    await reviewSessions.submit('test-session-13', 'COMMENT', NO_CHANGES, [])
+    await vi.waitFor(() => expect(session(13).status).toBe('error'))
+    expect(session(13).pendingReviewId).toBe(55)
+    expect((mocks.query.mock.calls[0][0] as { prompt: string }).prompt).not.toContain('reviews/55 --method DELETE')
+
+    mocks.query.mockImplementation(turn({ submits: true, pendingReviewId: 56 }))
+    mocks.resolveOwnThreads.mockResolvedValue({ resolved: [], failed: [] })
+    await reviewSessions.submit('test-session-13', 'COMMENT', NO_CHANGES, [])
+    expect((mocks.query.mock.calls[1][0] as { prompt: string }).prompt).toContain('gh api repos/acme/api/pulls/13/reviews/55 --method DELETE')
+    await vi.waitFor(() => expect(session(13).status).toBe('submitted'))
+    expect(session(13).pendingReviewId).toBeNull()
   })
 
   it('resolves the selected threads once the review is submitted', async () => {

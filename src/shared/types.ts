@@ -230,6 +230,7 @@ export interface ReviewSession {
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]
+  pendingReviewId?: number | null
   createdAt: string
   updatedAt: string
 }

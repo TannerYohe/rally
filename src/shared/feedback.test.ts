@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Drafts } from './types'
-import { feedbackMessage } from './feedback'
+import { feedbackMessage, isEmptyCommentReview, type DraftChanges } from './feedback'
 
 const drafts: Drafts = {
   mode: 'full',
@@ -67,5 +67,30 @@ describe('feedbackMessage', () => {
 
   it('asks to remove a review body cleared to whitespace', () => {
     expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, {}, '  ', '')).toBe('Edits I made in Rally:\n- Remove the review body.')
+  })
+})
+
+describe('isEmptyCommentReview', () => {
+  const unchanged: DraftChanges = { edits: {}, summaryBodyEdit: undefined, instructions: '' }
+  const dropAll: DraftChanges = { ...unchanged, edits: { '1': { dropped: true }, '2': { dropped: true }, '3': { dropped: true } } }
+
+  it('is true for a Comment with every draft dropped, no body, and no instructions', () => {
+    expect(isEmptyCommentReview('COMMENT', drafts, dropAll)).toBe(true)
+  })
+
+  it('is false while a draft is kept, a body is set, or the user gave instructions', () => {
+    expect(isEmptyCommentReview('COMMENT', drafts, unchanged)).toBe(false)
+    expect(isEmptyCommentReview('COMMENT', drafts, { ...dropAll, summaryBodyEdit: 'Thanks.' })).toBe(false)
+    expect(isEmptyCommentReview('COMMENT', drafts, { ...dropAll, instructions: 'Add a short thank-you.' })).toBe(false)
+  })
+
+  it('uses the edited body over the published one', () => {
+    expect(isEmptyCommentReview('COMMENT', { ...drafts, summaryBody: 'Nice.' }, dropAll)).toBe(false)
+    expect(isEmptyCommentReview('COMMENT', { ...drafts, summaryBody: 'Nice.' }, { ...dropAll, summaryBodyEdit: ' ' })).toBe(true)
+  })
+
+  it('is false for Approve and Request changes', () => {
+    expect(isEmptyCommentReview('APPROVE', drafts, dropAll)).toBe(false)
+    expect(isEmptyCommentReview('REQUEST_CHANGES', drafts, dropAll)).toBe(false)
   })
 })

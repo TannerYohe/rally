@@ -1,4 +1,4 @@
-import type { Drafts } from './types'
+import type { Drafts, ReviewEvent } from './types'
 
 export interface DraftEdit {
   body?: string
@@ -6,6 +6,15 @@ export interface DraftEdit {
 }
 
 export type DraftEdits = Record<string, DraftEdit>
+
+export interface DraftChanges {
+  edits: DraftEdits
+  summaryBodyEdit: string | undefined
+  instructions: string
+}
+
+export const EMPTY_COMMENT_REVIEW_ERROR =
+  'There is nothing to post: a Comment review needs a body, an inline comment, or a thread reply. Use Resolve selected to resolve threads without a review.'
 
 export function bodyEdited(original: string, edit: string | undefined): boolean {
   return edit !== undefined && edit.trim() !== original.trim()
@@ -34,4 +43,13 @@ export function describeEdits(drafts: Drafts | null, edits: DraftEdits, summaryB
 
 export function feedbackMessage(drafts: Drafts | null, edits: DraftEdits, summaryBodyEdit: string | undefined, text: string): string {
   return [describeEdits(drafts, edits, summaryBodyEdit), text.trim()].filter(Boolean).join('\n\n')
+}
+
+export function keptCommentCount(drafts: Drafts | null, edits: DraftEdits): number {
+  return drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
+}
+
+export function isEmptyCommentReview(event: ReviewEvent, drafts: Drafts, changes: DraftChanges): boolean {
+  const summaryBody = changes.summaryBodyEdit ?? drafts.summaryBody
+  return event === 'COMMENT' && !summaryBody.trim() && keptCommentCount(drafts, changes.edits) === 0 && !changes.instructions.trim()
 }

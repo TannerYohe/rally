@@ -4,9 +4,8 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
+import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, type DraftChanges } from '@shared/feedback'
 import {
-  EMPTY_COMMENT_REVIEW_ERROR,
-  isEmptyCommentReview,
   priorConcernThreadIds,
   prKey,
   type PrRef,
@@ -111,15 +110,14 @@ class ReviewSessions extends EventEmitter {
     void this.runTurn(sessionId, message, 'refine')
   }
 
-  async submit(sessionId: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]): Promise<void> {
+  async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
-    if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
-    const { drafts } = this.byId(sessionId)
-    if (drafts && !notes.trim() && isEmptyCommentReview(event, drafts.summaryBody, drafts.comments.length)) {
-      throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-    }
+    const { drafts, pr, submitted } = this.byId(sessionId)
+    if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
+    if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
+    const notes = feedbackMessage(drafts, changes.edits, changes.summaryBodyEdit, changes.instructions)
     this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
-    void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
+    void this.runTurn(sessionId, submitPrompt(pr, event, notes), 'submit')
   }
 
   async threads(sessionId: string): Promise<ReviewThread[]> {

@@ -1,6 +1,6 @@
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { EMPTY_COMMENT_REVIEW_ERROR, isEmptyCommentReview, prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
+import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
@@ -13,7 +13,7 @@ import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { ReviewTabBar, ReviewTabPanel } from '../components/ReviewTabBar'
 import { SubmitBar } from '../components/SubmitBar'
-import { feedbackMessage, type DraftEdits } from '@shared/feedback'
+import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, keptCommentCount, type DraftEdits } from '@shared/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
@@ -133,7 +133,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const { drafts } = session
   const hasDrafts = Boolean(drafts)
   const message = feedbackMessage(drafts, edits, summaryEdit, feedback)
-  const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
+  const keptComments = keptCommentCount(drafts, edits)
   const lastTurnAt = lastTurnStartedAt(session)
   const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
@@ -176,11 +176,11 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     event.preventDefault()
     if (canSend) void send()
   }
-  const finalSummaryBody = summaryEdit ?? drafts?.summaryBody ?? ''
   const submit = (event: ReviewEvent) =>
     run(async () => {
-      if (!feedback.trim() && isEmptyCommentReview(event, finalSummaryBody, keptComments)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-      await window.rally.submitReview(session.id, event, message, threadResolution.selectedIds)
+      const changes = { edits, summaryBodyEdit: summaryEdit, instructions: feedback }
+      if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
+      await window.rally.submitReview(session.id, event, changes, threadResolution.selectedIds)
     })
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)

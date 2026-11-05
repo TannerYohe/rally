@@ -128,13 +128,6 @@ export const REVIEW_EVENT_LABELS: Record<ReviewEvent, string> = {
   REQUEST_CHANGES: 'Request changes',
 }
 
-export const EMPTY_COMMENT_REVIEW_ERROR =
-  'There is nothing to post: a Comment review needs a body, an inline comment, or a thread reply. Use Resolve selected to resolve threads without a review.'
-
-export function isEmptyCommentReview(event: ReviewEvent, summaryBody: string, commentCount: number): boolean {
-  return event === 'COMMENT' && !summaryBody.trim() && commentCount === 0
-}
-
 export type Severity = 'blocker' | 'high' | 'medium' | 'nit'
 
 export interface DraftComment {

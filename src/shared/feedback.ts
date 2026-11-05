@@ -24,7 +24,7 @@ function rewriteLine(subject: string, body: string): string {
   return `- I rewrote ${subject}; use this as final wording:\n  """${body}"""`
 }
 
-export function describeEdits(drafts: Drafts | null, edits: DraftEdits, summaryBodyEdit: string | undefined): string {
+function describeEdits(drafts: Drafts | null, edits: DraftEdits, summaryBodyEdit: string | undefined): string {
   if (!drafts) return ''
   const lines: string[] = []
   if (summaryBodyEdit !== undefined && bodyEdited(drafts.summaryBody, summaryBodyEdit)) {
@@ -41,8 +41,8 @@ export function describeEdits(drafts: Drafts | null, edits: DraftEdits, summaryB
   return lines.length ? `Edits I made in Rally:\n${lines.join('\n')}` : ''
 }
 
-export function feedbackMessage(drafts: Drafts | null, edits: DraftEdits, summaryBodyEdit: string | undefined, text: string): string {
-  return [describeEdits(drafts, edits, summaryBodyEdit), text.trim()].filter(Boolean).join('\n\n')
+export function feedbackMessage(drafts: Drafts | null, changes: DraftChanges): string {
+  return [describeEdits(drafts, changes.edits, changes.summaryBodyEdit), changes.instructions.trim()].filter(Boolean).join('\n\n')
 }
 
 export function keptCommentCount(drafts: Drafts | null, edits: DraftEdits): number {

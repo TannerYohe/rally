@@ -13,7 +13,7 @@ import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { ReviewTabBar, ReviewTabPanel } from '../components/ReviewTabBar'
 import { SubmitBar } from '../components/SubmitBar'
-import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, keptCommentCount, type DraftEdits } from '@shared/feedback'
+import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, keptCommentCount, type DraftChanges, type DraftEdits } from '@shared/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
@@ -132,7 +132,8 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const submitted = isSubmitted(session)
   const { drafts } = session
   const hasDrafts = Boolean(drafts)
-  const message = feedbackMessage(drafts, edits, summaryEdit, feedback)
+  const changes: DraftChanges = { edits, summaryBodyEdit: summaryEdit, instructions: feedback }
+  const message = feedbackMessage(drafts, changes)
   const keptComments = keptCommentCount(drafts, edits)
   const lastTurnAt = lastTurnStartedAt(session)
   const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
@@ -178,7 +179,6 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   }
   const submit = (event: ReviewEvent) =>
     run(async () => {
-      const changes = { edits, summaryBodyEdit: summaryEdit, instructions: feedback }
       if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
       await window.rally.submitReview(session.id, event, changes, threadResolution.selectedIds)
     })

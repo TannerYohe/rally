@@ -119,7 +119,7 @@ class ReviewSessions extends EventEmitter {
     const { drafts, pr, submitted, timeline } = this.byId(sessionId)
     if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
     if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-    const notes = feedbackMessage(drafts, changes.edits, changes.summaryBodyEdit, changes.instructions)
+    const notes = feedbackMessage(drafts, changes)
     this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
     const context = { viewer: prList.get().viewer, earlierAttemptAt: lastSubmitAttemptAt(timeline) }
     void this.runTurn(sessionId, submitPrompt(pr, event, notes, context), 'submit')

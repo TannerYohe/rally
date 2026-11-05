@@ -67,7 +67,7 @@ The phase chips above the list show a count per phase and toggle that phase on o
 
 Hovering a row shows **Snooze** and **Hide**, which are also on the PR page:
 
-- **Snooze** hides the PR until its head commit changes, or until the author requests your review when no request was open at snooze time. Use it for a PR you know needs more work before your next round.
+- **Snooze** hides the PR until its head commit changes or the author requests your review again. A request that was already open when you snoozed doesn't count; a new one after it clears does. Use it for a PR you know needs more work before your next round.
 - **Hide** keeps the PR hidden until you unhide it. Use it for a PR you'll never review.
 
 Hidden PRs leave the main list and the phase counts and collect in a collapsed **hidden** section at the bottom, which respects the author, repo, and draft filters. Each shows how it was hidden and an **Unhide** button. A PR with a review in progress always shows in the main list and hides again once the review is submitted or discarded. Hides are stored in `hidden-prs.json`. A snooze is dropped when its PR no longer appears in the list; a hide is kept for 30 days after its PR was last listed, so narrowing the repo or author lists doesn't lose it.

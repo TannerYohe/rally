@@ -92,24 +92,43 @@ describe('toReleaseInfo', () => {
 })
 
 describe('assetProblem', () => {
+  const TAG = 'v1.7.0'
   const asset = (name: string, url = `https://github.com/TannerYohe/rally/releases/download/v1.7.0/${name}`) => ({ name, browser_download_url: url, size: 1 })
+  const problemFor = (url: string) => assetProblem(asset('Rally-1.7.0-x64.exe', url), TAG)
 
-  it('accepts a release download from the Rally repo', () => {
-    expect(assetProblem(asset('Rally-1.7.0-x64.exe'))).toBeNull()
+  it('accepts a release download from the Rally repo for this tag', () => {
+    expect(assetProblem(asset('Rally-1.7.0-x64.exe'), TAG)).toBeNull()
   })
 
   it('rejects a name that is not a bare file name', () => {
-    expect(assetProblem(asset('../Rally.exe'))).toMatch(/plain file name/)
-    expect(assetProblem(asset('dir\\Rally.exe'))).toMatch(/plain file name/)
-    expect(assetProblem(asset('.hidden.exe'))).toMatch(/plain file name/)
+    expect(assetProblem(asset('../Rally.exe'), TAG)).toMatch(/plain file name/)
+    expect(assetProblem(asset('dir\\Rally.exe'), TAG)).toMatch(/plain file name/)
+    expect(assetProblem(asset('.hidden.exe'), TAG)).toMatch(/plain file name/)
   })
 
-  it('rejects a URL outside the Rally release downloads', () => {
-    expect(assetProblem(asset('Rally.exe', 'https://github.com/someone/else/releases/download/v1/Rally.exe'))).toMatch(/doesn't download from/)
-    expect(assetProblem(asset('Rally.exe', 'http://github.com/TannerYohe/rally/releases/download/v1/Rally.exe'))).toMatch(/doesn't download from/)
+  it('rejects a path that climbs out of the Rally release downloads', () => {
+    expect(problemFor('https://github.com/TannerYohe/rally/releases/download/../../../../someone/else/releases/download/v1.7.0/Rally-1.7.0-x64.exe')).toMatch(
+      /doesn't download from https:\/\/github.com\/TannerYohe\/rally\/releases\/download\/v1.7.0\/Rally-1.7.0-x64.exe/,
+    )
+    expect(problemFor('https://github.com/TannerYohe/rally/releases/download/%2e%2e/%2E%2E/%2e%2e/%2e%2e/someone/else/releases/download/v1.7.0/Rally-1.7.0-x64.exe')).not.toBeNull()
   })
 
-  it('rejects a URL that names a different file', () => {
-    expect(assetProblem(asset('Rally.exe', 'https://github.com/TannerYohe/rally/releases/download/v1.7.0/Other.exe'))).toMatch(/doesn't download from/)
+  it('rejects another repo, host, scheme, or port', () => {
+    expect(problemFor('https://github.com/someone/else/releases/download/v1.7.0/Rally-1.7.0-x64.exe')).not.toBeNull()
+    expect(problemFor('https://evil.test/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.exe')).not.toBeNull()
+    expect(problemFor('http://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.exe')).not.toBeNull()
+    expect(problemFor('https://github.com:8443/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.exe')).not.toBeNull()
+    expect(problemFor('https://user@github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.exe')).not.toBeNull()
+  })
+
+  it('rejects a query, a fragment, another tag, or another file name', () => {
+    expect(problemFor(`https://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.exe?x=1`)).not.toBeNull()
+    expect(problemFor(`https://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.exe#x`)).not.toBeNull()
+    expect(problemFor('https://github.com/TannerYohe/rally/releases/download/v1.6.0/Rally-1.7.0-x64.exe')).not.toBeNull()
+    expect(problemFor(`https://github.com/TannerYohe/rally/releases/download/v1.7.0/Other.exe`)).not.toBeNull()
+  })
+
+  it('rejects a URL that does not parse', () => {
+    expect(problemFor('not a url')).not.toBeNull()
   })
 })

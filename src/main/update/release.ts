@@ -1,7 +1,7 @@
-import { RALLY_REPO_URL } from '@shared/repo'
+import { RALLY_REPO, RALLY_REPO_URL } from '@shared/repo'
 import type { ReleaseAsset, ReleaseInfo } from '@shared/types'
 
-const RELEASE_DOWNLOAD_PREFIX = `${RALLY_REPO_URL}/releases/download/`
+const RALLY_ORIGIN = new URL(RALLY_REPO_URL).origin
 const ASSET_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 interface Version {
@@ -53,18 +53,25 @@ export interface GithubRelease {
   assets: GithubReleaseAsset[]
 }
 
-export function assetProblem(asset: GithubReleaseAsset): string | null {
+export function assetProblem(asset: GithubReleaseAsset, tag: string): string | null {
   if (!ASSET_NAME_PATTERN.test(asset.name)) return `The release asset name ${JSON.stringify(asset.name)} isn't a plain file name.`
-  if (!asset.browser_download_url.startsWith(RELEASE_DOWNLOAD_PREFIX) || !asset.browser_download_url.endsWith(`/${asset.name}`)) {
-    return `The release asset ${asset.name} doesn't download from ${RELEASE_DOWNLOAD_PREFIX}.`
-  }
-  return null
+  const expectedPath = `/${RALLY_REPO}/releases/download/${encodeURIComponent(tag)}/${asset.name}`
+  const url = URL.parse(asset.browser_download_url)
+  const trusted =
+    url !== null &&
+    url.origin === RALLY_ORIGIN &&
+    url.username === '' &&
+    url.password === '' &&
+    url.search === '' &&
+    url.hash === '' &&
+    url.pathname === expectedPath
+  return trusted ? null : `The release asset ${asset.name} doesn't download from ${RALLY_ORIGIN}${expectedPath}.`
 }
 
 export function toReleaseInfo(release: GithubRelease, platform: NodeJS.Platform, arch: string): ReleaseInfo {
   const suffix = installerAssetSuffix(platform, arch)
   const asset = suffix ? release.assets.find((a) => a.name.endsWith(suffix)) : undefined
-  const problem = asset ? assetProblem(asset) : null
+  const problem = asset ? assetProblem(asset, release.tag_name) : null
   return {
     version: release.tag_name.replace(/^v/, ''),
     url: release.html_url,

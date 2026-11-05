@@ -29,6 +29,7 @@ describe('reviewTabForKey', () => {
   it('moves right and left, wrapping at the ends', () => {
     expect(reviewTabForKey('activity', 'ArrowRight')).toBe('report')
     expect(reviewTabForKey('drafts', 'ArrowRight')).toBe('activity')
+    expect(reviewTabForKey('report', 'ArrowLeft')).toBe('activity')
     expect(reviewTabForKey('activity', 'ArrowLeft')).toBe('drafts')
   })
 
@@ -46,7 +47,7 @@ describe('reviewTabReducer', () => {
   const following: ReviewTabState = { chosen: 'activity', following: true }
 
   it('keeps a tab picked during a turn until the turn ends, then shows Drafts', () => {
-    const picked = reviewTabReducer({ chosen: null, following: false }, { type: 'select', tab: 'report' })
+    const picked = reviewTabReducer(INITIAL_REVIEW_TAB_STATE, { type: 'select', tab: 'report' })
     expect(selectedReviewTab(picked.chosen, { busy: true, hasDrafts: true })).toBe('report')
     const ended = reviewTabReducer(picked, { type: 'busyChanged', busy: false })
     expect(selectedReviewTab(ended.chosen, { busy: false, hasDrafts: true })).toBe('drafts')
@@ -61,6 +62,10 @@ describe('reviewTabReducer', () => {
     expect(reviewTabReducer(following, { type: 'busyChanged', busy: false })).toEqual(INITIAL_REVIEW_TAB_STATE)
   })
 
+  it('does not start following when a turn starts without a send', () => {
+    expect(reviewTabReducer(INITIAL_REVIEW_TAB_STATE, { type: 'busyChanged', busy: true })).toEqual(INITIAL_REVIEW_TAB_STATE)
+  })
+
   it('returns to the automatic tab when a send fails', () => {
     expect(reviewTabReducer(following, { type: 'sendFailed' })).toEqual(INITIAL_REVIEW_TAB_STATE)
   })
@@ -72,6 +77,13 @@ describe('reviewTabReducer', () => {
   it('stops following when another tab is picked', () => {
     expect(reviewTabReducer(following, { type: 'select', tab: 'drafts' })).toEqual({ chosen: 'drafts', following: false })
     expect(reviewTabReducer(following, { type: 'select', tab: 'activity' })).toEqual(following)
+  })
+
+  it('does not start following when Activity is picked by hand', () => {
+    expect(reviewTabReducer({ chosen: 'activity', following: false }, { type: 'select', tab: 'activity' })).toEqual({
+      chosen: 'activity',
+      following: false,
+    })
   })
 })
 

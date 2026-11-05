@@ -7,10 +7,14 @@ export interface DraftEdit {
 
 export type DraftEdits = Record<string, DraftEdit>
 
+export function summaryBodyEdited(original: string, edit: string | undefined): edit is string {
+  return edit !== undefined && edit.trim() !== original.trim()
+}
+
 export function describeEdits(drafts: Drafts | null, edits: DraftEdits, summaryBody: string | undefined): string {
   if (!drafts) return ''
   const lines: string[] = []
-  if (summaryBody !== undefined && summaryBody !== drafts.summaryBody) {
+  if (summaryBodyEdited(drafts.summaryBody, summaryBody)) {
     lines.push(summaryBody.trim() ? `- I rewrote the review body; use this as final wording:\n  """${summaryBody}"""` : '- Remove the review body.')
   }
   for (const comment of drafts.comments) {

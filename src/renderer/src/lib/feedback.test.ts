@@ -39,6 +39,10 @@ describe('feedbackMessage', () => {
     )
   })
 
+  it('ignores whitespace typed where no review body was drafted', () => {
+    expect(feedbackMessage(drafts, {}, ' \n ', '')).toBe('')
+  })
+
   it('asks to remove a review body cleared to whitespace', () => {
     expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, {}, '  ', '')).toBe('Edits I made in Rally:\n- Remove the review body.')
   })

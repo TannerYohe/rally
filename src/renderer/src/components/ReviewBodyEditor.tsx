@@ -1,3 +1,6 @@
+import { summaryBodyEdited } from '../lib/feedback'
+import { BodyTextarea } from './BodyTextarea'
+
 interface Props {
   original: string
   edit: string | undefined
@@ -7,7 +10,7 @@ interface Props {
 
 export function ReviewBodyEditor({ original, edit, disabled, onEdit }: Props) {
   const body = edit ?? original
-  const edited = edit !== undefined && edit !== original
+  const edited = summaryBodyEdited(original, edit)
   return (
     <div className="rounded-xl border border-white/5 bg-ink-900/60 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs">
@@ -19,14 +22,7 @@ export function ReviewBodyEditor({ original, edit, disabled, onEdit }: Props) {
           </button>
         )}
       </div>
-      <textarea
-        className="w-full resize-y rounded border border-ink-800 bg-ink-950 p-2 font-mono text-sm text-ink-100 disabled:opacity-60"
-        rows={Math.min(8, Math.max(2, Math.ceil(body.length / 90)))}
-        value={body}
-        placeholder="No review body. Type one to add it."
-        disabled={disabled}
-        onChange={(e) => onEdit(e.target.value)}
-      />
+      <BodyTextarea value={body} disabled={disabled} placeholder="No review body. Type one to add it." onChange={onEdit} />
     </div>
   )
 }

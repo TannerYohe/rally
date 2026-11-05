@@ -1,5 +1,6 @@
 import type { DraftComment, Drafts, Severity } from '@shared/types'
 import type { DraftEdits } from '../lib/feedback'
+import { BodyTextarea } from './BodyTextarea'
 
 const SEVERITY_STYLES: Record<Severity, string> = {
   blocker: 'bg-rose-500/15 text-rose-300',
@@ -63,13 +64,7 @@ export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
                 </button>
               </div>
             </div>
-            <textarea
-              className="w-full resize-y rounded border border-ink-800 bg-ink-950 p-2 font-mono text-sm text-ink-100 disabled:opacity-60"
-              rows={Math.min(8, Math.max(2, Math.ceil(body.length / 90)))}
-              value={body}
-              disabled={disabled || dropped}
-              onChange={(e) => onEdit(comment.id, { ...edit, body: e.target.value })}
-            />
+            <BodyTextarea value={body} disabled={disabled || dropped} onChange={(value) => onEdit(comment.id, { ...edit, body: value })} />
           </li>
         )
       })}

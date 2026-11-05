@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Drafts, ReviewSession, SubmittedReview } from '@shared/types'
+import { EMPTY_COMMENT_REVIEW_ERROR, type Drafts, type ReviewSession, type SubmittedReview } from '@shared/types'
 
 const SUBMITTED: SubmittedReview = { reviewId: 1, url: 'https://github.com/acme/api/pull/1#review-1', event: 'COMMENT' }
 
@@ -10,7 +10,7 @@ const drafts = (threadIds: string[]): Drafts => ({
   mode: 'followup',
   verdict: 'Looks good',
   reportMarkdown: '',
-  summaryBody: '',
+  summaryBody: 'Thanks for the fixes.',
   comments: [],
   priorConcerns: threadIds.map((threadId, i) => ({ id: `C${i + 1}`, location: 'a.rb:1', gist: '', verdict: '', status: 'addressed', threadId })),
 })
@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   stored: [] as ReviewSession[],
   resolveOwnThreads: vi.fn(),
   query: vi.fn(),
+  recordRallyReview: vi.fn(),
   handlers: null as null | { onSubmitted(review: SubmittedReview): void },
 }))
 
@@ -43,7 +44,7 @@ vi.mock('../store', () => ({
   configFile: { get: () => ({ reviewSkill: 'review-pr' }) },
   sessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
 }))
-vi.mock('../prList', () => ({ prList: { refreshOne: vi.fn(async () => {}) } }))
+vi.mock('../prList', () => ({ prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview } }))
 vi.mock('../github/threads', () => ({ fetchOwnThreads: vi.fn(), resolveOwnThreads: mocks.resolveOwnThreads }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
@@ -70,6 +71,7 @@ mocks.stored = [
   storedSession(7, { status: 'error', resolvingThreads: true, threadsToResolveOnSubmit: ['T1'] }),
   storedSession(8),
   storedSession(9),
+  storedSession(10, { drafts: { ...drafts(['T1']), summaryBody: '  ' } }),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -154,6 +156,29 @@ describe('submit', () => {
     finish({ resolved: ['T1'], failed: [] })
     await vi.waitFor(() => expect(session(9).threadsToResolveOnSubmit).toBeUndefined())
     expect(session(9).resolvingThreads).toBe(false)
+  })
+
+  it('records the submitted review id for the PR', async () => {
+    mocks.query.mockImplementation(turn({ submits: true }))
+    mocks.resolveOwnThreads.mockResolvedValue({ resolved: [], failed: [] })
+    await reviewSessions.submit('test-session-4', 'COMMENT', '', [])
+    await vi.waitFor(() => expect(session(4).status).toBe('submitted'))
+    expect(mocks.recordRallyReview).toHaveBeenCalledWith('acme/api#4', SUBMITTED.reviewId)
+  })
+
+  it('rejects a Comment review with nothing to post before starting the turn', async () => {
+    await expect(reviewSessions.submit('test-session-10', 'COMMENT', '', ['T1'])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
+    expect(mocks.query).not.toHaveBeenCalled()
+    expect(session(10).status).toBe('awaiting_feedback')
+  })
+
+  it('submits an empty review when the event is not Comment, or when the user sent final edits', async () => {
+    mocks.query.mockImplementation(turn({ submits: false }))
+    await reviewSessions.submit('test-session-10', 'APPROVE', '', [])
+    await vi.waitFor(() => expect(session(10).status).toBe('error'))
+    await reviewSessions.submit('test-session-10', 'COMMENT', 'Add a thank-you body.', [])
+    expect(mocks.query).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(session(10).status).toBe('error'))
   })
 
   it('resolves the selected threads once the review is submitted', async () => {

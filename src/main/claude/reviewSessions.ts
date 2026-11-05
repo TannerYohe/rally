@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
 import {
+  EMPTY_COMMENT_REVIEW_ERROR,
+  isEmptyCommentReview,
   priorConcernThreadIds,
   prKey,
   type PrRef,
@@ -112,6 +114,10 @@ class ReviewSessions extends EventEmitter {
   async submit(sessionId: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
     if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
+    const { drafts } = this.byId(sessionId)
+    if (drafts && !notes.trim() && isEmptyCommentReview(event, drafts.summaryBody, drafts.comments.length)) {
+      throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
+    }
     this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
     void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
   }

@@ -1,6 +1,6 @@
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
+import { EMPTY_COMMENT_REVIEW_ERROR, isEmptyCommentReview, prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
@@ -176,7 +176,12 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     event.preventDefault()
     if (canSend) void send()
   }
-  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message, threadResolution.selectedIds))
+  const finalSummaryBody = summaryEdit ?? drafts?.summaryBody ?? ''
+  const submit = (event: ReviewEvent) =>
+    run(async () => {
+      if (!feedback.trim() && isEmptyCommentReview(event, finalSummaryBody, keptComments)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
+      await window.rally.submitReview(session.id, event, message, threadResolution.selectedIds)
+    })
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)
   }

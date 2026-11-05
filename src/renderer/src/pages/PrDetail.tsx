@@ -128,14 +128,15 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const busy = BUSY_STATUSES.includes(session.status)
   const submitted = isSubmitted(session)
   const { drafts } = session
+  const hasDrafts = Boolean(drafts)
   const message = feedbackMessage(drafts, edits, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
   const lastTurnAt = lastTurnStartedAt(session)
-  const reviewTab = useReviewTab({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
+  const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
   const threadResolution = useThreadResolution(session)
   const resolvingThreads = threadResolution.resolving
-  const emptyTabs = emptyReviewTabs({ hasDrafts: Boolean(drafts), threadCount: threadResolution.rows.length })
+  const emptyTabs = emptyReviewTabs({ hasDrafts, threadCount: threadResolution.rows.length })
   const tabBadges: Record<ReviewTab, ReactNode> = {
     activity: busy && <span className="h-2 w-2 animate-pulse rounded-full bg-primary-400" />,
     report: drafts && (
@@ -245,50 +246,58 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       </ReviewTabPanel>
 
       <ReviewTabPanel id="report" tab={reviewTab.tab}>
-        {drafts ? (
-          <div className="space-y-3">
-            <div className="text-sm">
-              <span className="text-ink-500">Verdict · </span>
-              <span className="text-ink-200">{drafts.verdict}</span>
-            </div>
-            <Markdown>{drafts.reportMarkdown}</Markdown>
-          </div>
-        ) : (
+        {emptyTabs.report ? (
           <EmptyTab>Claude hasn't published a report yet.</EmptyTab>
+        ) : (
+          drafts && (
+            <div className="space-y-3">
+              <div className="text-sm">
+                <span className="text-ink-500">Verdict · </span>
+                <span className="text-ink-200">{drafts.verdict}</span>
+              </div>
+              <Markdown>{drafts.reportMarkdown}</Markdown>
+            </div>
+          )
         )}
       </ReviewTabPanel>
 
       <ReviewTabPanel id="threads" tab={reviewTab.tab}>
-        {threadResolution.rows.length > 0 ? (
+        {emptyTabs.threads ? (
+          <EmptyTab>No earlier comments. Threads appear in follow-up reviews.</EmptyTab>
+        ) : (
           <PriorConcernList
             state={threadResolution}
             resolution={session.threadResolution ?? null}
             disabled={busy || resolvingThreads}
             submitted={submitted}
           />
-        ) : (
-          <EmptyTab>No earlier comments. Threads appear in follow-up reviews.</EmptyTab>
         )}
       </ReviewTabPanel>
 
       <ReviewTabPanel id="drafts" tab={reviewTab.tab}>
-        {drafts ? (
-          <div className="space-y-2">
-            <DraftList
-              drafts={drafts}
-              edits={edits}
-              disabled={busy || submitted}
-              onEdit={(id, edit) => setEdits(({ [id]: _removed, ...rest }) => (edit ? { ...rest, [id]: edit } : rest))}
-            />
-            {drafts.summaryBody && (
-              <div className="rounded-md border border-ink-800 bg-ink-900 p-3 text-sm">
-                <div className="mb-1 text-xs text-ink-500">Review body</div>
-                {drafts.summaryBody}
-              </div>
-            )}
-          </div>
-        ) : (
+        {emptyTabs.drafts ? (
           <EmptyTab>Claude hasn't drafted any comments yet.</EmptyTab>
+        ) : (
+          drafts && (
+            <div className="space-y-2">
+              {drafts.comments.length === 0 ? (
+                <EmptyTab>No draft comments.</EmptyTab>
+              ) : (
+                <DraftList
+                  drafts={drafts}
+                  edits={edits}
+                  disabled={busy || submitted}
+                  onEdit={(id, edit) => setEdits(({ [id]: _removed, ...rest }) => (edit ? { ...rest, [id]: edit } : rest))}
+                />
+              )}
+              {drafts.summaryBody && (
+                <div className="rounded-md border border-ink-800 bg-ink-900 p-3 text-sm">
+                  <div className="mb-1 text-xs text-ink-500">Review body</div>
+                  {drafts.summaryBody}
+                </div>
+              )}
+            </div>
+          )
         )}
       </ReviewTabPanel>
 

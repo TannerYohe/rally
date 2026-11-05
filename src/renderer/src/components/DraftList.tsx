@@ -30,7 +30,6 @@ interface Props {
 }
 
 export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
-  if (drafts.comments.length === 0) return <p className="text-sm text-ink-400">No draft comments.</p>
   return (
     <ol className="space-y-3">
       {drafts.comments.map((comment) => {

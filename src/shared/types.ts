@@ -260,15 +260,21 @@ export interface ReleaseInfo {
   version: string
   url: string
   notes: string
-  publishedAt: string
+  publishedAt: string | null
   asset: ReleaseAsset | null
 }
 
 export type UpdateState =
   | { status: 'idle' }
   | { status: 'checking' }
+  | { status: 'check_failed'; error: string }
   | { status: 'up_to_date'; checkedAt: string }
   | { status: 'available'; release: ReleaseInfo; installBlocker: string | null }
   | { status: 'downloading'; release: ReleaseInfo; received: number; total: number }
   | { status: 'installing'; release: ReleaseInfo }
-  | { status: 'error'; error: string; release: ReleaseInfo | null }
+  | { status: 'install_failed'; release: ReleaseInfo; error: string }
+
+export interface InstallAttempt {
+  version: string
+  logPath: string | null
+}

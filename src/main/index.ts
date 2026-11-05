@@ -4,6 +4,7 @@ import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
 import { prList } from './prList'
 import { loadLoginShellPath } from './shellPath'
+import { updater } from './update/updater'
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -42,6 +43,7 @@ app.whenReady().then(() => {
   app.dock?.setIcon(icon)
   loadLoginShellPath()
   registerIpc()
+  updater.start()
   createWindow()
   prList.start()
   app.on('activate', () => {

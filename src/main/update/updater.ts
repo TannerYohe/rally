@@ -1,20 +1,24 @@
 import { EventEmitter } from 'node:events'
-import { createWriteStream, mkdtempSync, rmSync } from 'node:fs'
+import { createWriteStream, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ReadableStream } from 'node:stream/web'
 import { app, net } from 'electron'
-import type { AppInfo, ReleaseAsset, ReleaseInfo, UpdateState } from '@shared/types'
-import { handOffMacInstall, handOffWindowsInstall, installBlocker, type InstallTarget } from './install'
-import { isNewerVersion, RELEASE_REPO, toReleaseInfo, type GithubRelease } from './release'
+import { errorMessage } from '@shared/errors'
+import { RALLY_REPO } from '@shared/repo'
+import type { AppInfo, InstallAttempt, ReleaseAsset, ReleaseInfo, UpdateState } from '@shared/types'
+import { GITHUB_TIMEOUT_MS } from '../github/client'
+import { updateFile } from '../store'
+import { handOffInstall, installBlocker, installLogPath, type InstallTarget } from './install'
+import { isNewerVersion, toReleaseInfo, type GithubRelease } from './release'
 
-const LATEST_RELEASE_URL = `https://api.github.com/repos/${RELEASE_REPO}/releases/latest`
+const LATEST_RELEASE_URL = `https://api.github.com/repos/${RALLY_REPO}/releases/latest`
+const DOWNLOAD_STALL_MS = 30_000
+const WORK_DIR_PREFIX = 'rally-update-'
 
 const PLATFORM_LABELS: Partial<Record<NodeJS.Platform, string>> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' }
-
-const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 export function appInfo(): AppInfo {
   return {
@@ -32,33 +36,89 @@ function installTarget(): InstallTarget {
 }
 
 async function fetchLatestRelease(): Promise<ReleaseInfo> {
-  const response = await net.fetch(LATEST_RELEASE_URL, { headers: { Accept: 'application/vnd.github+json' } })
+  let response: Response
+  try {
+    response = await net.fetch(LATEST_RELEASE_URL, {
+      headers: { Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') throw new Error(`GitHub didn't answer within ${GITHUB_TIMEOUT_MS / 1000} seconds.`)
+    throw error
+  }
   if (response.status === 403 || response.status === 429) throw new Error('GitHub rate limited the update check. Try again later.')
   if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status} for the latest release.`)
   return toReleaseInfo((await response.json()) as GithubRelease, process.platform, process.arch)
 }
 
 async function download(asset: ReleaseAsset, path: string, onProgress: (received: number, total: number) => void): Promise<void> {
-  const response = await net.fetch(asset.url)
-  if (!response.ok || !response.body) throw new Error(`Downloading ${asset.name} failed with HTTP ${response.status}.`)
-  const total = Number(response.headers.get('content-length')) || asset.size
+  const controller = new AbortController()
+  let stallTimer: NodeJS.Timeout | undefined
+  const resetStallTimer = () => {
+    clearTimeout(stallTimer)
+    stallTimer = setTimeout(
+      () => controller.abort(new Error(`The download stalled for ${DOWNLOAD_STALL_MS / 1000} seconds.`)),
+      DOWNLOAD_STALL_MS,
+    )
+  }
   let received = 0
-  const counter = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      received += chunk.length
-      onProgress(received, total)
-      callback(null, chunk)
-    },
-  })
-  await pipeline(Readable.fromWeb(response.body as ReadableStream), counter, createWriteStream(path))
+  resetStallTimer()
+  try {
+    const response = await net.fetch(asset.url, { signal: controller.signal })
+    if (!response.ok || !response.body) throw new Error(`Downloading ${asset.name} failed with HTTP ${response.status}.`)
+    const total = Number(response.headers.get('content-length')) || asset.size
+    const counter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        received += chunk.length
+        resetStallTimer()
+        onProgress(received, total)
+        callback(null, chunk)
+      },
+    })
+    await pipeline(Readable.fromWeb(response.body as ReadableStream), counter, createWriteStream(path), { signal: controller.signal })
+  } catch (error) {
+    throw controller.signal.aborted ? controller.signal.reason : error
+  } finally {
+    clearTimeout(stallTimer)
+  }
   if (received !== asset.size) throw new Error(`Downloaded ${received} bytes of ${asset.name}, expected ${asset.size}.`)
+}
+
+function sweepWorkDirs(): void {
+  const root = tmpdir()
+  for (const name of readdirSync(root).filter((n) => n.startsWith(WORK_DIR_PREFIX))) {
+    try {
+      rmSync(join(root, name), { recursive: true, force: true })
+    } catch (error) {
+      console.error('Removing a leftover update directory failed', { name, error })
+    }
+  }
+}
+
+function setPendingInstall(pending: InstallAttempt | null): void {
+  updateFile.set({ ...updateFile.get(), pending })
 }
 
 class Updater extends EventEmitter {
   private state: UpdateState = { status: 'idle' }
 
+  start(): void {
+    sweepWorkDirs()
+    const { pending } = updateFile.get()
+    if (!pending) return
+    updateFile.set({ pending: null, failed: pending.version === app.getVersion() ? null : pending })
+  }
+
   get(): UpdateState {
     return this.state
+  }
+
+  failedInstall(): InstallAttempt | null {
+    return updateFile.get().failed
+  }
+
+  dismissFailedInstall(): void {
+    updateFile.set({ ...updateFile.get(), failed: null })
   }
 
   async check(): Promise<void> {
@@ -73,57 +133,49 @@ class Updater extends EventEmitter {
       }
     } catch (error) {
       console.error('Checking for updates failed', { error })
-      this.set({ status: 'error', error: errorMessage(error), release: null })
+      this.set({ status: 'check_failed', error: errorMessage(error) })
     }
   }
 
   async install(): Promise<void> {
     const release = this.pendingRelease()
     if (!release || this.busy()) return
+    const { asset } = release
     const blocker = installBlocker(release, installTarget())
-    if (blocker || !release.asset) {
-      this.set({ status: 'error', error: blocker ?? 'This release has no build for this machine.', release })
+    if (blocker || !asset) {
+      this.set({ status: 'available', release, installBlocker: blocker })
       return
     }
-    const asset = release.asset
-    const workDir = mkdtempSync(join(tmpdir(), 'rally-update-'))
+    const workDir = mkdtempSync(join(tmpdir(), WORK_DIR_PREFIX))
     try {
-      const path = join(workDir, asset.name)
+      const downloadPath = join(workDir, asset.name)
       let lastPercent = -1
       this.set({ status: 'downloading', release, received: 0, total: asset.size })
-      await download(asset, path, (received, total) => {
+      await download(asset, downloadPath, (received, total) => {
         const percent = Math.floor((received / total) * 100)
         if (percent === lastPercent) return
         lastPercent = percent
         this.set({ status: 'downloading', release, received, total })
       })
       this.set({ status: 'installing', release })
-      await this.handOff(path, workDir)
+      const dataDir = app.getPath('userData')
+      setPendingInstall({ version: release.version, logPath: installLogPath(process.platform, dataDir) })
+      await handOffInstall({ downloadPath, workDir, exePath: app.getPath('exe'), dataDir })
     } catch (error) {
       console.error('Installing the update failed', { version: release.version, error })
+      setPendingInstall(null)
       rmSync(workDir, { recursive: true, force: true })
-      this.set({ status: 'error', error: errorMessage(error), release })
+      this.set({ status: 'install_failed', release, error: errorMessage(error) })
       return
     }
     app.quit()
-  }
-
-  private async handOff(downloadPath: string, workDir: string): Promise<void> {
-    switch (process.platform) {
-      case 'darwin':
-        return handOffMacInstall(downloadPath, workDir, app.getPath('exe'))
-      case 'win32':
-        return handOffWindowsInstall(downloadPath)
-      default:
-        throw new Error(`Rally can't install updates on ${process.platform}.`)
-    }
   }
 
   private pendingRelease(): ReleaseInfo | null {
     switch (this.state.status) {
       case 'available':
         return this.state.release
-      case 'error':
+      case 'install_failed':
         return this.state.release
       default:
         return null

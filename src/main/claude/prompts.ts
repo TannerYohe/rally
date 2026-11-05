@@ -34,5 +34,6 @@ Each reply belongs to the thread whose comments include its reply-to comment id.
 3. Add each reply to the pending review with: gh api graphql -f review=<node_id> -f thread=<thread id> -f body='<reply>' -f query='${THREAD_REPLY_MUTATION}'
 4. Submit the pending review: gh api ${pullPath}/reviews/<id>/events --method POST -f event=${event}
 5. Call ${REVIEW_SUBMITTED_TOOL} with the review id, its html_url, and the event.
-If the event is COMMENT and there is no body, inline comment, or reply, post nothing, tell the user there is nothing to submit, and end the turn.`
+If anything after creating the pending review fails and retrying does not fix it, delete that pending review with: gh api ${pullPath}/reviews/<id> --method DELETE
+Then tell the user what failed and end the turn without calling ${REVIEW_SUBMITTED_TOOL}.`
 }

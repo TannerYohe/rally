@@ -1,5 +1,6 @@
 import type { DraftComment, Drafts, Severity } from '@shared/types'
-import type { DraftEdits } from '../lib/feedback'
+import { bodyEdited, type DraftEdits } from '../lib/feedback'
+import { BodyTextarea } from './BodyTextarea'
 
 const SEVERITY_STYLES: Record<Severity, string> = {
   blocker: 'bg-rose-500/15 text-rose-300',
@@ -17,7 +18,7 @@ const SEVERITY_ACCENTS: Record<Severity, string> = {
 
 function location(comment: DraftComment): string {
   if (comment.kind === 'reply') return `Reply to comment ${comment.replyToCommentId ?? '?'}`
-  if (!comment.path) return 'Review body'
+  if (!comment.path) return 'General comment'
   const lines = comment.startLine ? `${comment.startLine}-${comment.line}` : `${comment.line ?? ''}`
   return `${comment.path}${lines ? `:${lines}` : ''}`
 }
@@ -36,7 +37,7 @@ export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
         const edit = edits[comment.id]
         const dropped = edit?.dropped ?? false
         const body = edit?.body ?? comment.body
-        const edited = edit?.body !== undefined && edit.body !== comment.body
+        const edited = bodyEdited(comment.body, edit?.body)
         return (
           <li
             key={comment.id}
@@ -62,13 +63,7 @@ export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
                 </button>
               </div>
             </div>
-            <textarea
-              className="w-full resize-y rounded border border-ink-800 bg-ink-950 p-2 font-mono text-sm text-ink-100 disabled:opacity-60"
-              rows={Math.min(8, Math.max(2, Math.ceil(body.length / 90)))}
-              value={body}
-              disabled={disabled || dropped}
-              onChange={(e) => onEdit(comment.id, { ...edit, body: e.target.value })}
-            />
+            <BodyTextarea value={body} disabled={disabled || dropped} onChange={(value) => onEdit(comment.id, { ...edit, body: value })} />
           </li>
         )
       })}

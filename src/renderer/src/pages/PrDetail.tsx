@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
+import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
 import { Markdown } from '../components/Markdown'
 import { Avatar } from '../components/Avatar'
 import { BusyDot } from '../components/BusyDot'
@@ -124,13 +125,14 @@ interface ReviewPanelProps {
 
 function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStartFollowUp }: ReviewPanelProps) {
   const [edits, setEdits] = useState<DraftEdits>({})
+  const [summaryEdit, setSummaryEdit] = useState<string | undefined>(undefined)
   const [feedback, setFeedback] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
   const busy = BUSY_STATUSES.includes(session.status)
   const submitted = isSubmitted(session)
   const { drafts } = session
   const hasDrafts = Boolean(drafts)
-  const message = feedbackMessage(drafts, edits, feedback)
+  const message = feedbackMessage(drafts, edits, summaryEdit, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
   const lastTurnAt = lastTurnStartedAt(session)
   const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
@@ -155,6 +157,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     try {
       await action()
       setEdits({})
+      setSummaryEdit(undefined)
       setFeedback('')
       return true
     } catch (error) {
@@ -298,11 +301,8 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               />
             )
           )}
-          {drafts?.summaryBody && (
-            <div className="rounded-md border border-ink-800 bg-ink-900 p-3 text-sm">
-              <div className="mb-1 text-xs text-ink-500">Review body</div>
-              {drafts.summaryBody}
-            </div>
+          {drafts && (
+            <ReviewBodyEditor original={drafts.summaryBody} edit={summaryEdit} disabled={busy || submitted} onEdit={setSummaryEdit} />
           )}
         </div>
       </ReviewTabPanel>

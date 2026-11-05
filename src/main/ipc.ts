@@ -1,12 +1,14 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { Config, Health, PrRef, ReviewEvent } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { reviewSessions } from './claude/reviewSessions'
 import { github, resetGithubClient } from './github/client'
 import { classifyGithubFailure } from './github/failure'
 import { prList } from './prList'
 import { configFile } from './store'
+import { appInfo, updater } from './update/updater'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, payload)
@@ -18,7 +20,7 @@ async function health(): Promise<Health> {
     const gh = await github()
     return { githubLogin: gh.login, githubFailure: null, githubError: null, claudeDefaults: readClaudeDefaults() }
   } catch (error) {
-    const githubError = error instanceof Error ? error.message : String(error)
+    const githubError = errorMessage(error)
     return { githubLogin: null, githubFailure: classifyGithubFailure(error), githubError, claudeDefaults: readClaudeDefaults() }
   }
 }
@@ -43,6 +45,12 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.resolveThreads, (_event, id: string, threadIds: string[]) => reviewSessions.resolveThreads(id, threadIds))
   ipcMain.handle(IPC.cancelReview, (_event, id: string) => reviewSessions.cancel(id))
   ipcMain.handle(IPC.discardSession, (_event, id: string) => reviewSessions.discard(id))
+  ipcMain.handle(IPC.getAppInfo, () => appInfo())
+  ipcMain.handle(IPC.getUpdateState, () => updater.get())
+  ipcMain.handle(IPC.checkForUpdates, () => updater.check())
+  ipcMain.handle(IPC.installUpdate, () => updater.install())
+  ipcMain.handle(IPC.getFailedInstall, () => updater.failedInstall())
+  ipcMain.handle(IPC.dismissFailedInstall, () => updater.dismissFailedInstall())
 
   prList.on('changed', (state) => broadcast(IPC.prsChanged, state))
   prList.setReviewStatusLookup((key) => reviewSessions.statusOf(key))
@@ -51,4 +59,5 @@ export function registerIpc(): void {
     prList.reapplyReviewStatus()
   })
   reviewSessions.on('removed', () => prList.reapplyReviewStatus())
+  updater.on('changed', (state) => broadcast(IPC.updateChanged, state))
 }

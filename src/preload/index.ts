@@ -23,6 +23,13 @@ const api: RallyApi = {
   cancelReview: (id) => ipcRenderer.invoke(IPC.cancelReview, id),
   discardSession: (id) => ipcRenderer.invoke(IPC.discardSession, id),
   onSessionChanged: (listener) => subscribe(IPC.sessionChanged, listener),
+  getAppInfo: () => ipcRenderer.invoke(IPC.getAppInfo),
+  getUpdateState: () => ipcRenderer.invoke(IPC.getUpdateState),
+  checkForUpdates: () => ipcRenderer.invoke(IPC.checkForUpdates),
+  installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
+  getFailedInstall: () => ipcRenderer.invoke(IPC.getFailedInstall),
+  dismissFailedInstall: () => ipcRenderer.invoke(IPC.dismissFailedInstall),
+  onUpdateChanged: (listener) => subscribe(IPC.updateChanged, listener),
 }
 
 contextBridge.exposeInMainWorld('rally', api)

@@ -5,7 +5,7 @@ import type { RawThread } from './threads'
 
 const mocks = vi.hoisted(() => ({ graphql: vi.fn() }))
 
-vi.mock('./client', () => ({ github: async () => ({ login: 'me', graphql: mocks.graphql }) }))
+vi.mock('./client', () => ({ GITHUB_TIMEOUT_MS: 15_000, github: async () => ({ login: 'me', graphql: mocks.graphql }) }))
 
 const { lookupThread, resolveOwnThreads } = await import('./threads')
 

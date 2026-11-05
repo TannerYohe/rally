@@ -1,6 +1,6 @@
 export const SETTINGS_ROOT = '/settings'
 
-export const SETTINGS_SECTIONS = ['pull-requests', 'reviews', 'appearance', 'accounts'] as const
+export const SETTINGS_SECTIONS = ['pull-requests', 'reviews', 'appearance', 'accounts', 'about'] as const
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 

@@ -4,6 +4,7 @@ import { blocksLeavingSettings, sectionFromParam, settingsPath } from './setting
 describe('sectionFromParam', () => {
   it('returns a known section', () => {
     expect(sectionFromParam('reviews')).toBe('reviews')
+    expect(sectionFromParam('about')).toBe('about')
   })
 
   it('falls back to pull requests for a missing or unknown section', () => {

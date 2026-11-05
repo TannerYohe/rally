@@ -40,7 +40,7 @@ export function submitPrompt(pr: PrRef, event: ReviewEvent, notes: string, conte
     : ''
   return `SUBMIT as "${REVIEW_EVENT_LABELS[event]}" (event ${event}).
 The drafts as last published are final.${edits}
-Every inline comment and thread reply goes into one pending review, which is then submitted. Do not use the comments/<comment_id>/replies endpoint: it posts each reply as a separate review.
+Every inline comment and thread reply goes into one pending review, which is then submitted.
 Before posting, list the PR's reviews with: gh api ${pullPath}/reviews --paginate --jq '${REVIEWS_JQ}'
 ${earlierAttempt}Delete every PENDING review in that list with: gh api ${pullPath}/reviews/<id> --method DELETE
 GitHub only shows a pending review to its author, so each one is yours, left by an interrupted submit or started in the GitHub UI. GitHub allows one pending review per user, so it has to go before a new one can be created.

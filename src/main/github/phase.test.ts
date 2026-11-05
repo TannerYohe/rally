@@ -8,18 +8,12 @@ function review(state: MyReview['state'], commitOid: string, submittedAt: string
   return { databaseId: null, state, commitOid, submittedAt, replyOnly: false }
 }
 
-function threadReply(commitOid: string, submittedAt: string, databaseId: number | null = null): MyReview {
-  return { ...review('COMMENTED', commitOid, submittedAt), databaseId, replyOnly: true }
+function threadReply(commitOid: string, submittedAt: string): MyReview {
+  return { ...review('COMMENTED', commitOid, submittedAt), replyOnly: true }
 }
 
-function phase(
-  myReviews: MyReview[],
-  reviewRequestedFromMe = false,
-  reviewInProgress = false,
-  headKnownSince: string | null = null,
-  rallySubmittedReviewId: number | null = null,
-) {
-  return computePhase({ headRefOid: HEAD, headKnownSince, reviewRequestedFromMe, myReviews, reviewInProgress, rallySubmittedReviewId })
+function phase(myReviews: MyReview[], reviewRequestedFromMe = false, reviewInProgress = false, headKnownSince: string | null = null) {
+  return computePhase({ headRefOid: HEAD, headKnownSince, reviewRequestedFromMe, myReviews, reviewInProgress })
 }
 
 describe('computePhase', () => {
@@ -89,21 +83,6 @@ describe('computePhase', () => {
   it('stays awaiting re-review when I reply on a thread after the author pushes', () => {
     const reviews = [review('CHANGES_REQUESTED', 'old-sha', '2026-10-01T00:00:00Z'), threadReply(HEAD, '2026-10-03T00:00:00Z')]
     expect(phase(reviews, false, false, '2026-10-02T00:00:00Z')).toBe('awaiting_rereview')
-  })
-
-  it('counts a reply-only review that Rally submitted as reviewing the head it was on', () => {
-    const reviews = [review('COMMENTED', 'old-sha', '2026-10-01T00:00:00Z'), threadReply(HEAD, '2026-10-03T00:00:00Z', 42)]
-    expect(phase(reviews, false, false, '2026-10-02T00:00:00Z', 42)).toBe('pending_changes')
-  })
-
-  it('ignores a reply-only review that Rally did not submit, even with a Rally review on record', () => {
-    const reviews = [review('COMMENTED', 'old-sha', '2026-10-01T00:00:00Z'), threadReply(HEAD, '2026-10-03T00:00:00Z', 7)]
-    expect(phase(reviews, false, false, '2026-10-02T00:00:00Z', 42)).toBe('awaiting_rereview')
-  })
-
-  it('keeps an earlier approval when Rally submitted a reply-only review after it', () => {
-    const reviews = [review('APPROVED', 'old-sha', '2026-10-01T00:00:00Z'), threadReply(HEAD, '2026-10-03T00:00:00Z', 42)]
-    expect(phase(reviews, false, false, '2026-10-02T00:00:00Z', 42)).toBe('approved')
   })
 
   it('falls back to my latest thread reply when the review window holds only replies', () => {

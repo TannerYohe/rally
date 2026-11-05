@@ -17,4 +17,5 @@ export const configFile = new JsonFile<Config>(join(dir, 'config.json'), DEFAULT
 export const prCacheFile = new JsonFile<PrCache>(join(dir, 'prs.json'), { viewer: null, refreshedAt: null, prs: [] })
 export const summariesFile = new JsonFile<Record<string, string>>(join(dir, 'summaries.json'), {})
 export const headsSeenFile = new JsonFile<Record<string, string>>(join(dir, 'heads-seen.json'), {})
+export const rallyReviewsFile = new JsonFile<Record<string, number[]>>(join(dir, 'rally-reviews.json'), {})
 export const sessionsDir = new JsonDir<ReviewSession>(join(dir, 'sessions'))

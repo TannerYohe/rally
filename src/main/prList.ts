@@ -1,26 +1,25 @@
 import { EventEmitter } from 'node:events'
-import { headKey, prKey, type Pr, type PrListState, type SessionStatus } from '@shared/types'
+import { headKey, prKey, type MyReview, type Pr, type PrListState, type SessionStatus } from '@shared/types'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { buildSearchQueries } from './github/search'
-import { configFile, headsSeenFile, prCacheFile, summariesFile } from './store'
+import { configFile, headsSeenFile, prCacheFile, rallyReviewsFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
-export interface ReviewSessionInfo {
-  status: SessionStatus
-  submittedReviewId: number | null
-}
+type ReviewStatusLookup = (key: string) => SessionStatus | null
 
-type ReviewSessionLookup = (key: string) => ReviewSessionInfo | null
+function countRallyReviews(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
+  return reviews.map((r) => (r.replyOnly && r.databaseId !== null && rallyReviewIds.includes(r.databaseId) ? { ...r, replyOnly: false } : r))
+}
 
 class PrList extends EventEmitter {
   private state: PrListState
   private timer: NodeJS.Timeout | null = null
   private summarizing = new Set<string>()
   private summaryErrors = new Map<string, string>()
-  private reviewSessionOf: ReviewSessionLookup = () => null
+  private reviewStatusOf: ReviewStatusLookup = () => null
 
   constructor() {
     super()
@@ -43,13 +42,19 @@ class PrList extends EventEmitter {
     this.timer = setInterval(() => void this.refresh(), minutes * 60_000)
   }
 
-  setReviewSessionLookup(lookup: ReviewSessionLookup): void {
-    this.reviewSessionOf = lookup
-    this.reapplyReviewStatus()
+  setReviewStatusLookup(lookup: ReviewStatusLookup): void {
+    this.reviewStatusOf = lookup
+    this.reapplyPhases()
   }
 
-  reapplyReviewStatus(): void {
-    const prs = this.withReviewStatus(this.state.prs)
+  recordRallyReview(key: string, reviewId: number): void {
+    const recorded = rallyReviewsFile.get()
+    const ids = recorded[key] ?? []
+    if (!ids.includes(reviewId)) rallyReviewsFile.set({ ...recorded, [key]: [...ids, reviewId] })
+  }
+
+  reapplyPhases(): void {
+    const prs = this.withPhases(this.state.prs)
     const changed = prs.some((pr, i) => pr.phase !== this.state.prs[i].phase || pr.reviewStatus !== this.state.prs[i].reviewStatus)
     if (changed) this.update({ prs })
   }
@@ -78,7 +83,13 @@ class PrList extends EventEmitter {
   }
 
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
-    return this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, prune), prune))
+    if (prune) this.pruneRallyReviews(prs)
+    return this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune))
+  }
+
+  private pruneRallyReviews(prs: GithubPr[]): void {
+    const current = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
+    rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => current.has(key))))
   }
 
   private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {
@@ -96,13 +107,14 @@ class PrList extends EventEmitter {
     return result
   }
 
-  private withReviewStatus(prs: Omit<Pr, 'phase' | 'reviewStatus'>[]): Pr[] {
+  private withPhases(prs: Omit<Pr, 'phase' | 'reviewStatus'>[]): Pr[] {
+    const rallyReviews = rallyReviewsFile.get()
     return prs.map((pr) => {
-      const session = this.reviewSessionOf(prKey(pr.owner, pr.repo, pr.number))
-      const reviewStatus = session?.status ?? null
+      const key = prKey(pr.owner, pr.repo, pr.number)
+      const reviewStatus = this.reviewStatusOf(key)
       const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'
-      const rallySubmittedReviewId = session?.submittedReviewId ?? null
-      return { ...pr, reviewStatus, phase: computePhase({ ...pr, reviewInProgress, rallySubmittedReviewId }) }
+      const myReviews = countRallyReviews(pr.myReviews, rallyReviews[key] ?? [])
+      return { ...pr, myReviews, reviewStatus, phase: computePhase({ ...pr, myReviews, reviewInProgress }) }
     })
   }
 

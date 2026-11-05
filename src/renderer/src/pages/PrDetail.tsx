@@ -223,8 +223,8 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         </div>
       </div>
 
-      {(session.error || actionError) && (
-        <div className="rounded-md bg-rose-950 px-3 py-2 text-sm text-rose-200">{session.error ?? actionError}</div>
+      {(actionError || session.error) && (
+        <div className="rounded-md bg-rose-950 px-3 py-2 text-sm text-rose-200">{actionError ?? session.error}</div>
       )}
 
       {session.submitted && (

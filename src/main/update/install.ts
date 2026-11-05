@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { accessSync, constants, existsSync } from 'node:fs'
+import { accessSync, constants, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { join, posix } from 'node:path'
 import { promisify } from 'node:util'
 import type { ReleaseInfo } from '@shared/types'
@@ -7,12 +7,12 @@ import type { ReleaseInfo } from '@shared/types'
 const run = promisify(execFile)
 
 const MAC_APP_NAME = 'Rally.app'
-const MAC_INSTALL_LOG = 'update.log'
+const INSTALL_LOG = 'update.log'
 const MAC_SYSTEM_ENV = { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }
+const WINDOWS_SCRIPT_NAME = 'install.ps1'
 
 export const MAC_SWAP_SCRIPT = `
-pid=$1 new_app=$2 current_app=$3 work_dir=$4 data_dir=$5 log=$6
-previous_app="$current_app.previous"
+pid=$1 new_app=$2 current_app=$3 previous_app=$4 work_dir=$5 data_dir=$6 log=$7
 exec >>"$log" 2>&1
 echo "$(date) installing $new_app over $current_app"
 while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
@@ -22,8 +22,8 @@ if ! mv "$current_app" "$previous_app"; then
   rm -rf "$work_dir"
 elif mv "$new_app" "$current_app"; then
   xattr -dr com.apple.quarantine "$current_app"
-  rm -rf "$previous_app" "$work_dir"
-  echo "installed"
+  rm -rf "$work_dir"
+  echo "installed; keeping $previous_app until the new version starts"
 elif mv "$previous_app" "$current_app"; then
   echo "failed: restored the previous app"
   rm -rf "$work_dir"
@@ -31,15 +31,32 @@ else
   echo "failed: could not restore the previous app, which is at $previous_app"
 fi
 if [ -d "$current_app" ]; then relaunch=$current_app; else relaunch=$previous_app; fi
-if [ -n "$data_dir" ]; then open --env "RALLY_USER_DATA_DIR=$data_dir" "$relaunch"; else open "$relaunch"; fi
+open --env "RALLY_USER_DATA_DIR=$data_dir" "$relaunch"
+`
+
+export const WINDOWS_INSTALL_SCRIPT = `
+param([string]$Installer, [string]$Log)
+"$(Get-Date -Format o) running $Installer" | Add-Content -LiteralPath $Log
+try {
+  $process = Start-Process -FilePath $Installer -ArgumentList '/S', '--force-run' -PassThru
+  $null = $process.Handle
+  $process.WaitForExit()
+  "installer exited with code $($process.ExitCode)" | Add-Content -LiteralPath $Log
+} catch {
+  "installer failed to start: $_" | Add-Content -LiteralPath $Log
+}
 `
 
 export function macBundlePath(exePath: string): string {
   return posix.resolve(exePath, '../../..')
 }
 
-export function installLogPath(platform: NodeJS.Platform, dataDir: string): string | null {
-  return platform === 'darwin' ? join(dataDir, MAC_INSTALL_LOG) : null
+export function macPreviousAppPath(currentApp: string): string {
+  return `${currentApp.replace(/\.app$/, '')}.previous.app`
+}
+
+export function installLogPath(dataDir: string): string {
+  return join(dataDir, INSTALL_LOG)
 }
 
 function isWritable(path: string): boolean {
@@ -59,6 +76,7 @@ export interface InstallTarget {
 
 export function installBlocker(release: ReleaseInfo, target: InstallTarget, canWrite: (path: string) => boolean = isWritable): string | null {
   if (!target.packaged) return 'Updates install only in the packaged app.'
+  if (release.assetProblem) return `${release.assetProblem} Rally won't install it.`
   if (!release.asset) return 'This release has no build for this machine yet. Check again later, or download it from the release page.'
   if (target.platform !== 'darwin') return null
   const bundle = macBundlePath(target.exePath)
@@ -70,7 +88,7 @@ export function installBlocker(release: ReleaseInfo, target: InstallTarget, canW
 
 function spawnDetached(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore', env })
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true, env })
     child.once('error', reject)
     child.once('spawn', () => {
       child.unref()
@@ -88,22 +106,25 @@ async function bundleId(appPath: string): Promise<string> {
 async function verifyMacApp(newApp: string, currentApp: string): Promise<void> {
   try {
     await run('codesign', ['--verify', '--deep', '--strict', newApp], { env: MAC_SYSTEM_ENV })
-  } catch {
-    throw new Error('The downloaded app failed its code signature check.')
+  } catch (error) {
+    const stderr = String((error as { stderr?: unknown }).stderr ?? '').trim()
+    throw new Error(`The downloaded app failed its code signature check${stderr ? `: ${stderr}` : '.'}`)
   }
   const [expected, actual] = await Promise.all([bundleId(currentApp), bundleId(newApp)])
   if (actual !== expected) throw new Error(`The downloaded app's bundle id is ${actual}, not ${expected}.`)
 }
 
-async function handOffMacInstall(zipPath: string, workDir: string, exePath: string, logPath: string): Promise<void> {
-  const extracted = join(workDir, 'extracted')
-  await run('ditto', ['-x', '-k', zipPath, extracted], { env: MAC_SYSTEM_ENV })
-  const newApp = join(extracted, MAC_APP_NAME)
-  if (!existsSync(newApp)) throw new Error(`The downloaded zip has no ${MAC_APP_NAME}.`)
-  const currentApp = macBundlePath(exePath)
-  await verifyMacApp(newApp, currentApp)
-  const args = [String(process.pid), newApp, currentApp, workDir, process.env.RALLY_USER_DATA_DIR ?? '', logPath]
-  await spawnDetached('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'rally-update', ...args], MAC_SYSTEM_ENV)
+export interface MacSwap {
+  pid: number
+  newApp: string
+  currentApp: string
+  workDir: string
+  dataDir: string
+  logPath: string
+}
+
+export function macSwapArgs({ pid, newApp, currentApp, workDir, dataDir, logPath }: MacSwap): string[] {
+  return [String(pid), newApp, currentApp, macPreviousAppPath(currentApp), workDir, dataDir, logPath]
 }
 
 export interface HandOff {
@@ -111,15 +132,36 @@ export interface HandOff {
   workDir: string
   exePath: string
   dataDir: string
+  logPath: string
 }
 
-export async function handOffInstall({ downloadPath, workDir, exePath, dataDir }: HandOff): Promise<void> {
+export async function handOffMacInstall({ downloadPath, workDir, exePath, dataDir, logPath }: HandOff): Promise<void> {
+  const newApp = join(workDir, 'extracted', MAC_APP_NAME)
+  await run('ditto', ['-x', '-k', downloadPath, join(workDir, 'extracted')], { env: MAC_SYSTEM_ENV })
+  if (!existsSync(newApp)) throw new Error(`The downloaded zip has no ${MAC_APP_NAME}.`)
+  const currentApp = macBundlePath(exePath)
+  await verifyMacApp(newApp, currentApp)
+  const args = macSwapArgs({ pid: process.pid, newApp, currentApp, workDir, dataDir, logPath })
+  await spawnDetached('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'rally-update', ...args], MAC_SYSTEM_ENV)
+}
+
+export async function handOffWindowsInstall({ downloadPath, workDir, logPath }: HandOff): Promise<void> {
+  const script = join(workDir, WINDOWS_SCRIPT_NAME)
+  writeFileSync(script, WINDOWS_INSTALL_SCRIPT)
+  await spawnDetached('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, downloadPath, logPath])
+}
+
+export async function handOffInstall(handOff: HandOff): Promise<void> {
   switch (process.platform) {
     case 'darwin':
-      return handOffMacInstall(downloadPath, workDir, exePath, join(dataDir, MAC_INSTALL_LOG))
+      return handOffMacInstall(handOff)
     case 'win32':
-      return spawnDetached(downloadPath, ['/S', '--force-run'])
+      return handOffWindowsInstall(handOff)
     default:
       throw new Error(`Rally can't install updates on ${process.platform}.`)
   }
+}
+
+export function removePreviousMacApp(exePath: string): void {
+  rmSync(macPreviousAppPath(macBundlePath(exePath)), { recursive: true, force: true })
 }

@@ -1,10 +1,27 @@
-import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReleaseInfo } from '@shared/types'
-import { installBlocker, MAC_SWAP_SCRIPT, macBundlePath } from './install'
+
+const mocks = vi.hoisted(() => ({
+  execFile: vi.fn(),
+  spawn: vi.fn(),
+}))
+
+vi.mock('node:child_process', () => ({ execFile: mocks.execFile, spawn: mocks.spawn }))
+
+const {
+  handOffMacInstall,
+  handOffWindowsInstall,
+  installBlocker,
+  MAC_SWAP_SCRIPT,
+  macBundlePath,
+  macPreviousAppPath,
+  macSwapArgs,
+  WINDOWS_INSTALL_SCRIPT,
+} = await import('./install')
 
 const release: ReleaseInfo = {
   version: '1.7.0',
@@ -12,6 +29,7 @@ const release: ReleaseInfo = {
   notes: '',
   publishedAt: '2026-11-05T12:00:00Z',
   asset: { name: 'Rally-1.7.0-arm64.zip', url: 'https://example.test/arm64.zip', size: 2 },
+  assetProblem: null,
 }
 
 const macTarget = { packaged: true, platform: 'darwin' as const, exePath: '/Applications/Rally.app/Contents/MacOS/Rally' }
@@ -20,6 +38,20 @@ const writable = () => true
 describe('macBundlePath', () => {
   it('climbs from the executable to the app bundle', () => {
     expect(macBundlePath('/Applications/Rally.app/Contents/MacOS/Rally')).toBe('/Applications/Rally.app')
+  })
+})
+
+describe('macPreviousAppPath', () => {
+  it('keeps the .app extension so macOS can open it', () => {
+    expect(macPreviousAppPath('/Applications/Rally.app')).toBe('/Applications/Rally.previous.app')
+  })
+})
+
+describe('macSwapArgs', () => {
+  it('orders the arguments the swap script names', () => {
+    const args = macSwapArgs({ pid: 42, newApp: '/w/x/Rally.app', currentApp: '/A/Rally.app', workDir: '/w', dataDir: '/d', logPath: '/d/update.log' })
+    expect(args).toEqual(['42', '/w/x/Rally.app', '/A/Rally.app', '/A/Rally.previous.app', '/w', '/d', '/d/update.log'])
+    expect(MAC_SWAP_SCRIPT).toContain('pid=$1 new_app=$2 current_app=$3 previous_app=$4 work_dir=$5 data_dir=$6 log=$7')
   })
 })
 
@@ -34,6 +66,11 @@ describe('installBlocker', () => {
 
   it('blocks a release without a build for this machine', () => {
     expect(installBlocker({ ...release, asset: null }, macTarget, writable)).toMatch(/no build for this machine/)
+  })
+
+  it('explains an asset that failed validation', () => {
+    const problem = "The release asset Rally.zip doesn't download from https://github.com/TannerYohe/rally/releases/download/."
+    expect(installBlocker({ ...release, asset: null, assetProblem: problem }, macTarget, writable)).toBe(`${problem} Rally won't install it.`)
   })
 
   it('blocks an app that macOS translocated', () => {
@@ -57,97 +94,111 @@ describe('installBlocker', () => {
   })
 })
 
-describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
-  let root: string
-  let paths: { currentApp: string; previousApp: string; newApp: string; workDir: string; log: string; calls: string; stubs: string }
+type ExecResult = { stdout?: string; error?: Error & { stderr?: string } }
 
-  const app = (path: string, version: string) => {
-    mkdirSync(path, { recursive: true })
-    writeFileSync(join(path, 'version'), version)
-  }
-  const versionOf = (path: string) => readFileSync(join(path, 'version'), 'utf8')
-  const stub = (name: string, body: string) => {
-    writeFileSync(join(paths.stubs, name), `#!/bin/sh\n${body}\n`)
-    chmodSync(join(paths.stubs, name), 0o755)
-  }
-  const exitedPid = () => String(spawnSync('/bin/sh', ['-c', 'echo $$']).stdout).trim()
+function stubExecFile(results: (command: string, args: string[]) => ExecResult) {
+  mocks.execFile.mockImplementation((command: string, args: string[], _options: unknown, callback: (error: Error | null, out?: object) => void) => {
+    const { stdout = '', error } = results(command, args)
+    callback(error ?? null, error ? undefined : { stdout, stderr: '' })
+  })
+}
 
-  function runScript({ dataDir = '', failMoves = [] as string[] } = {}) {
-    const args = [exitedPid(), paths.newApp, paths.currentApp, paths.workDir, dataDir, paths.log]
-    const result = spawnSync('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'rally-update', ...args], {
-      env: { ...process.env, PATH: `${paths.stubs}:${process.env.PATH}`, CALLS: paths.calls, FAIL_MOVES: failMoves.join(' ') },
-    })
-    expect(result.status).toBe(0)
-    return { log: readFileSync(paths.log, 'utf8'), calls: existsSync(paths.calls) ? readFileSync(paths.calls, 'utf8') : '' }
-  }
+function stubSpawn(event: 'spawn' | 'error' = 'spawn') {
+  mocks.spawn.mockImplementation(() => {
+    const child = Object.assign(new EventEmitter(), { unref: vi.fn() })
+    queueMicrotask(() => (event === 'spawn' ? child.emit('spawn') : child.emit('error', new Error('spawn EACCES'))))
+    return child
+  })
+}
+
+describe('handOffMacInstall', () => {
+  let workDir: string
+  const exePath = '/Applications/Rally.app/Contents/MacOS/Rally'
+  const handOff = () => ({ downloadPath: join(workDir, 'Rally.zip'), workDir, exePath, dataDir: '/d', logPath: '/d/update.log' })
+  const bundleIds = (newId: string) => (command: string, args: string[]): ExecResult =>
+    command === 'plutil' ? { stdout: args.at(-1)?.startsWith(workDir) ? `${newId}\n` : 'com.tanneryohe.rally\n' } : {}
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'rally-swap-test-'))
-    const currentApp = join(root, 'Applications', 'Rally.app')
-    const workDir = join(root, 'work')
-    paths = {
-      currentApp,
-      previousApp: `${currentApp}.previous`,
-      newApp: join(workDir, 'extracted', 'Rally.app'),
-      workDir,
-      log: join(root, 'update.log'),
-      calls: join(root, 'calls'),
-      stubs: join(root, 'stubs'),
-    }
-    mkdirSync(paths.stubs)
-    app(paths.currentApp, 'old')
-    app(paths.newApp, 'new')
-    stub('open', 'echo "open $*" >> "$CALLS"')
-    stub('xattr', 'echo "xattr $*" >> "$CALLS"')
-    stub('mv', 'for path in $FAIL_MOVES; do [ "$1" = "$path" ] && exit 1; done\nexec /bin/mv "$@"')
+    workDir = mkdtempSync(join(tmpdir(), 'rally-handoff-test-'))
+    mkdirSync(join(workDir, 'extracted', 'Rally.app'), { recursive: true })
+    mocks.execFile.mockReset()
+    mocks.spawn.mockReset()
   })
 
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
+    rmSync(workDir, { recursive: true, force: true })
   })
 
-  it('swaps in the new app, cleans up, and reopens it', () => {
-    const { log, calls } = runScript()
-    expect(versionOf(paths.currentApp)).toBe('new')
-    expect(existsSync(paths.previousApp)).toBe(false)
-    expect(existsSync(paths.workDir)).toBe(false)
-    expect(log).toContain('installed')
-    expect(calls).toBe(`xattr -dr com.apple.quarantine ${paths.currentApp}\nopen ${paths.currentApp}\n`)
+  it('verifies the app and starts the swap script with the shared arguments', async () => {
+    stubExecFile(bundleIds('com.tanneryohe.rally'))
+    stubSpawn()
+    await handOffMacInstall(handOff())
+    expect(mocks.execFile.mock.calls.map(([command]) => command)).toEqual(['ditto', 'codesign', 'plutil', 'plutil'])
+    const newApp = join(workDir, 'extracted', 'Rally.app')
+    const args = macSwapArgs({ pid: process.pid, newApp, currentApp: '/Applications/Rally.app', workDir, dataDir: '/d', logPath: '/d/update.log' })
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      '/bin/sh',
+      ['-c', MAC_SWAP_SCRIPT, 'rally-update', ...args],
+      expect.objectContaining({ detached: true, env: expect.objectContaining({ PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }) }),
+    )
   })
 
-  it('reopens with the same data directory', () => {
-    const { calls } = runScript({ dataDir: '/tmp/rally data' })
-    expect(calls).toContain(`open --env RALLY_USER_DATA_DIR=/tmp/rally data ${paths.currentApp}`)
+  it("reports codesign's stderr when the signature check fails", async () => {
+    const error = Object.assign(new Error('Command failed: codesign'), { stderr: 'Rally.app: a sealed resource is missing or invalid\n' })
+    stubExecFile((command) => (command === 'codesign' ? { error } : {}))
+    await expect(handOffMacInstall(handOff())).rejects.toThrow(
+      'The downloaded app failed its code signature check: Rally.app: a sealed resource is missing or invalid',
+    )
+    expect(mocks.spawn).not.toHaveBeenCalled()
   })
 
-  it('replaces a stale previous app left by an earlier run', () => {
-    app(paths.previousApp, 'stale')
-    runScript()
-    expect(versionOf(paths.currentApp)).toBe('new')
-    expect(existsSync(paths.previousApp)).toBe(false)
+  it('rejects an app with a different bundle id', async () => {
+    stubExecFile(bundleIds('com.example.other'))
+    await expect(handOffMacInstall(handOff())).rejects.toThrow("The downloaded app's bundle id is com.example.other, not com.tanneryohe.rally.")
+    expect(mocks.spawn).not.toHaveBeenCalled()
   })
 
-  it('restores the previous app when the new one cannot move into place', () => {
-    const { log, calls } = runScript({ failMoves: [paths.newApp] })
-    expect(versionOf(paths.currentApp)).toBe('old')
-    expect(existsSync(paths.previousApp)).toBe(false)
-    expect(existsSync(paths.workDir)).toBe(false)
-    expect(log).toContain('failed: restored the previous app')
-    expect(calls).toBe(`open ${paths.currentApp}\n`)
+  it('rejects a zip without Rally.app', async () => {
+    rmSync(join(workDir, 'extracted'), { recursive: true })
+    stubExecFile(() => ({}))
+    await expect(handOffMacInstall(handOff())).rejects.toThrow('The downloaded zip has no Rally.app.')
   })
 
-  it('keeps both copies and reopens the previous app when the restore fails', () => {
-    const { log, calls } = runScript({ failMoves: [paths.newApp, paths.previousApp] })
-    expect(existsSync(paths.currentApp)).toBe(false)
-    expect(versionOf(paths.previousApp)).toBe('old')
-    expect(versionOf(paths.newApp)).toBe('new')
-    expect(log).toContain('could not restore the previous app')
-    expect(calls).toBe(`open ${paths.previousApp}\n`)
+  it('fails when the swap script cannot start', async () => {
+    stubExecFile(bundleIds('com.tanneryohe.rally'))
+    stubSpawn('error')
+    await expect(handOffMacInstall(handOff())).rejects.toThrow('spawn EACCES')
+  })
+})
+
+describe('handOffWindowsInstall', () => {
+  let workDir: string
+
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), 'rally-handoff-test-'))
+    mocks.spawn.mockReset()
   })
 
-  it('leaves the current app alone when it cannot be moved aside', () => {
-    const { log } = runScript({ failMoves: [paths.currentApp] })
-    expect(versionOf(paths.currentApp)).toBe('old')
-    expect(log).toContain('could not move the current app aside')
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true })
+  })
+
+  it('writes the install script and runs it with the installer and log', async () => {
+    stubSpawn()
+    const downloadPath = join(workDir, 'Rally-1.7.0-x64.exe')
+    await handOffWindowsInstall({ downloadPath, workDir, exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' })
+    const script = join(workDir, 'install.ps1')
+    expect(readFileSync(script, 'utf8')).toBe(WINDOWS_INSTALL_SCRIPT)
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, downloadPath, 'C:\\data\\update.log'],
+      expect.objectContaining({ detached: true }),
+    )
+  })
+
+  it('fails when PowerShell cannot start', async () => {
+    stubSpawn('error')
+    const handOff = { downloadPath: 'x.exe', workDir, exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' }
+    await expect(handOffWindowsInstall(handOff)).rejects.toThrow('spawn EACCES')
   })
 })

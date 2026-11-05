@@ -22,6 +22,22 @@ export function selectedReviewTab(chosen: ReviewTab | null, input: TabInput): Re
   return chosen ?? automaticReviewTab(input)
 }
 
+export function reviewTabForKey(tab: ReviewTab, key: string): ReviewTab | null {
+  const index = REVIEW_TABS.indexOf(tab)
+  switch (key) {
+    case 'ArrowRight':
+      return REVIEW_TABS[(index + 1) % REVIEW_TABS.length]
+    case 'ArrowLeft':
+      return REVIEW_TABS[(index - 1 + REVIEW_TABS.length) % REVIEW_TABS.length]
+    case 'Home':
+      return REVIEW_TABS[0]
+    case 'End':
+      return REVIEW_TABS[REVIEW_TABS.length - 1]
+    default:
+      return null
+  }
+}
+
 export interface ReviewTabState {
   chosen: ReviewTab | null
   following: boolean

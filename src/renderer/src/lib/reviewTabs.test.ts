@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { automaticReviewTab, emptyReviewTabs, INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTabState } from './reviewTabs'
+import { automaticReviewTab, emptyReviewTabs, INITIAL_REVIEW_TAB_STATE, reviewTabForKey, reviewTabReducer, selectedReviewTab, type ReviewTabState } from './reviewTabs'
 
 describe('automaticReviewTab', () => {
   it('shows Activity while Claude is working', () => {
@@ -22,6 +22,23 @@ describe('selectedReviewTab', () => {
 
   it('falls back to the automatic tab when nothing is picked', () => {
     expect(selectedReviewTab(null, { busy: false, hasDrafts: true })).toBe('drafts')
+  })
+})
+
+describe('reviewTabForKey', () => {
+  it('moves right and left, wrapping at the ends', () => {
+    expect(reviewTabForKey('activity', 'ArrowRight')).toBe('report')
+    expect(reviewTabForKey('drafts', 'ArrowRight')).toBe('activity')
+    expect(reviewTabForKey('activity', 'ArrowLeft')).toBe('drafts')
+  })
+
+  it('jumps to the first and last tab', () => {
+    expect(reviewTabForKey('threads', 'Home')).toBe('activity')
+    expect(reviewTabForKey('report', 'End')).toBe('drafts')
+  })
+
+  it('ignores other keys', () => {
+    expect(reviewTabForKey('report', 'Enter')).toBeNull()
   })
 })
 

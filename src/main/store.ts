@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app } from 'electron'
 import { DEFAULT_CONFIG, type Config, type Pr, type ReviewSession } from '@shared/types'
+import type { StoredHide } from './hiddenPrs'
 import { JsonDir, JsonFile } from './jsonFile'
 
 interface PrCache {
@@ -17,4 +18,5 @@ export const configFile = new JsonFile<Config>(join(dir, 'config.json'), DEFAULT
 export const prCacheFile = new JsonFile<PrCache>(join(dir, 'prs.json'), { viewer: null, refreshedAt: null, prs: [] })
 export const summariesFile = new JsonFile<Record<string, string>>(join(dir, 'summaries.json'), {})
 export const headsSeenFile = new JsonFile<Record<string, string>>(join(dir, 'heads-seen.json'), {})
+export const hiddenPrsFile = new JsonFile<Record<string, StoredHide>>(join(dir, 'hidden-prs.json'), {})
 export const sessionsDir = new JsonDir<ReviewSession>(join(dir, 'sessions'))

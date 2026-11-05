@@ -3,7 +3,7 @@ import type { MyReview, Pr, ReviewState } from '@shared/types'
 import { github } from './client'
 import { MY_REVIEW_WINDOW } from './phase'
 
-export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError'>
+export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError' | 'hidden'>
 
 const PR_FIELDS = `
   fragment PrFields on PullRequest {

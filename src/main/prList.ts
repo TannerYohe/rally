@@ -1,10 +1,11 @@
 import { EventEmitter } from 'node:events'
-import { headKey, prKey, type Pr, type PrListState, type SessionStatus } from '@shared/types'
+import { headKey, prKey, type HideMode, type Pr, type PrHide, type PrListState, type SessionStatus } from '@shared/types'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { buildSearchQueries } from './github/search'
-import { configFile, headsSeenFile, prCacheFile, summariesFile } from './store'
+import { isHideActive, newHide, type StoredHide } from './hiddenPrs'
+import { configFile, headsSeenFile, hiddenPrsFile, prCacheFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
@@ -20,7 +21,7 @@ class PrList extends EventEmitter {
   constructor() {
     super()
     const cache = prCacheFile.get()
-    this.state = { prs: cache.prs, viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
+    this.state = { prs: this.withHidden(cache.prs, false), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
   }
 
   get(): PrListState {
@@ -72,8 +73,42 @@ class PrList extends EventEmitter {
     prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
+  hide(id: string, mode: HideMode): void {
+    const pr = this.state.prs.find((p) => p.id === id)
+    if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
+    hiddenPrsFile.set({ ...hiddenPrsFile.get(), [id]: newHide(pr, mode, new Date().toISOString()) })
+    this.reapplyHidden()
+  }
+
+  unhide(id: string): void {
+    const { [id]: _removed, ...rest } = hiddenPrsFile.get()
+    hiddenPrsFile.set(rest)
+    this.reapplyHidden()
+  }
+
+  private reapplyHidden(): void {
+    this.update({ prs: this.withHidden(this.state.prs, false) })
+    prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs: this.state.prs })
+  }
+
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
-    return this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, prune), prune))
+    return this.withReviewStatus(this.withHidden(this.withSummaries(this.withHeadTimes(prs, prune), prune), prune))
+  }
+
+  private withHidden<T extends GithubPr>(prs: T[], prune: boolean): (T & { hidden: PrHide | null })[] {
+    const stored = hiddenPrsFile.get()
+    const kept: Record<string, StoredHide> = prune ? {} : { ...stored }
+    const result = prs.map((pr) => {
+      const hide = stored[pr.id]
+      if (!hide || !isHideActive(hide, pr)) {
+        delete kept[pr.id]
+        return { ...pr, hidden: null }
+      }
+      kept[pr.id] = hide
+      return { ...pr, hidden: { mode: hide.mode, at: hide.at } }
+    })
+    hiddenPrsFile.set(kept)
+    return result
   }
 
   private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {

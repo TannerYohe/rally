@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
       prCacheFile: file({ viewer: null, refreshedAt: null, prs: [] }),
       summariesFile: file<Record<string, string>>({}),
       headsSeenFile: file<Record<string, string>>({}),
+      hiddenPrsFile: file<Record<string, unknown>>({}),
     },
     searchPrs: vi.fn(),
     fetchPr: vi.fn(),
@@ -74,6 +75,45 @@ describe('prList', () => {
     mocks.fetchPr.mockResolvedValue(githubPr())
     await prList.refreshOne('acme', 'api', 1)
     expect(mocks.store.summariesFile.get()).toEqual({ 'pr1:old': 'stale', 'other:h': 'other' })
+  })
+
+  it('hides a PR until it is unhidden', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    prList.hide('pr1', 'hide')
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'hide' })
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ headRefOid: 'newer' })] })
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'hide' })
+
+    prList.unhide('pr1')
+    expect(prList.get().prs[0].hidden).toBeNull()
+    expect(mocks.store.hiddenPrsFile.get()).toEqual({})
+  })
+
+  it('ends a snooze when the PR gets new commits', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    prList.hide('pr1', 'snooze')
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'snooze' })
+
+    mocks.fetchPr.mockResolvedValue(githubPr({ headRefOid: 'newer' }))
+    await prList.refreshOne('acme', 'api', 1)
+    expect(prList.get().prs[0].hidden).toBeNull()
+    expect(mocks.store.hiddenPrsFile.get()).toEqual({})
+  })
+
+  it('prunes hides for closed PRs on a full refresh', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr(), githubPr({ id: 'pr2', number: 2 })] })
+    await prList.refresh()
+    prList.hide('pr1', 'hide')
+    prList.hide('pr2', 'hide')
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr1'])
   })
 
   it('shows a summary error until a later summary succeeds', async () => {

@@ -31,6 +31,7 @@ function pr(overrides: Partial<Pr>): Pr {
     reviewStatus: null,
     summary: null,
     summaryError: null,
+    hidden: null,
     ...overrides,
   }
 }

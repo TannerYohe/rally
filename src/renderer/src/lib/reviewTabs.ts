@@ -22,6 +22,35 @@ export function selectedReviewTab(chosen: ReviewTab | null, input: TabInput): Re
   return chosen ?? automaticReviewTab(input)
 }
 
+export interface ReviewTabState {
+  chosen: ReviewTab | null
+  following: boolean
+}
+
+export const INITIAL_REVIEW_TAB_STATE: ReviewTabState = { chosen: null, following: false }
+
+export type ReviewTabAction =
+  | { type: 'select'; tab: ReviewTab }
+  | { type: 'follow' }
+  | { type: 'sendFailed' }
+  | { type: 'scrolledUp' }
+  | { type: 'busyChanged'; busy: boolean }
+
+export function reviewTabReducer(state: ReviewTabState, action: ReviewTabAction): ReviewTabState {
+  switch (action.type) {
+    case 'select':
+      return { chosen: action.tab, following: state.following && action.tab === 'activity' }
+    case 'follow':
+      return { chosen: 'activity', following: true }
+    case 'sendFailed':
+      return INITIAL_REVIEW_TAB_STATE
+    case 'scrolledUp':
+      return { ...state, following: false }
+    case 'busyChanged':
+      return { chosen: null, following: action.busy && state.following }
+  }
+}
+
 interface EmptyTabInput {
   hasDrafts: boolean
   threadCount: number

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type TimelineEntry } from '@shared/types'
-import { selectedReviewTab, type ReviewTab } from './reviewTabs'
+import { INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTab } from './reviewTabs'
 import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
@@ -43,24 +43,20 @@ interface ReviewTabInput {
   timeline: TimelineEntry[]
 }
 
-interface ReviewTabState {
+interface ReviewTabHook {
   tab: ReviewTab
   activityRef: RefObject<HTMLDivElement | null>
   select(tab: ReviewTab): void
   follow(): void
-  unfollow(): void
+  sendFailed(): void
 }
 
-export function useReviewTab({ busy, hasDrafts, timeline }: ReviewTabInput): ReviewTabState {
+export function useReviewTab({ busy, hasDrafts, timeline }: ReviewTabInput): ReviewTabHook {
   const activityRef = useRef<HTMLDivElement>(null)
-  const [chosen, setChosen] = useState<ReviewTab | null>(null)
-  const [following, setFollowing] = useState(false)
+  const [{ chosen, following }, dispatch] = useReducer(reviewTabReducer, INITIAL_REVIEW_TAB_STATE)
   const tab = selectedReviewTab(chosen, { busy, hasDrafts })
 
-  useEffect(() => {
-    setChosen(null)
-    if (!busy) setFollowing(false)
-  }, [busy])
+  useEffect(() => dispatch({ type: 'busyChanged', busy }), [busy])
 
   useEffect(() => {
     if (following && tab === 'activity') activityRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
@@ -69,7 +65,7 @@ export function useReviewTab({ busy, hasDrafts, timeline }: ReviewTabInput): Rev
   useEffect(() => {
     if (!following) return
     const stopOnScrollUp = (event: WheelEvent) => {
-      if (event.deltaY < 0) setFollowing(false)
+      if (event.deltaY < 0) dispatch({ type: 'scrolledUp' })
     }
     window.addEventListener('wheel', stopOnScrollUp)
     return () => window.removeEventListener('wheel', stopOnScrollUp)
@@ -78,15 +74,9 @@ export function useReviewTab({ busy, hasDrafts, timeline }: ReviewTabInput): Rev
   return {
     tab,
     activityRef,
-    select: (next) => {
-      setChosen(next)
-      if (next !== 'activity') setFollowing(false)
-    },
-    follow: () => {
-      setChosen('activity')
-      setFollowing(true)
-    },
-    unfollow: () => setFollowing(false),
+    select: (next) => dispatch({ type: 'select', tab: next }),
+    follow: () => dispatch({ type: 'follow' }),
+    sendFailed: () => dispatch({ type: 'sendFailed' }),
   }
 }
 

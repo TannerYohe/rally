@@ -163,7 +163,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const canSend = !busy && Boolean(message)
   const send = async () => {
     reviewTab.follow()
-    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) reviewTab.unfollow()
+    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) reviewTab.sendFailed()
   }
   const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return

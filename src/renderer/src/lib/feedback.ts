@@ -7,9 +7,12 @@ export interface DraftEdit {
 
 export type DraftEdits = Record<string, DraftEdit>
 
-export function describeEdits(drafts: Drafts | null, edits: DraftEdits): string {
+export function describeEdits(drafts: Drafts | null, edits: DraftEdits, summaryBody: string | undefined): string {
   if (!drafts) return ''
   const lines: string[] = []
+  if (summaryBody !== undefined && summaryBody !== drafts.summaryBody) {
+    lines.push(summaryBody.trim() ? `- I rewrote the review body; use this as final wording:\n  """${summaryBody}"""` : '- Remove the review body.')
+  }
   for (const comment of drafts.comments) {
     const edit = edits[comment.id]
     if (!edit) continue
@@ -21,6 +24,6 @@ export function describeEdits(drafts: Drafts | null, edits: DraftEdits): string 
   return lines.length ? `Edits I made in Rally:\n${lines.join('\n')}` : ''
 }
 
-export function feedbackMessage(drafts: Drafts | null, edits: DraftEdits, text: string): string {
-  return [describeEdits(drafts, edits), text.trim()].filter(Boolean).join('\n\n')
+export function feedbackMessage(drafts: Drafts | null, edits: DraftEdits, summaryBody: string | undefined, text: string): string {
+  return [describeEdits(drafts, edits, summaryBody), text.trim()].filter(Boolean).join('\n\n')
 }

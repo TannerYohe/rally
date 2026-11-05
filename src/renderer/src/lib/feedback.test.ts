@@ -23,13 +23,23 @@ const drafts: Drafts = {
 
 describe('feedbackMessage', () => {
   it('lists rewrites and drops before free text', () => {
-    const message = feedbackMessage(drafts, { '1': { body: 'shorter' }, '3': { dropped: true } }, 'make 2 a nitpick')
+    const message = feedbackMessage(drafts, { '1': { body: 'shorter' }, '3': { dropped: true } }, undefined, 'make 2 a nitpick')
     expect(message).toBe(
       'Edits I made in Rally:\n- I rewrote #1; use this as final wording:\n  """shorter"""\n- Drop #3.\n\nmake 2 a nitpick',
     )
   })
 
   it('ignores edits that match the original body', () => {
-    expect(feedbackMessage(drafts, { '2': { body: 'original 2' } }, '')).toBe('')
+    expect(feedbackMessage(drafts, { '2': { body: 'original 2' } }, '', '')).toBe('')
+  })
+
+  it('lists a review body rewrite first', () => {
+    expect(feedbackMessage(drafts, { '3': { dropped: true } }, 'Looks close.', '')).toBe(
+      'Edits I made in Rally:\n- I rewrote the review body; use this as final wording:\n  """Looks close."""\n- Drop #3.',
+    )
+  })
+
+  it('asks to remove a review body cleared to whitespace', () => {
+    expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, {}, '  ', '')).toBe('Edits I made in Rally:\n- Remove the review body.')
   })
 })

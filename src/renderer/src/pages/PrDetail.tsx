@@ -5,6 +5,7 @@ import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { Markdown } from '../components/Markdown'
 import { Avatar } from '../components/Avatar'
+import { BusyDot } from '../components/BusyDot'
 import { DiffStat } from '../components/DiffStat'
 import { PhaseBadge } from '../components/PhaseBadge'
 import { RepoChip } from '../components/RepoChip'
@@ -138,7 +139,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const resolvingThreads = threadResolution.resolving
   const emptyTabs = emptyReviewTabs({ hasDrafts, threadCount: threadResolution.rows.length })
   const tabBadges: Record<ReviewTab, ReactNode> = {
-    activity: busy && <span className="h-2 w-2 animate-pulse rounded-full bg-primary-400" />,
+    activity: busy && <BusyDot className="h-2 w-2 bg-primary-400" />,
     report: drafts && (
       <span className="max-w-48 truncate text-xs font-normal text-ink-400" title={drafts.verdict}>
         {drafts.verdict}
@@ -181,7 +182,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       <div className="flex items-center gap-3">
         <h2 className="text-lg font-semibold">Review</h2>
         <span className={`text-sm ${session.status === 'error' ? 'text-rose-300' : 'text-ink-400'}`}>
-          {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-primary-400" />}
+          {busy && <BusyDot className="mr-2 h-2 w-2 bg-primary-400" />}
           {SESSION_STATUS_LABELS[session.status]}
         </span>
         <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>

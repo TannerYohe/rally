@@ -16,13 +16,23 @@ export function reviewPrompt(pr: PrRef, skill: string): string {
   return `/${name} ${pr.url}`
 }
 
+const REVIEW_THREADS_QUERY =
+  'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id comments(first: 100) { nodes { databaseId } } } } } } }'
+
+const THREAD_REPLY_MUTATION =
+  'mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }'
+
 export function submitPrompt(pr: PrRef, event: ReviewEvent, notes: string): string {
   const edits = notes.trim() ? `\nApply these final edits from the user before posting:\n${notes.trim()}\n` : ''
   const pullPath = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}`
   return `SUBMIT as "${REVIEW_EVENT_LABELS[event]}" (event ${event}).
 The drafts as last published are final.${edits}
-1. Write the inline comments and summary body to a JSON file in the working directory with "commit_id" (the PR's current head SHA), "body", and "comments" (each with "path", "line", "side", and "start_line" for ranges). Omit "event" so the review stays pending. Create it with: gh api ${pullPath}/reviews --method POST --input <file>. If GitHub rejects a comment for an out-of-diff line, move it into the body and retry.
-2. Post each thread reply with: gh api ${pullPath}/comments/<comment_id>/replies --method POST -f body='<reply>'
-3. Submit the pending review: gh api ${pullPath}/reviews/<review_id>/events --method POST -f event=${event}
-4. Call ${REVIEW_SUBMITTED_TOOL} with the review id, its html_url, and the event.`
+Every inline comment and thread reply goes into one pending review, which is then submitted. Do not use the comments/<comment_id>/replies endpoint: it posts each reply as a separate review.
+1. Write the inline comments and summary body to a JSON file in the working directory with "commit_id" (the PR's current head SHA), "body", and "comments" (each with "path", "line", "side", and "start_line" for ranges; an empty array when there are none). Omit "event" so the review stays pending. Create it with: gh api ${pullPath}/reviews --method POST --input <file>. Keep the response's "id" and "node_id". If GitHub rejects a comment for an out-of-diff line, move it into the body and retry.
+2. If there are thread replies, list the PR's review threads with: gh api graphql -f owner=${pr.owner} -f repo=${pr.repo} -F number=${pr.number} -f query='${REVIEW_THREADS_QUERY}'
+Each reply belongs to the thread whose comments include its reply-to comment id.
+3. Add each reply to the pending review with: gh api graphql -f review=<node_id> -f thread=<thread id> -f body='<reply>' -f query='${THREAD_REPLY_MUTATION}'
+4. Submit the pending review: gh api ${pullPath}/reviews/<id>/events --method POST -f event=${event}
+5. Call ${REVIEW_SUBMITTED_TOOL} with the review id, its html_url, and the event.
+If the event is COMMENT and there is no body, inline comment, or reply, post nothing, tell the user there is nothing to submit, and end the turn.`
 }

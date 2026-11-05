@@ -10,7 +10,7 @@ const SUMMARY_CONCURRENCY = 3
 
 type ReviewStatusLookup = (key: string) => SessionStatus | null
 
-function countRallyReviews(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
+function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
   return reviews.map((r) => (r.replyOnly && r.databaseId !== null && rallyReviewIds.includes(r.databaseId) ? { ...r, replyOnly: false } : r))
 }
 
@@ -54,7 +54,7 @@ class PrList extends EventEmitter {
   }
 
   reapplyPhases(): void {
-    const prs = this.withPhases(this.state.prs)
+    const prs = this.withPhases(this.state.prs, false)
     const changed = prs.some((pr, i) => pr.phase !== this.state.prs[i].phase || pr.reviewStatus !== this.state.prs[i].reviewStatus)
     if (changed) this.update({ prs })
   }
@@ -83,13 +83,7 @@ class PrList extends EventEmitter {
   }
 
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
-    if (prune) this.pruneRallyReviews(prs)
-    return this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune))
-  }
-
-  private pruneRallyReviews(prs: GithubPr[]): void {
-    const current = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
-    rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => current.has(key))))
+    return this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune), prune)
   }
 
   private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {
@@ -107,14 +101,18 @@ class PrList extends EventEmitter {
     return result
   }
 
-  private withPhases(prs: Omit<Pr, 'phase' | 'reviewStatus'>[]): Pr[] {
+  private withPhases(prs: Omit<Pr, 'phase' | 'reviewStatus'>[], prune: boolean): Pr[] {
     const rallyReviews = rallyReviewsFile.get()
+    if (prune) {
+      const current = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
+      rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviews).filter(([key]) => current.has(key))))
+    }
     return prs.map((pr) => {
       const key = prKey(pr.owner, pr.repo, pr.number)
       const reviewStatus = this.reviewStatusOf(key)
       const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'
-      const myReviews = countRallyReviews(pr.myReviews, rallyReviews[key] ?? [])
-      return { ...pr, myReviews, reviewStatus, phase: computePhase({ ...pr, myReviews, reviewInProgress }) }
+      const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviews[key] ?? [])
+      return { ...pr, reviewStatus, phase: computePhase({ ...pr, myReviews, reviewInProgress }) }
     })
   }
 

@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { Config, Health, PrRef, ReviewEvent } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { reviewSessions } from './claude/reviewSessions'
 import { github, resetGithubClient } from './github/client'
@@ -19,7 +20,7 @@ async function health(): Promise<Health> {
     const gh = await github()
     return { githubLogin: gh.login, githubFailure: null, githubError: null, claudeDefaults: readClaudeDefaults() }
   } catch (error) {
-    const githubError = error instanceof Error ? error.message : String(error)
+    const githubError = errorMessage(error)
     return { githubLogin: null, githubFailure: classifyGithubFailure(error), githubError, claudeDefaults: readClaudeDefaults() }
   }
 }
@@ -48,6 +49,8 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getUpdateState, () => updater.get())
   ipcMain.handle(IPC.checkForUpdates, () => updater.check())
   ipcMain.handle(IPC.installUpdate, () => updater.install())
+  ipcMain.handle(IPC.getFailedInstall, () => updater.failedInstall())
+  ipcMain.handle(IPC.dismissFailedInstall, () => updater.dismissFailedInstall())
 
   prList.on('changed', (state) => broadcast(IPC.prsChanged, state))
   prList.setReviewStatusLookup((key) => reviewSessions.statusOf(key))

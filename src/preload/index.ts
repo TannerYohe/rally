@@ -27,6 +27,8 @@ const api: RallyApi = {
   getUpdateState: () => ipcRenderer.invoke(IPC.getUpdateState),
   checkForUpdates: () => ipcRenderer.invoke(IPC.checkForUpdates),
   installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
+  getFailedInstall: () => ipcRenderer.invoke(IPC.getFailedInstall),
+  dismissFailedInstall: () => ipcRenderer.invoke(IPC.dismissFailedInstall),
   onUpdateChanged: (listener) => subscribe(IPC.updateChanged, listener),
 }
 

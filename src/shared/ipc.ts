@@ -1,4 +1,4 @@
-import type { AppInfo, Config, Health, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution, UpdateState } from './types'
+import type { AppInfo, Config, Health, InstallAttempt, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution, UpdateState } from './types'
 
 export interface RallyApi {
   getConfig(): Promise<Config>
@@ -20,6 +20,8 @@ export interface RallyApi {
   getUpdateState(): Promise<UpdateState>
   checkForUpdates(): Promise<void>
   installUpdate(): Promise<void>
+  getFailedInstall(): Promise<InstallAttempt | null>
+  dismissFailedInstall(): Promise<void>
   onUpdateChanged(listener: (state: UpdateState) => void): () => void
 }
 
@@ -43,5 +45,7 @@ export const IPC = {
   getUpdateState: 'update:get',
   checkForUpdates: 'update:check',
   installUpdate: 'update:install',
+  getFailedInstall: 'update:failed-install',
+  dismissFailedInstall: 'update:dismiss-failed-install',
   updateChanged: 'update:changed',
 } as const

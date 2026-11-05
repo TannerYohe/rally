@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState, type RefObject } from 'react'
-import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type TimelineEntry } from '@shared/types'
+import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type TimelineEntry, type UpdateState } from '@shared/types'
 import { INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTab } from './reviewTabs'
 import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
@@ -10,6 +10,15 @@ export function usePrs(): PrListState {
   useEffect(() => {
     window.rally.getPrs().then(setState)
     return window.rally.onPrsChanged(setState)
+  }, [])
+  return state
+}
+
+export function useUpdateState(): UpdateState {
+  const [state, setState] = useState<UpdateState>({ status: 'idle' })
+  useEffect(() => {
+    window.rally.getUpdateState().then(setState)
+    return window.rally.onUpdateChanged(setState)
   }, [])
   return state
 }

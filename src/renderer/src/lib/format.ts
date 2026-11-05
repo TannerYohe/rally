@@ -17,6 +17,10 @@ export function usd(amount: number): string {
   return `$${amount.toFixed(2)}`
 }
 
+export function megabytes(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
+}
+
 export function duration(ms: number): string {
   const seconds = Math.round(ms / 1000)
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clockTime, fullTime } from './format'
+import { clockTime, fullTime, megabytes } from './format'
 
 const startedAt = new Date(2026, 10, 4, 15, 12)
 const iso = startedAt.toISOString()
@@ -19,5 +19,12 @@ describe('clockTime', () => {
 describe('fullTime', () => {
   it('formats the date and time in the local locale', () => {
     expect(fullTime(iso)).toBe(startedAt.toLocaleString())
+  })
+})
+
+describe('megabytes', () => {
+  it('shows bytes as decimal megabytes with one place', () => {
+    expect(megabytes(256_774_318)).toBe('256.8 MB')
+    expect(megabytes(0)).toBe('0.0 MB')
   })
 })

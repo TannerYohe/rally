@@ -34,7 +34,7 @@ export interface PrHide {
 
 export interface StoredHide extends PrHide {
   headRefOid: string
-  reviewRequested: boolean
+  reviewRequestedWhenLastListed: boolean
   lastListedAt: string
 }
 

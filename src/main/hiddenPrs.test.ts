@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { StoredHide } from '@shared/types'
 import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
 
 const pr = { headRefOid: 'abc', reviewRequestedFromMe: false }
@@ -22,6 +23,12 @@ describe('isHideActive', () => {
     expect(isHideActive(newHide(pr, 'snooze', AT), { ...pr, reviewRequestedFromMe: true })).toBe(false)
   })
 
+  it('drops records with a mode it does not know', () => {
+    const legacy = { ...newHide(pr, 'indefinite', AT), mode: 'hide' } as unknown as StoredHide
+    expect(isHideActive(legacy, pr)).toBe(false)
+    expect(keepsUnlistedHide(legacy, AT)).toBe(false)
+  })
+
   it('keeps a snooze taken while a review request was already open', () => {
     const requested = { ...pr, reviewRequestedFromMe: true }
     expect(isHideActive(newHide(requested, 'snooze', AT), requested)).toBe(true)
@@ -36,7 +43,7 @@ describe('refreshHide', () => {
   it('ends a snooze on a re-request after the request it was taken under cleared', () => {
     const requested = { ...pr, reviewRequestedFromMe: true }
     const cleared = refreshHide(newHide(requested, 'snooze', AT), pr, AT)
-    expect(cleared).toMatchObject({ reviewRequested: false })
+    expect(cleared).toMatchObject({ reviewRequestedWhenLastListed: false })
     expect(isHideActive(cleared!, requested)).toBe(false)
   })
 

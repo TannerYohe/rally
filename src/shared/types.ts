@@ -13,6 +13,7 @@ export const PHASE_LABELS: Record<Phase, string> = {
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
 
 export interface MyReview {
+  databaseId: number | null
   state: ReviewState
   submittedAt: string | null
   commitOid: string | null

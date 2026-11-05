@@ -1,22 +1,17 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { isSamePr, type PrRef } from '@shared/types'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { topLevelMutationFields } from './graphqlMutations'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
-export interface PolicyPr {
-  owner: string
-  repo: string
-  number: number
-}
-
 export interface PolicyContext {
   submitting: boolean
   cwd: string
-  pr: PolicyPr
+  pr: Pick<PrRef, 'owner' | 'repo' | 'number'>
 }
 
 interface ShellState {
@@ -463,12 +458,11 @@ function mutationFields(queries: string[]): string[] | null {
   return fields.some((f) => f === null) ? null : (fields.flat() as string[])
 }
 
-function isSubmitRestWrite(method: string, endpoint: string, pr: PolicyPr): boolean {
+function isSubmitRestWrite(method: string, endpoint: string, pr: PolicyContext['pr']): boolean {
   const match = endpoint.match(PR_REVIEWS_PATH)
   if (!match) return false
   const [, owner, repo, number, reviewId, events] = match
-  const samePr = owner.toLowerCase() === pr.owner.toLowerCase() && repo.toLowerCase() === pr.repo.toLowerCase() && Number(number) === pr.number
-  if (!samePr) return false
+  if (!isSamePr({ owner, repo, number: Number(number) }, pr)) return false
   switch (method) {
     case 'POST':
       return !reviewId || Boolean(events)

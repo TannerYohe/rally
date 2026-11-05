@@ -234,6 +234,10 @@ export interface ReviewSession {
   updatedAt: string
 }
 
+export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {
+  return a.number === b.number && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+}
+
 export function prKey(owner: string, repo: string, number: number): string {
   return `${owner}/${repo}#${number}`
 }

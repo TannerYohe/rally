@@ -117,7 +117,6 @@ const READ_METHODS = new Set(['GET', 'HEAD'])
 const SUBMIT_REST_PATHS = [
   /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/,
   /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews\/\d+\/events$/,
-  /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/comments\/\d+\/replies$/,
 ]
 
 const SUBMIT_GRAPHQL_MUTATIONS = [
@@ -481,7 +480,7 @@ function decideGhApi(args: string[], segment: string, context: PolicyContext): T
   if (context.submitting && method === 'POST' && SUBMIT_REST_PATHS.some((p) => p.test(endpoint))) return ALLOW
   return deny(
     context.submitting
-      ? `Rally only permits posting reviews, review events, and thread replies; \`${method} ${endpoint}\` is blocked.`
+      ? `Rally only permits creating and submitting reviews; thread replies go into the pending review through graphql. \`${method} ${endpoint}\` is blocked.`
       : 'GitHub writes are blocked until the user submits the review from Rally.',
   )
 }

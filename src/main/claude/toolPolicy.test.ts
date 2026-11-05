@@ -58,10 +58,13 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api repos/acme/api/pulls/12/reviews -XPOST')).toBe(false)
   })
 
-  it('allows posting reviews, events, and replies during submit', () => {
+  it('allows posting reviews and events during submit', () => {
     expect(bash('gh api repos/acme/api/pulls/12/reviews --method POST --input "$WORK/review.json"', SUBMITTING)).toBe(true)
     expect(bash('gh api repos/acme/api/pulls/12/reviews/99/events --method POST -f event=COMMENT', SUBMITTING)).toBe(true)
-    expect(bash("gh api repos/acme/api/pulls/12/comments/5/replies --method POST -f body='still broken'", SUBMITTING)).toBe(true)
+  })
+
+  it('blocks standalone thread replies during submit', () => {
+    expect(bash("gh api repos/acme/api/pulls/12/comments/5/replies --method POST -f body='still broken'", SUBMITTING)).toBe(false)
   })
 
   it('finds the endpoint after flag values', () => {

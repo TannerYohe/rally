@@ -1,5 +1,5 @@
 import type { DraftChanges } from './feedback'
-import type { Config, Health, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution } from './types'
+import type { AppInfo, Config, Health, InstallAttempt, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution, UpdateState } from './types'
 
 export interface RallyApi {
   getConfig(): Promise<Config>
@@ -17,6 +17,13 @@ export interface RallyApi {
   cancelReview(sessionId: string): Promise<void>
   discardSession(sessionId: string): Promise<void>
   onSessionChanged(listener: (session: ReviewSession) => void): () => void
+  getAppInfo(): Promise<AppInfo>
+  getUpdateState(): Promise<UpdateState>
+  checkForUpdates(): Promise<void>
+  installUpdate(): Promise<void>
+  getFailedInstall(): Promise<InstallAttempt | null>
+  dismissFailedInstall(): Promise<void>
+  onUpdateChanged(listener: (state: UpdateState) => void): () => void
 }
 
 export const IPC = {
@@ -35,4 +42,11 @@ export const IPC = {
   cancelReview: 'session:cancel',
   discardSession: 'session:discard',
   sessionChanged: 'session:changed',
+  getAppInfo: 'app:info',
+  getUpdateState: 'update:get',
+  checkForUpdates: 'update:check',
+  installUpdate: 'update:install',
+  getFailedInstall: 'update:failed-install',
+  dismissFailedInstall: 'update:dismiss-failed-install',
+  updateChanged: 'update:changed',
 } as const

@@ -20,7 +20,7 @@ Install or update to the latest release:
 gh api repos/TannerYohe/rally/contents/scripts/install.sh -H 'Accept: application/vnd.github.raw' | sh
 ```
 
-The script downloads the release zip with `gh`, quits Rally if it is running, and replaces `/Applications/Rally.app`. The app is ad-hoc signed, not notarized. Files that `gh` downloads are not quarantined, so it opens without a Gatekeeper prompt. If you download the zip or dmg from the release page in a browser instead, macOS blocks the first launch: open it once, then allow it under System Settings → Privacy & Security → Open Anyway.
+The script downloads the macOS release zip with `gh`, quits Rally if it is running, and replaces `/Applications/Rally.app`. After the first install, Settings → About can update Rally in place; see [Updates](#updates). The app is ad-hoc signed, not notarized. Files that `gh` downloads are not quarantined, so it opens without a Gatekeeper prompt. If you download the zip or dmg from the release page in a browser instead, macOS blocks the first launch: open it once, then allow it under System Settings → Privacy & Security → Open Anyway.
 
 ## Development
 
@@ -102,6 +102,19 @@ A submitted session stays on the PR page with a link to the review on GitHub. **
 Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the skill's work directory lands inside it. Rally deletes the directory after the review is submitted or discarded.
 
 Settings → Reviews picks the review skill, and the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
+
+### Updates
+
+Settings → About shows the app version, the Electron, Chromium, and Node.js versions, and the data folder. **Check for updates** reads the latest release from the GitHub API without signing in, and gives up after 15 seconds. When the release is newer than the running version, the page shows its date and notes and **Download and install**, which downloads the release asset for this machine and shows progress. A download that receives nothing for 30 seconds fails, and you can try again. Rally only downloads an asset whose name is a plain file name and whose URL, once parsed, is exactly `https://github.com/TannerYohe/rally/releases/download/<tag>/<name>` for the release's tag, with no query or fragment; otherwise the page says why and offers **Check again**.
+
+- macOS: the `arm64` zip. Rally extracts it with `ditto`, checks it with `codesign --verify --deep --strict`, and checks that its bundle id matches the running app's. Rally then quits, and a detached shell script waits for it to exit, moves the old app aside to `Rally.previous.app`, moves the new one into place, and reopens it. If the new app can't move into place, the script restores the old one. `Rally.previous.app` stays until the new version starts. If the new release fails to launch, delete `Rally.app` and rename `Rally.previous.app` back to `Rally.app` rather than opening it in place, since the next update would treat it as the current app and leave a `Rally.previous.previous.app`. Rally only installs when it can write to the folder holding `Rally.app` and macOS has not translocated it; otherwise the page says why.
+- Windows: the `x64` installer, run silently with `--force-run` so it reopens Rally. A detached PowerShell command runs it and records its exit code. Rally passes the command with `-EncodedCommand`, which execution policy doesn't apply to, so a Group Policy restriction doesn't stop it.
+
+On both platforms Rally writes a hand-off line to `update.log` in the data folder before starting the script, and the script appends its result. The release's signature is ad-hoc, so the `codesign` check catches a corrupt download, not a build someone re-signed.
+
+Before handing off, Rally records the version it is installing in `update.json` in the data folder. If the next launch isn't on that version, the dashboard shows that the update didn't install, and Settings → About points to `update.log`. On launch, Rally also removes its own leftover download folders from the temp directory. Their names include a hash of the data folder, so a test instance with a different `RALLY_USER_DATA_DIR` doesn't touch another instance's download.
+
+Quitting stops any running Claude turn; the review shows as interrupted and resumes when you send feedback. The development build checks for updates but doesn't install them. A relaunched test instance keeps its `RALLY_USER_DATA_DIR`. The logic lives in `src/main/update/`.
 
 ### Guardrails
 

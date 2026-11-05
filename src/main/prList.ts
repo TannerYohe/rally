@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { headKey, prKey, type MyReview, type Pr, type PrListState, type SessionStatus } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
@@ -69,7 +70,7 @@ class PrList extends EventEmitter {
       prCacheFile.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
     } catch (error) {
-      this.update({ refreshing: false, error: error instanceof Error ? error.message : String(error) })
+      this.update({ refreshing: false, error: errorMessage(error) })
     }
   }
 
@@ -145,7 +146,7 @@ class PrList extends EventEmitter {
           this.summaryErrors.delete(key)
           this.patchByHead(key, { summary, summaryError: null })
         } catch (error) {
-          const summaryError = error instanceof Error ? error.message : String(error)
+          const summaryError = errorMessage(error)
           this.summaryErrors.set(key, summaryError)
           this.patchByHead(key, { summaryError })
           console.error('PR summary failed', { pr: pr.url, error })

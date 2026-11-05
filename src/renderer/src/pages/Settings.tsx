@@ -2,27 +2,37 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
+  type AppInfo,
+  type InstallAttempt,
   EFFORT_LABELS,
   MODEL_LABELS,
   type Config,
   type EffortChoice,
   type Health,
   type ModelChoice,
+  type ReleaseInfo,
+  type UpdateState,
 } from '@shared/types'
+import { errorMessage } from '@shared/errors'
+import { RALLY_REPO_URL } from '@shared/repo'
 import logo from '../../../../resources/icon.svg'
 import { Avatar } from '../components/Avatar'
 import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
+import { Markdown } from '../components/Markdown'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
+import { calendarDate, clockTime, megabytes } from '../lib/format'
+import { useFailedInstall, useUpdateState } from '../lib/hooks'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
 import { SKIN_IDS, SKINS, parseSkinId, useSkinPreview } from '../lib/skins'
-import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
   'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
   reviews: { label: 'Reviews', icon: <SparkleIcon /> },
   appearance: { label: 'Appearance', icon: <PaletteIcon /> },
   accounts: { label: 'Accounts', icon: <PersonIcon /> },
+  about: { label: 'About', icon: <InfoIcon /> },
 }
 
 export function Settings() {
@@ -57,7 +67,7 @@ export function Settings() {
     try {
       await window.rally.saveConfig(config)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       setSaveError(message)
       return message
     }
@@ -146,6 +156,8 @@ function SectionBody({ section, ...props }: SectionProps & { section: SettingsSe
       return <AppearanceSection {...props} />
     case 'accounts':
       return <AccountsSection {...props} />
+    case 'about':
+      return <AboutSection />
   }
 }
 
@@ -301,6 +313,188 @@ function AccountsSection({ health }: SectionProps) {
         </Row>
       </Card>
     </>
+  )
+}
+
+function AboutSection() {
+  const [info, setInfo] = useState<AppInfo | null>(null)
+  const update = useUpdateState()
+  const [failedInstall, dismissFailedInstall] = useFailedInstall()
+
+  useEffect(() => {
+    window.rally.getAppInfo().then(setInfo)
+  }, [])
+
+  if (!info) return null
+
+  return (
+    <>
+      <div className="flex items-center gap-4 pb-1">
+        <img src={logo} alt="" className="h-14 w-14" />
+        <div>
+          <h2 className="text-lg font-semibold">Rally</h2>
+          <p className="text-sm text-ink-400">Version {info.version}</p>
+        </div>
+      </div>
+      <Card title="Updates" description="Rally checks GitHub releases when you ask.">
+        {failedInstall && <FailedInstallRow attempt={failedInstall} onDismiss={dismissFailedInstall} />}
+        <UpdateRow state={update} currentVersion={info.version} />
+        {update.status === 'available' && <ReleaseNotes release={update.release} />}
+      </Card>
+      <Card title="Details">
+        <InfoRow label="Electron" value={info.electron} />
+        <InfoRow label="Chromium" value={info.chrome} />
+        <InfoRow label="Node.js" value={info.node} />
+        <InfoRow label="Platform" value={info.platform} />
+        <InfoRow label="Data folder" value={info.userDataDir} />
+      </Card>
+      <p className="flex gap-4 px-1 text-xs">
+        <a href={RALLY_REPO_URL} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
+          GitHub
+        </a>
+        <a href={`${RALLY_REPO_URL}/releases`} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
+          Releases
+        </a>
+        <a href={`${RALLY_REPO_URL}/blob/main/LICENSE.md`} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
+          License
+        </a>
+      </p>
+    </>
+  )
+}
+
+function UpdateRow({ state, currentVersion }: { state: UpdateState; currentVersion: string }) {
+  const check = () => window.rally.checkForUpdates()
+  const install = () => window.rally.installUpdate()
+  switch (state.status) {
+    case 'idle':
+      return (
+        <Row label="Check for updates" description={`You have Rally ${currentVersion}.`}>
+          <button className={SECONDARY_BUTTON_CLASS} onClick={check}>
+            Check for updates
+          </button>
+        </Row>
+      )
+    case 'checking':
+      return (
+        <Row label="Check for updates" description={`You have Rally ${currentVersion}.`}>
+          <StatusText tone="pending">Checking…</StatusText>
+        </Row>
+      )
+    case 'up_to_date':
+      return (
+        <Row label="Rally is up to date" description={`Checked ${clockTime(state.checkedAt)}.`}>
+          <button className={SECONDARY_BUTTON_CLASS} onClick={check}>
+            Check again
+          </button>
+        </Row>
+      )
+    case 'available':
+      return (
+        <Row
+          label={`Rally ${state.release.version} is available`}
+          description={
+            state.installBlocker ??
+            `You have ${currentVersion}. Rally quits and reopens to install it. A running Claude turn stops; send feedback to resume it.`
+          }
+        >
+          {state.installBlocker ? (
+            <button className={SECONDARY_BUTTON_CLASS} onClick={check}>
+              Check again
+            </button>
+          ) : (
+            <button className={`px-3 py-1.5 text-sm ${PRIMARY_BUTTON_CLASS}`} onClick={install}>
+              Download and install
+            </button>
+          )}
+        </Row>
+      )
+    case 'downloading':
+      return (
+        <Row label={`Downloading Rally ${state.release.version}`} description={`${megabytes(state.received)} of ${megabytes(state.total)}`}>
+          <ProgressBar fraction={state.received / state.total} />
+        </Row>
+      )
+    case 'installing':
+      return (
+        <Row label={`Installing Rally ${state.release.version}`} description="Rally quits and reopens on the new version.">
+          <StatusText tone="pending">Installing…</StatusText>
+        </Row>
+      )
+    case 'check_failed':
+      return (
+        <Row label="Couldn't check for updates" description={state.error}>
+          <button className={SECONDARY_BUTTON_CLASS} onClick={check}>
+            Try again
+          </button>
+        </Row>
+      )
+    case 'install_failed':
+      return (
+        <Row label={`Couldn't install Rally ${state.release.version}`} description={state.error}>
+          <button className={SECONDARY_BUTTON_CLASS} onClick={install}>
+            Try again
+          </button>
+        </Row>
+      )
+  }
+}
+
+function FailedInstallRow({ attempt, onDismiss }: { attempt: InstallAttempt; onDismiss(): void }) {
+  const description = `Rally is still on the previous version. The install log is at ${attempt.logPath}.`
+  return (
+    <div className="flex items-center gap-6 bg-amber-950/30 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm text-amber-200">Rally {attempt.version} didn't install</div>
+        <div className="select-text break-all text-xs text-amber-300/70">{description}</div>
+      </div>
+      <button className={SECONDARY_BUTTON_CLASS} onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
+function ProgressBar({ fraction }: { fraction: number }) {
+  const percent = Math.min(100, Math.round(fraction * 100))
+  return (
+    <div className="flex w-48 items-center gap-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-800" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+        <div className="h-full rounded-full bg-gradient-to-r from-primary-500 to-secondary-500 transition-[width]" style={{ width: `${percent}%` }} />
+      </div>
+      <span className="w-9 text-right text-xs tabular-nums text-ink-400">{percent}%</span>
+    </div>
+  )
+}
+
+function ReleaseNotes({ release }: { release: ReleaseInfo }) {
+  return (
+    <div className="space-y-2 px-4 py-3">
+      <div className="flex items-baseline justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-ink-500">
+          What's new{release.publishedAt && <span className="normal-case tracking-normal"> · {calendarDate(release.publishedAt)}</span>}
+        </span>
+        <a href={release.url} target="_blank" rel="noreferrer" className="text-xs text-secondary-300 hover:underline">
+          View release on GitHub
+        </a>
+      </div>
+      {release.notes ? (
+        <div className="max-h-64 overflow-auto [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h3]:uppercase [&_h3]:tracking-wide [&_h3]:text-ink-400">
+          <Markdown>{release.notes}</Markdown>
+        </div>
+      ) : (
+        <p className="text-xs text-ink-500">This release has no notes.</p>
+      )}
+    </div>
+  )
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline gap-6 px-4 py-2.5">
+      <div className="w-28 shrink-0 text-sm text-ink-400">{label}</div>
+      <div className="min-w-0 flex-1 select-text break-all font-mono text-xs text-ink-200">{value}</div>
+    </div>
   )
 }
 
@@ -476,6 +670,16 @@ function PersonIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
       <circle cx="12" cy="8" r="3.5" />
       <path strokeLinecap="round" d="M5 20c.8-3.5 3.6-5.5 7-5.5s6.2 2 7 5.5" />
+    </svg>
+  )
+}
+
+function InfoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
+      <circle cx="12" cy="12" r="9" />
+      <path strokeLinecap="round" d="M12 11v5" />
+      <circle cx="12" cy="7.75" r="1" fill="currentColor" stroke="none" />
     </svg>
   )
 }

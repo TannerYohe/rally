@@ -17,6 +17,10 @@ export function usd(amount: number): string {
   return `$${amount.toFixed(2)}`
 }
 
+export function megabytes(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
+}
+
 export function duration(ms: number): string {
   const seconds = Math.round(ms / 1000)
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
@@ -27,6 +31,10 @@ export function clockTime(iso: string, now = new Date()): string {
   const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   if (date.toDateString() === now.toDateString()) return time
   return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
+}
+
+export function calendarDate(iso: string): string {
+  return new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 export function fullTime(iso: string): string {

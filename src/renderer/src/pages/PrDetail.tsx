@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
@@ -162,7 +163,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       setFeedback('')
       return true
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
+      setActionError(errorMessage(error))
       return false
     }
   }

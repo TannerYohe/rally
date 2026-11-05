@@ -9,7 +9,7 @@ import { DiffStat } from '../components/DiffStat'
 import { PhaseBadge } from '../components/PhaseBadge'
 import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
-import { ReviewTabBar, reviewPanelId, reviewTabId } from '../components/ReviewTabBar'
+import { ReviewTabBar, ReviewTabPanel } from '../components/ReviewTabBar'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
@@ -238,13 +238,13 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
 
       <ReviewTabBar tab={reviewTab.tab} badges={tabBadges} empty={emptyTabs} onSelect={reviewTab.select} />
 
-      <TabPanel id="activity" selected={reviewTab.tab}>
+      <ReviewTabPanel id="activity" tab={reviewTab.tab}>
         <div ref={reviewTab.activityRef}>
           <ProgressTimeline timeline={session.timeline} />
         </div>
-      </TabPanel>
+      </ReviewTabPanel>
 
-      <TabPanel id="report" selected={reviewTab.tab}>
+      <ReviewTabPanel id="report" tab={reviewTab.tab}>
         {drafts ? (
           <div className="space-y-3">
             <div className="text-sm">
@@ -256,9 +256,9 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         ) : (
           <EmptyTab>Claude hasn't published a report yet.</EmptyTab>
         )}
-      </TabPanel>
+      </ReviewTabPanel>
 
-      <TabPanel id="threads" selected={reviewTab.tab}>
+      <ReviewTabPanel id="threads" tab={reviewTab.tab}>
         {threadResolution.rows.length > 0 ? (
           <PriorConcernList
             state={threadResolution}
@@ -269,9 +269,9 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         ) : (
           <EmptyTab>No earlier comments. Threads appear in follow-up reviews.</EmptyTab>
         )}
-      </TabPanel>
+      </ReviewTabPanel>
 
-      <TabPanel id="drafts" selected={reviewTab.tab}>
+      <ReviewTabPanel id="drafts" tab={reviewTab.tab}>
         {drafts ? (
           <div className="space-y-2">
             <DraftList
@@ -290,7 +290,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         ) : (
           <EmptyTab>Claude hasn't drafted any comments yet.</EmptyTab>
         )}
-      </TabPanel>
+      </ReviewTabPanel>
 
       {!submitted && (
         <div className="space-y-3">
@@ -317,14 +317,6 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         </div>
       )}
     </section>
-  )
-}
-
-function TabPanel({ id, selected, children }: { id: ReviewTab; selected: ReviewTab; children: ReactNode }) {
-  return (
-    <div role="tabpanel" id={reviewPanelId(id)} aria-labelledby={reviewTabId(id)} hidden={id !== selected}>
-      {children}
-    </div>
   )
 }
 

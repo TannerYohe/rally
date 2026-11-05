@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 import { REVIEW_TAB_LABELS, REVIEW_TABS, type ReviewTab } from '../lib/reviewTabs'
 
-export function reviewTabId(tab: ReviewTab): string {
+function reviewTabId(tab: ReviewTab): string {
   return `review-tab-${tab}`
 }
 
-export function reviewPanelId(tab: ReviewTab): string {
+function reviewPanelId(tab: ReviewTab): string {
   return `review-panel-${tab}`
 }
 
@@ -38,6 +38,14 @@ export function ReviewTabBar({ tab, badges, empty, onSelect }: Props) {
           </button>
         )
       })}
+    </div>
+  )
+}
+
+export function ReviewTabPanel({ id, tab, children }: { id: ReviewTab; tab: ReviewTab; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={reviewPanelId(id)} aria-labelledby={reviewTabId(id)} hidden={id !== tab}>
+      {children}
     </div>
   )
 }

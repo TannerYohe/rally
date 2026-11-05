@@ -1,7 +1,6 @@
 import { join } from 'node:path'
 import { app } from 'electron'
-import { DEFAULT_CONFIG, type Config, type Pr, type ReviewSession } from '@shared/types'
-import type { StoredHide } from './hiddenPrs'
+import { DEFAULT_CONFIG, type Config, type Pr, type ReviewSession, type StoredHide } from '@shared/types'
 import { JsonDir, JsonFile } from './jsonFile'
 
 interface PrCache {

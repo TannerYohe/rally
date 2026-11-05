@@ -25,7 +25,7 @@ export function HideControls({ pr, className = '' }: { pr: Pr; className?: strin
       >
         Snooze
       </button>
-      <button className={BUTTON_CLASS} title="Hide until you unhide it" onClick={() => window.rally.hidePr(pr.id, 'hide')}>
+      <button className={BUTTON_CLASS} title="Hide until you unhide it" onClick={() => window.rally.hidePr(pr.id, 'indefinite')}>
         Hide
       </button>
     </div>

@@ -19,16 +19,22 @@ export interface MyReview {
   replyOnly: boolean
 }
 
-export type HideMode = 'snooze' | 'hide'
+export type HideMode = 'snooze' | 'indefinite'
 
 export const HIDE_MODE_LABELS: Record<HideMode, string> = {
   snooze: 'Snoozed until updated',
-  hide: 'Hidden',
+  indefinite: 'Hidden',
 }
 
 export interface PrHide {
   mode: HideMode
   at: string
+}
+
+export interface StoredHide extends PrHide {
+  headRefOid: string
+  reviewRequested: boolean
+  lastListedAt: string
 }
 
 export interface Pr {

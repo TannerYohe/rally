@@ -1,4 +1,4 @@
-import type { Config, Health, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution } from './types'
+import type { Config, HideMode, Health, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution } from './types'
 
 export interface RallyApi {
   getConfig(): Promise<Config>
@@ -7,6 +7,8 @@ export interface RallyApi {
   getPrs(): Promise<PrListState>
   refreshPrs(): Promise<void>
   onPrsChanged(listener: (state: PrListState) => void): () => void
+  hidePr(id: string, mode: HideMode): Promise<void>
+  unhidePr(id: string): Promise<void>
   getSession(prKey: string): Promise<ReviewSession | null>
   startReview(pr: PrRef): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
@@ -25,6 +27,8 @@ export const IPC = {
   getPrs: 'prs:get',
   refreshPrs: 'prs:refresh',
   prsChanged: 'prs:changed',
+  hidePr: 'prs:hide',
+  unhidePr: 'prs:unhide',
   getSession: 'session:get',
   startReview: 'session:start',
   sendFeedback: 'session:feedback',

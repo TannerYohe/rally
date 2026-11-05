@@ -5,8 +5,9 @@ import { describe, expect, it } from 'vitest'
 import { decideToolUse } from './toolPolicy'
 
 const SESSION_CWD = join(tmpdir(), 'rally', 'test-session')
-const REVIEWING = { submitting: false, cwd: SESSION_CWD }
-const SUBMITTING = { submitting: true, cwd: SESSION_CWD }
+const PR = { owner: 'acme', repo: 'api', number: 12 }
+const REVIEWING = { submitting: false, cwd: SESSION_CWD, pr: PR }
+const SUBMITTING = { submitting: true, cwd: SESSION_CWD, pr: PR }
 
 const WORK = '/tmp/review-pr-api-12-abcd'
 const SET_WORK = 'WORK=$(mktemp -d "${TMPDIR:-/tmp}/review-pr-api-12-XXXX"); '
@@ -69,6 +70,18 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method DELETE')).toBe(false)
     expect(bash('gh api repos/acme/api/pulls/12/comments/5 --method DELETE', SUBMITTING)).toBe(false)
     expect(bash('gh api repos/acme/api/pulls/12 --method DELETE', SUBMITTING)).toBe(false)
+  })
+
+  it('only allows review writes on the PR being submitted', () => {
+    expect(bash('gh api repos/acme/other/pulls/12/reviews --method POST --input x.json', SUBMITTING)).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/13/reviews/99/events --method POST -f event=COMMENT', SUBMITTING)).toBe(false)
+    expect(bash('gh api repos/ACME/Api/pulls/12/reviews/99 --method DELETE', SUBMITTING)).toBe(true)
+  })
+
+  it('blocks review paths with query or fragment characters that gh would cut the path at', () => {
+    expect(bash("gh api -X DELETE 'repos/acme/api?/pulls/12/reviews/1'", SUBMITTING)).toBe(false)
+    expect(bash("gh api -X DELETE 'repos/acme/api#/pulls/12/reviews/1'", SUBMITTING)).toBe(false)
+    expect(bash("gh api --method POST 'repos/acme/api?x=/pulls/12/reviews' --input x.json", SUBMITTING)).toBe(false)
   })
 
   it('blocks standalone thread replies during submit', () => {

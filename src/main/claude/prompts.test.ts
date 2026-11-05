@@ -51,7 +51,7 @@ describe('submitPrompt', () => {
   })
 
   it('only gives commands that the submit-turn tool policy allows, each with its timeline label', () => {
-    const decide = (command: string) => decideToolUse('Bash', { command }, { submitting: true, cwd: '/tmp/rally/session' })
+    const decide = (command: string) => decideToolUse('Bash', { command }, { submitting: true, cwd: '/tmp/rally/session', pr })
     expect(submitCommands().map((command) => [bashStepLabel(command, undefined), decide(command)])).toEqual([
       ['Posting pending review', { allow: true }],
       ['Querying review threads', { allow: true }],

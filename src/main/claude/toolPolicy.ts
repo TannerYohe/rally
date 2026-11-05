@@ -7,9 +7,16 @@ import { parseShellWords, splitShellCommand, type Redirect } from './shellComman
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
+export interface PolicyPr {
+  owner: string
+  repo: string
+  number: number
+}
+
 export interface PolicyContext {
   submitting: boolean
   cwd: string
+  pr: PolicyPr
 }
 
 interface ShellState {
@@ -114,12 +121,7 @@ const WGET_METHOD_FLAGS = ['--method']
 const WGET_BODY_FLAGS = ['--post-data', '--post-file', '--body-data', '--body-file']
 const READ_METHODS = new Set(['GET', 'HEAD'])
 
-const SUBMIT_REST_PATHS = [
-  /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/,
-  /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews\/\d+\/events$/,
-]
-
-const PENDING_REVIEW_PATH = /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews\/\d+$/
+const PR_REVIEWS_PATH = /^\/?repos\/([\w.-]+)\/([\w.-]+)\/pulls\/(\d+)\/reviews(?:\/(\d+)(\/events)?)?$/
 
 const SUBMIT_GRAPHQL_MUTATIONS = [
   'addPullRequestReview',
@@ -461,6 +463,22 @@ function mutationFields(queries: string[]): string[] | null {
   return fields.some((f) => f === null) ? null : (fields.flat() as string[])
 }
 
+function isSubmitRestWrite(method: string, endpoint: string, pr: PolicyPr): boolean {
+  const match = endpoint.match(PR_REVIEWS_PATH)
+  if (!match) return false
+  const [, owner, repo, number, reviewId, events] = match
+  const samePr = owner.toLowerCase() === pr.owner.toLowerCase() && repo.toLowerCase() === pr.repo.toLowerCase() && Number(number) === pr.number
+  if (!samePr) return false
+  switch (method) {
+    case 'POST':
+      return !reviewId || Boolean(events)
+    case 'DELETE':
+      return Boolean(reviewId) && !events
+    default:
+      return false
+  }
+}
+
 function decideGhApi(args: string[], segment: string, context: PolicyContext): ToolDecision {
   const endpoint = ghApiEndpoint(args)
   if (endpoint === 'graphql') {
@@ -479,11 +497,10 @@ function decideGhApi(args: string[], segment: string, context: PolicyContext): T
 
   const method = requestMethod(args, GH_API_METHOD_FLAGS, GH_API_BODY_FLAGS)
   if (method === 'GET') return ALLOW
-  if (context.submitting && method === 'POST' && SUBMIT_REST_PATHS.some((p) => p.test(endpoint))) return ALLOW
-  if (context.submitting && method === 'DELETE' && PENDING_REVIEW_PATH.test(endpoint)) return ALLOW
+  if (context.submitting && isSubmitRestWrite(method, endpoint, context.pr)) return ALLOW
   return deny(
     context.submitting
-      ? `Rally only permits creating, submitting, and deleting pending reviews; thread replies go into the pending review through graphql. \`${method} ${endpoint}\` is blocked.`
+      ? `Rally only permits creating, submitting, and deleting pending reviews on ${context.pr.owner}/${context.pr.repo}#${context.pr.number}; thread replies go into the pending review through graphql. \`${method} ${endpoint}\` is blocked.`
       : 'GitHub writes are blocked until the user submits the review from Rally.',
   )
 }

@@ -1,10 +1,10 @@
 import { EventEmitter } from 'node:events'
-import { headKey, prKey, type HideMode, type Pr, type PrHide, type PrListState, type SessionStatus } from '@shared/types'
+import { headKey, prKey, type HideMode, type Pr, type PrListState, type SessionStatus, type StoredHide } from '@shared/types'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { buildSearchQueries } from './github/search'
-import { isHideActive, newHide, type StoredHide } from './hiddenPrs'
+import { keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
 import { configFile, headsSeenFile, hiddenPrsFile, prCacheFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
@@ -45,8 +45,13 @@ class PrList extends EventEmitter {
   }
 
   reapplyReviewStatus(): void {
-    const prs = this.withReviewStatus(this.state.prs)
-    const changed = prs.some((pr, i) => pr.phase !== this.state.prs[i].phase || pr.reviewStatus !== this.state.prs[i].reviewStatus)
+    const prs = this.withHidden(this.withReviewStatus(this.state.prs), false)
+    const changed = prs.some(
+      (pr, i) =>
+        pr.phase !== this.state.prs[i].phase ||
+        pr.reviewStatus !== this.state.prs[i].reviewStatus ||
+        pr.hidden?.mode !== this.state.prs[i].hidden?.mode,
+    )
     if (changed) this.update({ prs })
   }
 
@@ -88,24 +93,24 @@ class PrList extends EventEmitter {
 
   private reapplyHidden(): void {
     this.update({ prs: this.withHidden(this.state.prs, false) })
-    prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs: this.state.prs })
   }
 
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
-    return this.withReviewStatus(this.withHidden(this.withSummaries(this.withHeadTimes(prs, prune), prune), prune))
+    return this.withHidden(this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, prune), prune)), prune)
   }
 
-  private withHidden<T extends GithubPr>(prs: T[], prune: boolean): (T & { hidden: PrHide | null })[] {
+  private withHidden(prs: Omit<Pr, 'hidden'>[], prune: boolean): Pr[] {
+    const now = new Date().toISOString()
     const stored = hiddenPrsFile.get()
-    const kept: Record<string, StoredHide> = prune ? {} : { ...stored }
+    const listed = new Set(prs.map((pr) => pr.id))
+    const kept: Record<string, StoredHide> = Object.fromEntries(
+      Object.entries(stored).filter(([id, hide]) => !listed.has(id) && (!prune || keepsUnlistedHide(hide, now))),
+    )
     const result = prs.map((pr) => {
-      const hide = stored[pr.id]
-      if (!hide || !isHideActive(hide, pr)) {
-        delete kept[pr.id]
-        return { ...pr, hidden: null }
-      }
-      kept[pr.id] = hide
-      return { ...pr, hidden: { mode: hide.mode, at: hide.at } }
+      const hide = stored[pr.id] && refreshHide(stored[pr.id], pr, now)
+      if (hide) kept[pr.id] = hide
+      const shown = !hide || pr.phase === 'in_progress'
+      return { ...pr, hidden: shown ? null : { mode: hide.mode, at: hide.at } }
     })
     hiddenPrsFile.set(kept)
     return result
@@ -126,7 +131,7 @@ class PrList extends EventEmitter {
     return result
   }
 
-  private withReviewStatus(prs: Omit<Pr, 'phase' | 'reviewStatus'>[]): Pr[] {
+  private withReviewStatus(prs: Omit<Pr, 'phase' | 'reviewStatus' | 'hidden'>[]): Omit<Pr, 'hidden'>[] {
     return prs.map((pr) => {
       const reviewStatus = this.reviewStatusOf(prKey(pr.owner, pr.repo, pr.number))
       const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'

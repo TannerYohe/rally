@@ -59,6 +59,7 @@ describe('prList', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.summarizePr.mockReset()
+    mocks.store.hiddenPrsFile.set({})
     mocks.summarizePr.mockResolvedValue('A summary')
   })
 
@@ -80,12 +81,12 @@ describe('prList', () => {
   it('hides a PR until it is unhidden', async () => {
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
     await prList.refresh()
-    prList.hide('pr1', 'hide')
-    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'hide' })
+    prList.hide('pr1', 'indefinite')
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'indefinite' })
 
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ headRefOid: 'newer' })] })
     await prList.refresh()
-    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'hide' })
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'indefinite' })
 
     prList.unhide('pr1')
     expect(prList.get().prs[0].hidden).toBeNull()
@@ -105,15 +106,46 @@ describe('prList', () => {
     expect(mocks.store.hiddenPrsFile.get()).toEqual({})
   })
 
-  it('prunes hides for closed PRs on a full refresh', async () => {
+  it('keeps other hides when refreshing one PR', async () => {
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr(), githubPr({ id: 'pr2', number: 2 })] })
     await prList.refresh()
-    prList.hide('pr1', 'hide')
-    prList.hide('pr2', 'hide')
+    prList.hide('pr2', 'snooze')
 
+    mocks.fetchPr.mockResolvedValue(githubPr())
+    await prList.refreshOne('acme', 'api', 1)
+    expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr2'])
+  })
+
+  it('drops snoozes for unlisted PRs on a full refresh and keeps recent indefinite hides', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr(), githubPr({ id: 'pr2', number: 2 })] })
+    await prList.refresh()
+    prList.hide('pr1', 'snooze')
+    prList.hide('pr2', 'indefinite')
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [] })
+    await prList.refresh()
+    expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr2'])
+  })
+
+  it('ages out indefinite hides for PRs unlisted for 30 days', async () => {
+    const lastListedAt = new Date(Date.now() - 31 * 24 * 60 * 60_000).toISOString()
+    const hide = { mode: 'indefinite', at: lastListedAt, headRefOid: 'new', reviewRequested: false, lastListedAt }
+    mocks.store.hiddenPrsFile.set({ gone: hide })
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [] })
+    await prList.refresh()
+    expect(mocks.store.hiddenPrsFile.get()).toEqual({})
+  })
+
+  it('shows a hidden PR while its review is in progress', async () => {
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
     await prList.refresh()
-    expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr1'])
+    prList.hide('pr1', 'indefinite')
+
+    prList.setReviewStatusLookup(() => 'awaiting_feedback')
+    expect(prList.get().prs[0].hidden).toBeNull()
+
+    prList.setReviewStatusLookup(() => null)
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'indefinite' })
   })
 
   it('shows a summary error until a later summary succeeds', async () => {

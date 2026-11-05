@@ -1,6 +1,6 @@
 import { spawn, execFile } from 'node:child_process'
 import { accessSync, constants, existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { join, posix } from 'node:path'
 import { promisify } from 'node:util'
 import type { ReleaseInfo } from '@shared/types'
 
@@ -22,7 +22,7 @@ rm -rf "$4"
 `
 
 export function macBundlePath(exePath: string): string {
-  return resolve(exePath, '../../..')
+  return posix.resolve(exePath, '../../..')
 }
 
 function isWritable(path: string): boolean {
@@ -46,7 +46,8 @@ export function installBlocker(release: ReleaseInfo, target: InstallTarget, canW
   if (target.platform !== 'darwin') return null
   const bundle = macBundlePath(target.exePath)
   if (bundle.includes('/AppTranslocation/')) return 'Move Rally to the Applications folder, reopen it, and try again.'
-  if (!canWrite(dirname(bundle))) return `Rally can't write to ${dirname(bundle)}. Install the update with scripts/install.sh instead.`
+  const folder = posix.dirname(bundle)
+  if (!canWrite(folder)) return `Rally can't write to ${folder}. Install the update with scripts/install.sh instead.`
   return null
 }
 

@@ -105,10 +105,14 @@ Settings → Reviews picks the review skill, and the model and effort for the re
 
 ### Updates
 
-Settings → About shows the app version, the Electron, Chromium, and Node.js versions, and the data folder. **Check for updates** reads the latest release from the GitHub API without signing in. When it is newer than the running version, the page shows its release notes and **Download and install**, which downloads the release asset for this machine and shows progress:
+Settings → About shows the app version, the Electron, Chromium, and Node.js versions, and the data folder. **Check for updates** reads the latest release from the GitHub API without signing in, and gives up after 15 seconds. When the release is newer than the running version, the page shows its date and notes and **Download and install**, which downloads the release asset for this machine and shows progress. A download that receives nothing for 30 seconds fails, and you can try again.
 
-- macOS: the `arm64` zip. Rally extracts it with `ditto`, quits, and a detached shell script waits for Rally to exit, swaps the new `Rally.app` into the old one's place, and opens it. If the swap fails, the script puts the old app back. Rally only installs when it can write to the folder holding `Rally.app` and macOS has not translocated it; otherwise the page says why.
+- macOS: the `arm64` zip. Rally extracts it with `ditto`, checks it with `codesign --verify --deep --strict`, and checks that its bundle id matches the running app's. Rally then quits, and a detached shell script waits for it to exit, moves the old app aside to `Rally.app.previous`, moves the new one into place, and reopens it. If the new app can't move into place, the script restores the old one. The script appends to `update.log` in the data folder. Rally only installs when it can write to the folder holding `Rally.app` and macOS has not translocated it; otherwise the page says why.
 - Windows: the `x64` installer, run silently with `--force-run` so it reopens Rally.
+
+The release's signature is ad-hoc, so the `codesign` check catches a corrupt or altered download, not a build from someone else.
+
+Before handing off, Rally records the version it is installing in `update.json` in the data folder. If the next launch is on a different version, the dashboard shows that the update didn't install, and Settings → About points to the log. On launch, Rally also removes leftover `rally-update-*` download folders from the temp directory.
 
 Quitting stops any running Claude turn; the review shows as interrupted and resumes when you send feedback. The development build checks for updates but doesn't install them. A relaunched test instance keeps its `RALLY_USER_DATA_DIR`. The logic lives in `src/main/update/`.
 

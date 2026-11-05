@@ -87,4 +87,17 @@ describe('prList', () => {
     await vi.waitFor(() => expect(prList.get().prs[0].summary).toBe('A summary'))
     expect(prList.get().prs[0].summaryError).toBeNull()
   })
+  it('counts the reply-only review Rally submitted when computing the phase', async () => {
+    const reply = { databaseId: 42, state: 'COMMENTED' as const, submittedAt: '2026-10-03T00:00:00Z', commitOid: 'new', replyOnly: true }
+    const earlier = { ...reply, databaseId: 41, submittedAt: '2026-10-01T00:00:00Z', commitOid: 'old', replyOnly: false }
+    mocks.store.headsSeenFile.set({ 'pr1:new': '2026-10-02T00:00:00Z' })
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ myReviews: [earlier, reply] })] })
+    prList.setReviewSessionLookup(() => null)
+    await prList.refresh()
+    expect(prList.get().prs[0].phase).toBe('awaiting_rereview')
+
+    prList.setReviewSessionLookup(() => ({ status: 'submitted', submittedReviewId: 42 }))
+    expect(prList.get().prs[0].phase).toBe('pending_changes')
+    expect(prList.get().prs[0].reviewStatus).toBe('submitted')
+  })
 })

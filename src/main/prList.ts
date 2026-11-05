@@ -8,14 +8,19 @@ import { configFile, headsSeenFile, prCacheFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
-type ReviewStatusLookup = (key: string) => SessionStatus | null
+export interface ReviewSessionInfo {
+  status: SessionStatus
+  submittedReviewId: number | null
+}
+
+type ReviewSessionLookup = (key: string) => ReviewSessionInfo | null
 
 class PrList extends EventEmitter {
   private state: PrListState
   private timer: NodeJS.Timeout | null = null
   private summarizing = new Set<string>()
   private summaryErrors = new Map<string, string>()
-  private reviewStatusOf: ReviewStatusLookup = () => null
+  private reviewSessionOf: ReviewSessionLookup = () => null
 
   constructor() {
     super()
@@ -38,8 +43,8 @@ class PrList extends EventEmitter {
     this.timer = setInterval(() => void this.refresh(), minutes * 60_000)
   }
 
-  setReviewStatusLookup(lookup: ReviewStatusLookup): void {
-    this.reviewStatusOf = lookup
+  setReviewSessionLookup(lookup: ReviewSessionLookup): void {
+    this.reviewSessionOf = lookup
     this.reapplyReviewStatus()
   }
 
@@ -93,9 +98,11 @@ class PrList extends EventEmitter {
 
   private withReviewStatus(prs: Omit<Pr, 'phase' | 'reviewStatus'>[]): Pr[] {
     return prs.map((pr) => {
-      const reviewStatus = this.reviewStatusOf(prKey(pr.owner, pr.repo, pr.number))
+      const session = this.reviewSessionOf(prKey(pr.owner, pr.repo, pr.number))
+      const reviewStatus = session?.status ?? null
       const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'
-      return { ...pr, reviewStatus, phase: computePhase({ ...pr, reviewInProgress }) }
+      const rallySubmittedReviewId = session?.submittedReviewId ?? null
+      return { ...pr, reviewStatus, phase: computePhase({ ...pr, reviewInProgress, rallySubmittedReviewId }) }
     })
   }
 

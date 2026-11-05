@@ -11,14 +11,13 @@ import {
   type ReviewEvent,
   type ReviewSession,
   type ReviewThread,
-  type SessionStatus,
   type SubmittedReview,
   type ThreadResolution,
   type TimelineEntry,
   type TurnMode,
 } from '@shared/types'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
-import { prList } from '../prList'
+import { prList, type ReviewSessionInfo } from '../prList'
 import { configFile, sessionsDir } from '../store'
 import { claudeExecutable } from './executable'
 import { APP_PROTOCOL, reviewPrompt, submitPrompt } from './prompts'
@@ -78,8 +77,9 @@ class ReviewSessions extends EventEmitter {
     return this.sessions.get(key) ?? null
   }
 
-  statusOf(key: string): SessionStatus | null {
-    return this.sessions.get(key)?.status ?? null
+  sessionInfoOf(key: string): ReviewSessionInfo | null {
+    const session = this.sessions.get(key)
+    return session ? { status: session.status, submittedReviewId: session.submitted?.reviewId ?? null } : null
   }
 
   async start(pr: PrRef): Promise<ReviewSession> {

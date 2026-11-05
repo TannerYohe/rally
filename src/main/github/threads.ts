@@ -1,5 +1,6 @@
 import type { PrRef, ReviewThread, ThreadResolution } from '@shared/types'
-import { github } from './client'
+import { errorMessage } from '@shared/errors'
+import { github, GITHUB_TIMEOUT_MS } from './client'
 import { fetchNodes } from './queries'
 
 const THREADS_QUERY = `
@@ -30,7 +31,6 @@ export interface RawThread {
 
 export type ThreadLookup = { kind: 'own'; thread: ReviewThread } | { kind: 'not_found' } | { kind: 'not_own' }
 
-const GITHUB_TIMEOUT_MS = 15_000
 const NOT_FOUND_ERROR = 'Review thread not found'
 const NOT_OWN_ERROR = 'Not a review thread you started on this PR'
 
@@ -76,7 +76,7 @@ export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise
         await gh.graphql(RESOLVE_MUTATION, { threadId, request: { signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS) } })
         result.resolved.push(threadId)
       } catch (error) {
-        fail(threadId, error instanceof Error ? error.message : String(error))
+        fail(threadId, errorMessage(error))
       }
     }
   }

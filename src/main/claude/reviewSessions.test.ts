@@ -69,6 +69,7 @@ mocks.stored = [
   storedSession(6, { status: 'submitted', submitted: SUBMITTED, resolvingThreads: true, threadsToResolveOnSubmit: ['T1'] }),
   storedSession(7, { status: 'error', resolvingThreads: true, threadsToResolveOnSubmit: ['T1'] }),
   storedSession(8),
+  storedSession(9),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -140,6 +141,21 @@ describe('submit', () => {
     expect(session(5).threadsToResolveOnSubmit).toBeUndefined()
   })
 
+  it('keeps the selection saved until the post-submit resolve settles', async () => {
+    let finish: (value: unknown) => void = () => {}
+    mocks.query.mockImplementation(turn({ submits: true }))
+    mocks.resolveOwnThreads.mockReturnValue(new Promise((resolve) => (finish = resolve)))
+    await reviewSessions.submit('test-session-9', 'COMMENT', '', ['T1'])
+    await vi.waitFor(() => expect(session(9).status).toBe('submitted'))
+    await vi.waitFor(() => expect(mocks.resolveOwnThreads).toHaveBeenCalled())
+    const midResolve = { resolvingThreads: true, threadsToResolveOnSubmit: ['T1'], submitted: SUBMITTED }
+    expect(session(9)).toMatchObject(midResolve)
+    expect(mocks.stored.find((stored) => stored.id === 'test-session-6')).toMatchObject(midResolve)
+    finish({ resolved: ['T1'], failed: [] })
+    await vi.waitFor(() => expect(session(9).threadsToResolveOnSubmit).toBeUndefined())
+    expect(session(9).resolvingThreads).toBe(false)
+  })
+
   it('resolves the selected threads once the review is submitted', async () => {
     mocks.query.mockImplementation(turn({ submits: true }))
     mocks.resolveOwnThreads.mockResolvedValue({ resolved: ['T1'], failed: [] })
@@ -151,7 +167,7 @@ describe('submit', () => {
 })
 
 describe('restoring sessions', () => {
-  it('reports a pending post-submit selection on a submitted session and clears the thread flags', () => {
+  it('reports the selection of a session saved mid-resolve after submit and clears the thread flags', () => {
     expect(session(6).resolvingThreads).toBe(false)
     expect(session(6).threadsToResolveOnSubmit).toBeUndefined()
     expect(session(6).threadResolution?.failed).toEqual([{ threadId: 'T1', error: expect.stringContaining('Rally closed before resolving') }])

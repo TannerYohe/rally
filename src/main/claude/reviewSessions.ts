@@ -299,7 +299,7 @@ class ReviewSessions extends EventEmitter {
       )
     } finally {
       this.controllers.delete(sessionId)
-      this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }))
+      if (!this.find(sessionId)?.submitted) this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }))
       this.patch(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()
     }
@@ -327,12 +327,16 @@ class ReviewSessions extends EventEmitter {
     }
     this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
     const threadIds = this.find(sessionId)?.threadsToResolveOnSubmit ?? []
-    if (threadIds.length > 0) {
-      this.resolveThreads(sessionId, threadIds).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error)
-        console.error('Resolving review threads after submit failed', { sessionId, error })
-        this.patch(sessionId, () => ({ threadResolution: failedResolution(threadIds, message) }), true)
-      })
+    const clearPending = () => this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }), true)
+    if (threadIds.length === 0) clearPending()
+    else {
+      this.resolveThreads(sessionId, threadIds)
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error('Resolving review threads after submit failed', { sessionId, error })
+          this.patch(sessionId, () => ({ threadResolution: failedResolution(threadIds, message) }), true)
+        })
+        .finally(clearPending)
     }
     removeSessionDir(sessionId)
     const pr = this.find(sessionId)?.pr

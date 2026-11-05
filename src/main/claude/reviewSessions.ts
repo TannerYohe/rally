@@ -17,6 +17,7 @@ import {
   type TimelineEntry,
   type TurnMode,
 } from '@shared/types'
+import { errorMessage } from '@shared/errors'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList } from '../prList'
 import { configFile, sessionsDir } from '../store'
@@ -136,7 +137,7 @@ class ReviewSessions extends EventEmitter {
       const refused = outside.map((threadId) => ({ threadId, error: "Not one of this review's earlier comments" }))
       result = { at: now(), resolved: resolution.resolved, failed: [...resolution.failed, ...refused] }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       console.error('Resolving review threads failed', { pr: pr.url, error })
       result = failedResolution(threadIds, message)
     }
@@ -293,7 +294,7 @@ class ReviewSessions extends EventEmitter {
         sessionId,
         () => ({
           status: cancelled ? 'cancelled' : 'error',
-          error: cancelled ? null : error instanceof Error ? error.message : String(error),
+          error: cancelled ? null : errorMessage(error),
         }),
         true,
       )
@@ -332,7 +333,7 @@ class ReviewSessions extends EventEmitter {
     else {
       this.resolveThreads(sessionId, threadIds)
         .catch((error) => {
-          const message = error instanceof Error ? error.message : String(error)
+          const message = errorMessage(error)
           console.error('Resolving review threads after submit failed', { sessionId, error })
           this.patch(sessionId, () => ({ threadResolution: failedResolution(threadIds, message) }), true)
         })

@@ -20,7 +20,7 @@ Install or update to the latest release:
 gh api repos/TannerYohe/rally/contents/scripts/install.sh -H 'Accept: application/vnd.github.raw' | sh
 ```
 
-The script downloads the release zip with `gh`, quits Rally if it is running, and replaces `/Applications/Rally.app`. The app is ad-hoc signed, not notarized. Files that `gh` downloads are not quarantined, so it opens without a Gatekeeper prompt. If you download the zip or dmg from the release page in a browser instead, macOS blocks the first launch: open it once, then allow it under System Settings → Privacy & Security → Open Anyway.
+The script downloads the macOS release zip with `gh`, quits Rally if it is running, and replaces `/Applications/Rally.app`. After the first install, Settings → About can update Rally in place; see [Updates](#updates). The app is ad-hoc signed, not notarized. Files that `gh` downloads are not quarantined, so it opens without a Gatekeeper prompt. If you download the zip or dmg from the release page in a browser instead, macOS blocks the first launch: open it once, then allow it under System Settings → Privacy & Security → Open Anyway.
 
 ## Development
 
@@ -102,6 +102,15 @@ A submitted session stays on the PR page with a link to the review on GitHub. **
 Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the skill's work directory lands inside it. Rally deletes the directory after the review is submitted or discarded.
 
 Settings → Reviews picks the review skill, and the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
+
+### Updates
+
+Settings → About shows the app version, the Electron, Chromium, and Node.js versions, and the data folder. **Check for updates** reads the latest release from the GitHub API without signing in. When it is newer than the running version, the page shows its release notes and **Download and install**, which downloads the release asset for this machine and shows progress:
+
+- macOS: the `arm64` zip. Rally extracts it with `ditto`, quits, and a detached shell script waits for Rally to exit, swaps the new `Rally.app` into the old one's place, and opens it. If the swap fails, the script puts the old app back. Rally only installs when it can write to the folder holding `Rally.app` and macOS has not translocated it; otherwise the page says why.
+- Windows: the `x64` installer, run silently with `--force-run` so it reopens Rally.
+
+Quitting stops any running Claude turn; the review shows as interrupted and resumes when you send feedback. The development build checks for updates but doesn't install them. A relaunched test instance keeps its `RALLY_USER_DATA_DIR`. The logic lives in `src/main/update/`.
 
 ### Guardrails
 

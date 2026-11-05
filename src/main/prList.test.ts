@@ -27,6 +27,7 @@ vi.mock('./github/search', () => ({ buildSearchQueries: () => ['query'] }))
 vi.mock('./claude/summarize', () => ({ summarizePr: mocks.summarizePr }))
 
 const { prList } = await import('./prList')
+const { newHide, UNLISTED_HIDE_RETENTION_DAYS } = await import('./hiddenPrs')
 
 function githubPr(overrides: Partial<GithubPr> = {}): GithubPr {
   return {
@@ -130,13 +131,37 @@ describe('prList', () => {
     expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr2'])
   })
 
-  it('ages out indefinite hides for PRs unlisted for 30 days', async () => {
-    const lastListedAt = new Date(Date.now() - 31 * 24 * 60 * 60_000).toISOString()
-    const hide = { mode: 'indefinite', at: lastListedAt, headRefOid: 'new', reviewRequested: false, lastListedAt }
-    mocks.store.hiddenPrsFile.set({ gone: hide })
+  it('ages out indefinite hides for PRs unlisted past the retention window', async () => {
+    const lastListedAt = new Date(Date.now() - (UNLISTED_HIDE_RETENTION_DAYS + 1) * 24 * 60 * 60_000).toISOString()
+    mocks.store.hiddenPrsFile.set({ gone: newHide(githubPr(), 'indefinite', lastListedAt) })
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [] })
     await prList.refresh()
     expect(mocks.store.hiddenPrsFile.get()).toEqual({})
+  })
+
+  it('ends a snooze on a re-request after the request it was taken under cleared', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ reviewRequestedFromMe: true })] })
+    await prList.refresh()
+    prList.hide('pr1', 'snooze')
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'snooze' })
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ reviewRequestedFromMe: true })] })
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toBeNull()
+  })
+
+  it('does not write hides when review status changes', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    prList.hide('pr1', 'indefinite')
+    const write = vi.spyOn(mocks.store.hiddenPrsFile, 'set')
+
+    prList.reapplyPhases()
+    expect(write).not.toHaveBeenCalled()
+    write.mockRestore()
   })
 
   it('shows a hidden PR while its review is in progress', async () => {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { createWriteStream, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -11,12 +12,11 @@ import { RALLY_REPO } from '@shared/repo'
 import type { AppInfo, InstallAttempt, ReleaseAsset, ReleaseInfo, UpdateState } from '@shared/types'
 import { GITHUB_TIMEOUT_MS } from '../github/client'
 import { updateFile } from '../store'
-import { handOffInstall, installBlocker, installLogPath, type InstallTarget } from './install'
+import { handOffInstall, installBlocker, installLogPath, removePreviousMacApp, type InstallTarget } from './install'
 import { isNewerVersion, toReleaseInfo, type GithubRelease } from './release'
 
 const LATEST_RELEASE_URL = `https://api.github.com/repos/${RALLY_REPO}/releases/latest`
 const DOWNLOAD_STALL_MS = 30_000
-const WORK_DIR_PREFIX = 'rally-update-'
 
 const PLATFORM_LABELS: Partial<Record<NodeJS.Platform, string>> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' }
 
@@ -84,9 +84,15 @@ async function download(asset: ReleaseAsset, path: string, onProgress: (received
   if (received !== asset.size) throw new Error(`Downloaded ${received} bytes of ${asset.name}, expected ${asset.size}.`)
 }
 
+function workDirPrefix(): string {
+  const dataDirHash = createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0, 12)
+  return `rally-update-${dataDirHash}-`
+}
+
 function sweepWorkDirs(): void {
   const root = tmpdir()
-  for (const name of readdirSync(root).filter((n) => n.startsWith(WORK_DIR_PREFIX))) {
+  const prefix = workDirPrefix()
+  for (const name of readdirSync(root).filter((n) => n.startsWith(prefix))) {
     try {
       rmSync(join(root, name), { recursive: true, force: true })
     } catch (error) {
@@ -106,7 +112,9 @@ class Updater extends EventEmitter {
     sweepWorkDirs()
     const { pending } = updateFile.get()
     if (!pending) return
-    updateFile.set({ pending: null, failed: pending.version === app.getVersion() ? null : pending })
+    const reachedVersion = pending.version === app.getVersion()
+    updateFile.set({ pending: null, failed: reachedVersion ? null : pending })
+    if (reachedVersion && process.platform === 'darwin' && app.isPackaged) removePreviousMacApp(app.getPath('exe'))
   }
 
   get(): UpdateState {
@@ -139,14 +147,14 @@ class Updater extends EventEmitter {
 
   async install(): Promise<void> {
     const release = this.pendingRelease()
-    if (!release || this.busy()) return
+    if (!release) return
     const { asset } = release
     const blocker = installBlocker(release, installTarget())
     if (blocker || !asset) {
       this.set({ status: 'available', release, installBlocker: blocker })
       return
     }
-    const workDir = mkdtempSync(join(tmpdir(), WORK_DIR_PREFIX))
+    const workDir = mkdtempSync(join(tmpdir(), workDirPrefix()))
     try {
       const downloadPath = join(workDir, asset.name)
       let lastPercent = -1
@@ -159,8 +167,9 @@ class Updater extends EventEmitter {
       })
       this.set({ status: 'installing', release })
       const dataDir = app.getPath('userData')
-      setPendingInstall({ version: release.version, logPath: installLogPath(process.platform, dataDir) })
-      await handOffInstall({ downloadPath, workDir, exePath: app.getPath('exe'), dataDir })
+      const logPath = installLogPath(dataDir)
+      setPendingInstall({ version: release.version, logPath })
+      await handOffInstall({ downloadPath, workDir, exePath: app.getPath('exe'), dataDir, logPath })
     } catch (error) {
       console.error('Installing the update failed', { version: release.version, error })
       setPendingInstall(null)

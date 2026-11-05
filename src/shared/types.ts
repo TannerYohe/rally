@@ -240,3 +240,35 @@ export function prKey(owner: string, repo: string, number: number): string {
 export function headKey(pr: { id: string; headRefOid: string }): string {
   return `${pr.id}:${pr.headRefOid}`
 }
+
+export interface AppInfo {
+  version: string
+  electron: string
+  chrome: string
+  node: string
+  platform: string
+  userDataDir: string
+}
+
+export interface ReleaseAsset {
+  name: string
+  url: string
+  size: number
+}
+
+export interface ReleaseInfo {
+  version: string
+  url: string
+  notes: string
+  publishedAt: string
+  asset: ReleaseAsset | null
+}
+
+export type UpdateState =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'up_to_date'; checkedAt: string }
+  | { status: 'available'; release: ReleaseInfo; installBlocker: string | null }
+  | { status: 'downloading'; release: ReleaseInfo; received: number; total: number }
+  | { status: 'installing'; release: ReleaseInfo }
+  | { status: 'error'; error: string; release: ReleaseInfo | null }

@@ -6,14 +6,16 @@ const EVENTS: ReviewEvent[] = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES']
 interface Props {
   disabled: boolean
   commentCount: number
+  threadCount: number
   onSubmit(event: ReviewEvent): void
 }
 
-export function SubmitBar({ disabled, commentCount, onSubmit }: Props) {
+export function SubmitBar({ disabled, commentCount, threadCount, onSubmit }: Props) {
   const [event, setEvent] = useState<ReviewEvent>('COMMENT')
   const submit = () => {
     const label = REVIEW_EVENT_LABELS[event]
-    if (window.confirm(`Post ${commentCount} comment(s) and submit the review as "${label}"?`)) onSubmit(event)
+    const resolve = threadCount > 0 ? `, then resolve ${threadCount} review thread(s)` : ''
+    if (window.confirm(`Post ${commentCount} comment(s) and submit the review as "${label}"${resolve}?`)) onSubmit(event)
   }
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border border-ink-800 bg-ink-900 p-3">

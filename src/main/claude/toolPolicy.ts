@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
+import { topLevelMutationFields } from './graphqlMutations'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
@@ -125,7 +126,6 @@ const SUBMIT_GRAPHQL_MUTATIONS = [
   'addPullRequestReviewThreadReply',
   'addPullRequestReviewComment',
   'submitPullRequestReview',
-  'resolveReviewThread',
 ]
 
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
@@ -338,12 +338,14 @@ function matchesFlag(arg: string, flag: string): boolean {
 }
 
 function requestMethod(args: string[], methodFlags: string[], bodyFlags: string[]): string {
+  let method: string | null = null
   for (let i = 0; i < args.length; i++) {
     const flag = methodFlags.find((f) => matchesFlag(args[i], f))
     if (!flag) continue
     const inline = args[i].slice(flag.length).replace(/^=/, '')
-    return (inline || args[i + 1] || '').toUpperCase()
+    method = (inline || args[++i] || '').toUpperCase()
   }
+  if (method !== null) return method
   return args.some((a) => bodyFlags.some((flag) => matchesFlag(a, flag))) ? 'POST' : 'GET'
 }
 
@@ -453,15 +455,25 @@ function isInlineGraphql(query: string): boolean {
   return !query.startsWith('@') && query.includes('{')
 }
 
+function mutationFields(queries: string[]): string[] | null {
+  const fields = queries.map(topLevelMutationFields)
+  return fields.some((f) => f === null) ? null : (fields.flat() as string[])
+}
+
 function decideGhApi(args: string[], segment: string, context: PolicyContext): ToolDecision {
   const endpoint = ghApiEndpoint(args)
   if (endpoint === 'graphql') {
     if (args.some((a) => matchesFlag(a, '--input')) || !graphqlQueries(args).every(isInlineGraphql)) {
       return deny("Rally only inspects inline graphql queries. Pass the query text with `-f query='...'`.")
     }
-    if (!/\bmutation\b/.test(segment)) return ALLOW
-    if (context.submitting && SUBMIT_GRAPHQL_MUTATIONS.some((m) => segment.includes(m))) return ALLOW
-    return deny('GitHub mutations are blocked until the user submits the review from Rally.')
+    const fields = mutationFields(graphqlQueries(args))
+    if (fields === null) return deny('Rally could not parse this graphql query, so it is blocked.')
+    if (fields.length === 0) return ALLOW
+    if (!context.submitting) return deny('GitHub mutations are blocked until the user submits the review from Rally.')
+    if (fields.every((field) => SUBMIT_GRAPHQL_MUTATIONS.includes(field))) return ALLOW
+    return deny(
+      `In the submit turn Rally only permits these graphql mutations: ${SUBMIT_GRAPHQL_MUTATIONS.join(', ')}. Rally resolves review threads itself.`,
+    )
   }
 
   const method = requestMethod(args, GH_API_METHOD_FLAGS, GH_API_BODY_FLAGS)

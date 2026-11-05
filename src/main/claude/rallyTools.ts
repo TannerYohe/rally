@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import type { Drafts, SubmittedReview } from '@shared/types'
+import { CONCERN_STATUSES, type Drafts, type SubmittedReview } from '@shared/types'
 
 export interface RallyToolHandlers {
   onDrafts(drafts: Drafts): void
@@ -40,7 +40,25 @@ export function createRallyServer(handlers: RallyToolHandlers) {
       summary_body: z.string().describe('Top-level review body, or empty string for none'),
       comments: z.array(commentSchema),
       prior_concerns: z
-        .array(z.object({ id: z.string(), location: z.string(), gist: z.string(), verdict: z.string() }))
+        .array(
+          z.object({
+            id: z.string(),
+            location: z.string(),
+            gist: z.string(),
+            verdict: z.string().describe('One-line verdict with evidence, e.g. "addressed in abc1234"'),
+            status: z
+              .enum(CONCERN_STATUSES)
+              .describe(
+                'addressed: a later commit fixes it. partly: some of it is still missing. not_addressed: the code still has the problem. ' +
+                  'pushed_back_accept: the author disagreed and their argument holds against the code, so the thread can be resolved. ' +
+                  'pushed_back_hold: the author disagreed and the concern still stands. moot: the code it was about is gone.',
+              ),
+            thread_id: z
+              .string()
+              .nullable()
+              .describe('GraphQL node id of the review thread (PRRT_...) for inline comments; null for review bodies and conversation comments'),
+          }),
+        )
         .default([])
         .describe('Follow-up mode ledger of my earlier comments and their verdicts'),
     },
@@ -50,7 +68,14 @@ export function createRallyServer(handlers: RallyToolHandlers) {
         verdict: args.verdict,
         reportMarkdown: args.report_markdown,
         summaryBody: args.summary_body,
-        priorConcerns: args.prior_concerns,
+        priorConcerns: args.prior_concerns.map((c) => ({
+          id: c.id,
+          location: c.location,
+          gist: c.gist,
+          verdict: c.verdict,
+          status: c.status,
+          threadId: c.thread_id,
+        })),
         comments: args.comments.map((c) => ({
           id: c.id,
           kind: c.kind,

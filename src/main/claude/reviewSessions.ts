@@ -5,14 +5,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
 import {
+  priorConcernThreadIds,
   prKey,
   type PrRef,
   type ReviewEvent,
   type ReviewSession,
+  type ReviewThread,
   type SessionStatus,
   type SubmittedReview,
+  type ThreadResolution,
   type TimelineEntry,
+  type TurnMode,
 } from '@shared/types'
+import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList } from '../prList'
 import { configFile, sessionsDir } from '../store'
 import { claudeExecutable } from './executable'
@@ -21,8 +26,6 @@ import { reviewModelOptions } from './modelOptions'
 import { createRallyServer, RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
 import { decideToolUse } from './toolPolicy'
-
-type TurnMode = 'review' | 'refine' | 'submit'
 
 const FLUSH_INTERVAL_MS = 200
 const ACTIVE_STATUSES = new Set(['running', 'submitting'])
@@ -39,7 +42,21 @@ function removeSessionDir(sessionId: string): void {
   }
 }
 
-function restoreSession(session: ReviewSession): ReviewSession {
+function failedResolution(threadIds: string[], error: string): ThreadResolution {
+  return { at: now(), resolved: [], failed: threadIds.map((threadId) => ({ threadId, error })) }
+}
+
+const INTERRUPTED_RESOLVE_ERROR = 'Rally closed before resolving this thread. Select it and use Resolve selected to retry.'
+
+function restoreThreadState(stored: ReviewSession): ReviewSession {
+  const pending = stored.threadsToResolveOnSubmit ?? []
+  if (!stored.resolvingThreads && pending.length === 0) return stored
+  const session = { ...stored, resolvingThreads: false, threadsToResolveOnSubmit: undefined }
+  return stored.submitted && pending.length > 0 ? { ...session, threadResolution: failedResolution(pending, INTERRUPTED_RESOLVE_ERROR) } : session
+}
+
+function restoreSession(stored: ReviewSession): ReviewSession {
+  const session = restoreThreadState(stored)
   if (!ACTIVE_STATUSES.has(session.status)) return session
   if (session.submitted) return { ...session, status: 'submitted', error: null }
   return { ...session, status: 'error', error: 'Interrupted when Rally closed. Send feedback to resume.' }
@@ -92,10 +109,39 @@ class ReviewSessions extends EventEmitter {
     void this.runTurn(sessionId, message, 'refine')
   }
 
-  async submit(sessionId: string, event: ReviewEvent, notes: string): Promise<void> {
+  async submit(sessionId: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
     if (this.byId(sessionId).submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
+    this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
     void this.runTurn(sessionId, submitPrompt(this.byId(sessionId).pr, event, notes), 'submit')
+  }
+
+  async threads(sessionId: string): Promise<ReviewThread[]> {
+    const session = this.byId(sessionId)
+    return fetchOwnThreads(session.pr, priorConcernThreadIds(session.drafts))
+  }
+
+  async resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution> {
+    const { pr, resolvingThreads, drafts } = this.byId(sessionId)
+    if (resolvingThreads) throw new Error('Rally is already resolving threads for this review')
+    const concernThreadIds = new Set(priorConcernThreadIds(drafts))
+    const outside = threadIds.filter((id) => !concernThreadIds.has(id))
+    this.patch(sessionId, () => ({ resolvingThreads: true }), true)
+    let result: ThreadResolution
+    try {
+      const resolution = await resolveOwnThreads(
+        pr,
+        threadIds.filter((id) => concernThreadIds.has(id)),
+      )
+      const refused = outside.map((threadId) => ({ threadId, error: "Not one of this review's earlier comments" }))
+      result = { at: now(), resolved: resolution.resolved, failed: [...resolution.failed, ...refused] }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('Resolving review threads failed', { pr: pr.url, error })
+      result = failedResolution(threadIds, message)
+    }
+    this.patch(sessionId, () => ({ threadResolution: result, resolvingThreads: false }), true)
+    return result
   }
 
   cancel(sessionId: string): void {
@@ -103,8 +149,9 @@ class ReviewSessions extends EventEmitter {
   }
 
   discard(sessionId: string): void {
-    this.cancel(sessionId)
     const session = this.byId(sessionId)
+    if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
+    this.cancel(sessionId)
     this.sessions.delete(session.prKey)
     sessionsDir.remove(session.prKey)
     removeSessionDir(sessionId)
@@ -171,7 +218,7 @@ class ReviewSessions extends EventEmitter {
       (s) => ({
         status: submitting ? 'submitting' : 'running',
         error: null,
-        timeline: [...s.timeline, { kind: 'user', id: randomUUID(), text: prompt, at: now() }],
+        timeline: [...s.timeline, { kind: 'user', id: randomUUID(), text: prompt, at: now(), turn: mode }],
       }),
       true,
     )
@@ -252,6 +299,7 @@ class ReviewSessions extends EventEmitter {
       )
     } finally {
       this.controllers.delete(sessionId)
+      if (!this.find(sessionId)?.submitted) this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }))
       this.patch(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()
     }
@@ -278,6 +326,18 @@ class ReviewSessions extends EventEmitter {
       return
     }
     this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
+    const threadIds = this.find(sessionId)?.threadsToResolveOnSubmit ?? []
+    const clearPending = () => this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }), true)
+    if (threadIds.length === 0) clearPending()
+    else {
+      this.resolveThreads(sessionId, threadIds)
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error('Resolving review threads after submit failed', { sessionId, error })
+          this.patch(sessionId, () => ({ threadResolution: failedResolution(threadIds, message) }), true)
+        })
+        .finally(clearPending)
+    }
     removeSessionDir(sessionId)
     const pr = this.find(sessionId)?.pr
     if (!pr) return

@@ -141,11 +141,32 @@ export interface DraftComment {
   replyToCommentId: number | null
 }
 
+export const CONCERN_STATUSES = ['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot'] as const
+
+export type ConcernStatus = (typeof CONCERN_STATUSES)[number]
+
+export const RESOLVABLE_CONCERN_STATUSES: ConcernStatus[] = ['addressed', 'moot', 'pushed_back_accept']
+
+export const CONCERN_STATUS_LABELS: Record<ConcernStatus, string> = {
+  addressed: 'Addressed',
+  partly: 'Partly addressed',
+  not_addressed: 'Not addressed',
+  pushed_back_accept: 'Pushed back, accepted',
+  pushed_back_hold: 'Pushed back, holding',
+  moot: 'Moot',
+}
+
 export interface PriorConcern {
   id: string
   location: string
   gist: string
   verdict: string
+  status?: ConcernStatus
+  threadId?: string | null
+}
+
+export function priorConcernThreadIds(drafts: Pick<Drafts, 'priorConcerns'> | null): string[] {
+  return drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
 }
 
 export interface Drafts {
@@ -159,13 +180,28 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
+export type TurnMode = 'review' | 'refine' | 'submit'
+
 export type TimelineEntry =
-  | { kind: 'user'; id: string; text: string; at: string }
+  | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }
   | { kind: 'text'; id: string; text: string; at: string }
   | { kind: 'step'; id: string; label: string; detail: string; done: boolean; at: string }
   | { kind: 'agent'; id: string; label: string; done: boolean; activity: number; background: boolean; at: string }
   | { kind: 'denied'; id: string; label: string; at: string }
   | { kind: 'result'; id: string; ok: boolean; text: string; costUsd: number; durationMs: number; at: string }
+
+export interface ReviewThread {
+  id: string
+  url: string
+  isResolved: boolean
+  isOutdated: boolean
+}
+
+export interface ThreadResolution {
+  at: string
+  resolved: string[]
+  failed: { threadId: string; error: string }[]
+}
 
 export interface SubmittedReview {
   reviewId: number
@@ -190,6 +226,9 @@ export interface ReviewSession {
   timeline: TimelineEntry[]
   drafts: Drafts | null
   submitted: SubmittedReview | null
+  threadResolution?: ThreadResolution | null
+  resolvingThreads?: boolean
+  threadsToResolveOnSubmit?: string[]
   createdAt: string
   updatedAt: string
 }

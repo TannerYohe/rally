@@ -1,3 +1,4 @@
+import { GraphqlResponseError } from '@octokit/graphql'
 import type { MyReview, Pr, ReviewState } from '@shared/types'
 import { github } from './client'
 import { MY_REVIEW_WINDOW } from './phase'
@@ -57,9 +58,7 @@ interface ReviewComment {
   replyTo: { id: string } | null
 }
 
-interface ReviewCommentsResponse {
-  nodes: ({ id: string; comments: { nodes: ReviewComment[] } } | null)[]
-}
+type ReviewCommentsNode = { id: string; comments: { nodes: ReviewComment[] } }
 
 interface RawPr {
   id: string
@@ -92,16 +91,32 @@ export function isReplyOnly(review: Pick<RawReview, 'state' | 'body'>, comments:
   return mightBeReplyOnly(review) && comments.length > 0 && comments.every((c) => c.replyTo)
 }
 
-async function replyOnlyReviewIds(gh: Awaited<ReturnType<typeof github>>, prs: RawPr[]): Promise<Set<string>> {
-  const candidates = prs.flatMap((pr) => pr.reviews.nodes.filter(mightBeReplyOnly))
-  const replyOnly = new Set<string>()
-  for (let i = 0; i < candidates.length; i += MAX_NODE_IDS) {
-    const batch = candidates.slice(i, i + MAX_NODE_IDS)
-    const response = await gh.graphql<ReviewCommentsResponse>(REVIEW_COMMENTS_QUERY, { ids: batch.map((r) => r.id) })
-    response.nodes.forEach((node, index) => {
-      if (node && isReplyOnly(batch[index], node.comments.nodes)) replyOnly.add(node.id)
-    })
+type GithubClient = Awaited<ReturnType<typeof github>>
+
+export async function fetchNodes<T>(gh: GithubClient, query: string, ids: string[], timeoutMs?: number): Promise<(T | null)[]> {
+  const nodes: (T | null)[] = []
+  for (let i = 0; i < ids.length; i += MAX_NODE_IDS) {
+    const request = timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : undefined
+    try {
+      const response = await gh.graphql<{ nodes: (T | null)[] }>(query, { ids: ids.slice(i, i + MAX_NODE_IDS), request })
+      nodes.push(...response.nodes)
+    } catch (error) {
+      const partial = error instanceof GraphqlResponseError ? (error.data as { nodes?: (T | null)[] } | undefined) : undefined
+      if (!partial?.nodes) throw error
+      console.warn('GitHub node lookup returned partial errors', { errors: (error as GraphqlResponseError<unknown>).errors })
+      nodes.push(...partial.nodes)
+    }
   }
+  return nodes
+}
+
+async function replyOnlyReviewIds(gh: GithubClient, prs: RawPr[]): Promise<Set<string>> {
+  const candidates = prs.flatMap((pr) => pr.reviews.nodes.filter(mightBeReplyOnly))
+  const nodes = await fetchNodes<ReviewCommentsNode>(gh, REVIEW_COMMENTS_QUERY, candidates.map((r) => r.id))
+  const replyOnly = new Set<string>()
+  nodes.forEach((node, index) => {
+    if (node && isReplyOnly(candidates[index], node.comments.nodes)) replyOnly.add(node.id)
+  })
   return replyOnly
 }
 

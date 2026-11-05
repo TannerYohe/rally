@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { DraftList } from '../components/DraftList'
+import { PriorConcernList } from '../components/PriorConcernList'
 import { Markdown } from '../components/Markdown'
 import { Avatar } from '../components/Avatar'
 import { DiffStat } from '../components/DiffStat'
@@ -10,9 +11,9 @@ import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { SubmitBar } from '../components/SubmitBar'
 import { feedbackMessage, type DraftEdits } from '../lib/feedback'
-import { age } from '../lib/format'
-import { usePrs, useSession } from '../lib/hooks'
-import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { age, clockTime, fullTime } from '../lib/format'
+import { useFollowActivity, usePrs, useSession, useThreadResolution } from '../lib/hooks'
+import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 export function PrDetail() {
@@ -89,6 +90,7 @@ export function PrDetail() {
           key={session.id}
           session={session}
           needsRereview={pr?.phase === 'awaiting_rereview'}
+          prUpdatedAt={pr?.updatedAt ?? null}
           onDiscarded={() => setSession(null)}
           onStartFollowUp={() => startFollowUp(session)}
         />
@@ -112,32 +114,50 @@ export function PrDetail() {
 interface ReviewPanelProps {
   session: ReviewSession
   needsRereview: boolean
+  prUpdatedAt: string | null
   onDiscarded(): void
   onStartFollowUp(): void
 }
 
-function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: ReviewPanelProps) {
+function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStartFollowUp }: ReviewPanelProps) {
   const [edits, setEdits] = useState<DraftEdits>({})
   const [feedback, setFeedback] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
   const busy = BUSY_STATUSES.includes(session.status)
+  const submitted = isSubmitted(session)
   const { drafts } = session
   const message = feedbackMessage(drafts, edits, feedback)
   const keptComments = drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
+  const lastTurnAt = lastTurnStartedAt(session)
+  const activity = useFollowActivity({ busy, hasDrafts: Boolean(drafts), timeline: session.timeline })
+  const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
+  const threadResolution = useThreadResolution(session)
+  const resolvingThreads = threadResolution.resolving
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<void>): Promise<boolean> => {
     setActionError(null)
     try {
       await action()
       setEdits({})
       setFeedback('')
+      return true
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
+      return false
     }
   }
 
-  const send = () => run(() => window.rally.sendFeedback(session.id, message))
-  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message))
+  const canSend = !busy && Boolean(message)
+  const send = async () => {
+    activity.follow()
+    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) activity.unfollow()
+  }
+  const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (canSend) void send()
+  }
+  const submit = (event: ReviewEvent) => run(() => window.rally.submitReview(session.id, event, message, threadResolution.selectedIds))
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)
   }
@@ -150,14 +170,29 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
           {busy && <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-primary-400" />}
           {SESSION_STATUS_LABELS[session.status]}
         </span>
+        <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>
+          started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
+        </span>
+        {prUpdatedAfterLastTurn && prUpdatedAt && (
+          <span
+            className="text-sm text-amber-300"
+            title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last turn started at ${fullTime(lastTurnAt)}`}
+          >
+            PR updated since last turn
+          </span>
+        )}
         <div className="ml-auto flex gap-2">
           {busy && (
             <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={() => window.rally.cancelReview(session.id)}>
               Cancel
             </button>
           )}
-          {!busy && session.status !== 'submitted' && (
-            <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={startOver}>
+          {!busy && !submitted && (
+            <button
+              className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700 disabled:opacity-40"
+              disabled={resolvingThreads}
+              onClick={startOver}
+            >
               Start over
             </button>
           )}
@@ -177,8 +212,10 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
             </a>
           </span>
           {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
+          {resolvingThreads && <span className="text-ink-300">Resolving threads…</span>}
           <button
             className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`}
+            disabled={resolvingThreads}
             onClick={onStartFollowUp}
           >
             Start follow-up review
@@ -186,7 +223,12 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
         </div>
       )}
 
-      <details className="rounded-xl border border-white/5 bg-ink-900/40 p-4" open={busy || !drafts}>
+      <details
+        ref={activity.ref}
+        className="rounded-xl border border-white/5 bg-ink-900/40 p-4"
+        open={activity.open}
+        onToggle={activity.onToggle}
+      >
         <summary className="cursor-pointer text-sm font-semibold">Activity</summary>
         <div className="mt-3">
           <ProgressTimeline timeline={session.timeline} />
@@ -204,12 +246,21 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
             </div>
           </details>
 
+          {threadResolution.rows.length > 0 && (
+            <PriorConcernList
+              state={threadResolution}
+              resolution={session.threadResolution ?? null}
+              disabled={busy || resolvingThreads}
+              submitted={submitted}
+            />
+          )}
+
           <div className="space-y-2">
             <h3 className="text-sm font-semibold">Draft comments</h3>
             <DraftList
               drafts={drafts}
               edits={edits}
-              disabled={busy || session.status === 'submitted'}
+              disabled={busy || submitted}
               onEdit={(id, edit) => setEdits(({ [id]: _removed, ...rest }) => (edit ? { ...rest, [id]: edit } : rest))}
             />
             {drafts.summaryBody && (
@@ -222,7 +273,7 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
         </>
       )}
 
-      {session.status !== 'submitted' && (
+      {!submitted && (
         <div className="space-y-3">
           <textarea
             className="w-full rounded-md border border-ink-800 bg-ink-900 p-3 text-sm"
@@ -231,17 +282,19 @@ function ReviewPanel({ session, needsRereview, onDiscarded, onStartFollowUp }: R
             value={feedback}
             disabled={busy}
             onChange={(e) => setFeedback(e.target.value)}
+            onKeyDown={sendOnEnter}
           />
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-3">
+            <span className="text-xs text-ink-500">Enter to send · Shift+Enter for a new line</span>
             <button
               className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
-              disabled={busy || !message}
+              disabled={!canSend}
               onClick={send}
             >
               Send to Claude
             </button>
           </div>
-          {drafts && <SubmitBar disabled={busy} commentCount={keptComments} onSubmit={submit} />}
+          {drafts && <SubmitBar disabled={busy || resolvingThreads} commentCount={keptComments} threadCount={threadResolution.selectedIds.length} onSubmit={submit} />}
         </div>
       )}
     </section>

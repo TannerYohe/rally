@@ -44,6 +44,13 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api graphql --input "$WORK/mutation.json"')).toBe(false)
   })
 
+  it('uses the last method flag, as gh and curl do', () => {
+    expect(bash('gh api -X GET -X PUT repos/o/r/pulls/1/merge')).toBe(false)
+    expect(bash('gh api --method GET --method=DELETE repos/o/r/git/refs/heads/x')).toBe(false)
+    expect(bash('gh api -X PUT -X GET repos/o/r/pulls/1')).toBe(true)
+    expect(bash('curl -X GET -X POST https://api.github.com/repos/o/r/issues')).toBe(false)
+  })
+
   it('treats attached and = forms of gh api body flags as writes', () => {
     expect(bash('gh api repos/acme/api/issues/12/comments -fbody=hi')).toBe(false)
     expect(bash('gh api repos/acme/api/issues/12/comments --field=body=x')).toBe(false)
@@ -73,10 +80,38 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
   })
 
   it('allows only review mutations through graphql during submit', () => {
-    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
+    const submit = `gh api graphql -f query='mutation { submitPullRequestReview(input:{pullRequestReviewId:"x", event:COMMENT}) { pullRequestReview { id } } }'`
     const merge = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
-    expect(bash(resolve, SUBMITTING)).toBe(true)
+    expect(bash(submit, SUBMITTING)).toBe(true)
     expect(bash(merge, SUBMITTING)).toBe(false)
+  })
+
+  it('blocks a disallowed mutation sent alongside an allowed one during submit', () => {
+    const withResolve = `gh api graphql -f query='mutation { submitPullRequestReview(input:{pullRequestReviewId:"x", event:COMMENT}) { clientMutationId } resolveReviewThread(input:{threadId:"y"}) { thread { id } } }'`
+    const withMerge = `gh api graphql -f query='mutation { addPullRequestReviewThread(input:{}) { clientMutationId } mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
+    expect(bash(withResolve, SUBMITTING)).toBe(false)
+    expect(bash(withMerge, SUBMITTING)).toBe(false)
+  })
+
+  it('does not count allowed names inside strings or nested selections', () => {
+    const inString = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"submitPullRequestReview"}) { clientMutationId } }'`
+    const aliasedMerge = `gh api graphql -f query='mutation { submitPullRequestReview: mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
+    expect(bash(inString, SUBMITTING)).toBe(false)
+    expect(bash(aliasedMerge, SUBMITTING)).toBe(false)
+  })
+
+  it('allows aliased and parameterized review mutations during submit', () => {
+    const withVariables = `gh api graphql -f query='mutation($id: ID!) { done: submitPullRequestReview(input:{pullRequestReviewId:$id, event:COMMENT}) { pullRequestReview { id } } }' -f id=x`
+    expect(bash(withVariables, SUBMITTING)).toBe(true)
+  })
+
+  it('allows read-only graphql queries that use variables', () => {
+    expect(bash("gh api graphql -f owner=acme -f query='query($owner: String!) { repository(owner: $owner, name: \"api\") { id } }'")).toBe(true)
+  })
+
+  it('leaves resolving review threads to Rally even during submit', () => {
+    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
+    expect(bash(resolve, SUBMITTING)).toBe(false)
   })
 
   it('blocks unrelated writes even during submit', () => {

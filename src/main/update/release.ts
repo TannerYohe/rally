@@ -1,4 +1,8 @@
+import { RALLY_REPO_URL } from '@shared/repo'
 import type { ReleaseAsset, ReleaseInfo } from '@shared/types'
+
+const RELEASE_DOWNLOAD_PREFIX = `${RALLY_REPO_URL}/releases/download/`
+const ASSET_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 interface Version {
   core: number[]
@@ -35,7 +39,7 @@ export function installerAssetSuffix(platform: NodeJS.Platform, arch: string): s
   }
 }
 
-interface GithubReleaseAsset {
+export interface GithubReleaseAsset {
   name: string
   browser_download_url: string
   size: number
@@ -49,15 +53,25 @@ export interface GithubRelease {
   assets: GithubReleaseAsset[]
 }
 
+export function assetProblem(asset: GithubReleaseAsset): string | null {
+  if (!ASSET_NAME_PATTERN.test(asset.name)) return `The release asset name ${JSON.stringify(asset.name)} isn't a plain file name.`
+  if (!asset.browser_download_url.startsWith(RELEASE_DOWNLOAD_PREFIX) || !asset.browser_download_url.endsWith(`/${asset.name}`)) {
+    return `The release asset ${asset.name} doesn't download from ${RELEASE_DOWNLOAD_PREFIX}.`
+  }
+  return null
+}
+
 export function toReleaseInfo(release: GithubRelease, platform: NodeJS.Platform, arch: string): ReleaseInfo {
   const suffix = installerAssetSuffix(platform, arch)
   const asset = suffix ? release.assets.find((a) => a.name.endsWith(suffix)) : undefined
+  const problem = asset ? assetProblem(asset) : null
   return {
     version: release.tag_name.replace(/^v/, ''),
     url: release.html_url,
     notes: release.body ?? '',
     publishedAt: release.published_at,
-    asset: asset ? toAsset(asset) : null,
+    asset: asset && !problem ? toAsset(asset) : null,
+    assetProblem: problem,
   }
 }
 

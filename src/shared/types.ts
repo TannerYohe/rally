@@ -262,6 +262,7 @@ export interface ReleaseInfo {
   notes: string
   publishedAt: string | null
   asset: ReleaseAsset | null
+  assetProblem: string | null
 }
 
 export type UpdateState =
@@ -276,5 +277,5 @@ export type UpdateState =
 
 export interface InstallAttempt {
   version: string
-  logPath: string | null
+  logPath: string
 }

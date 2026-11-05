@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { installerAssetSuffix, isNewerVersion, toReleaseInfo, type GithubRelease } from './release'
+import { assetProblem, installerAssetSuffix, isNewerVersion, toReleaseInfo, type GithubRelease } from './release'
 
 describe('isNewerVersion', () => {
   it('compares major, minor, and patch numerically', () => {
@@ -50,10 +50,10 @@ describe('toReleaseInfo', () => {
     body: '### Features\n\n* about screen',
     published_at: '2026-11-05T12:00:00Z',
     assets: [
-      { name: 'Rally-1.7.0-arm64.dmg', browser_download_url: 'https://example.test/arm64.dmg', size: 3 },
-      { name: 'Rally-1.7.0-arm64.zip', browser_download_url: 'https://example.test/arm64.zip', size: 2 },
-      { name: 'Rally-1.7.0-x64.exe', browser_download_url: 'https://example.test/x64.exe', size: 4 },
-      { name: 'Rally-1.7.0-x64.zip', browser_download_url: 'https://example.test/x64.zip', size: 5 },
+      { name: 'Rally-1.7.0-arm64.dmg', browser_download_url: 'https://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-arm64.dmg', size: 3 },
+      { name: 'Rally-1.7.0-arm64.zip', browser_download_url: 'https://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-arm64.zip', size: 2 },
+      { name: 'Rally-1.7.0-x64.exe', browser_download_url: 'https://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.exe', size: 4 },
+      { name: 'Rally-1.7.0-x64.zip', browser_download_url: 'https://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-x64.zip', size: 5 },
     ],
   }
 
@@ -63,7 +63,8 @@ describe('toReleaseInfo', () => {
       url: release.html_url,
       notes: release.body,
       publishedAt: release.published_at,
-      asset: { name: 'Rally-1.7.0-arm64.zip', url: 'https://example.test/arm64.zip', size: 2 },
+      asset: { name: 'Rally-1.7.0-arm64.zip', url: 'https://github.com/TannerYohe/rally/releases/download/v1.7.0/Rally-1.7.0-arm64.zip', size: 2 },
+      assetProblem: null,
     })
   })
 
@@ -80,5 +81,35 @@ describe('toReleaseInfo', () => {
     const info = toReleaseInfo({ ...release, body: null, published_at: null }, 'darwin', 'arm64')
     expect(info.notes).toBe('')
     expect(info.publishedAt).toBeNull()
+  })
+
+  it('withholds an asset that fails validation and says why', () => {
+    const tampered = { ...release, assets: [{ name: 'Rally-1.7.0-arm64.zip', browser_download_url: 'https://evil.test/Rally-1.7.0-arm64.zip', size: 2 }] }
+    const info = toReleaseInfo(tampered, 'darwin', 'arm64')
+    expect(info.asset).toBeNull()
+    expect(info.assetProblem).toMatch(/doesn't download from/)
+  })
+})
+
+describe('assetProblem', () => {
+  const asset = (name: string, url = `https://github.com/TannerYohe/rally/releases/download/v1.7.0/${name}`) => ({ name, browser_download_url: url, size: 1 })
+
+  it('accepts a release download from the Rally repo', () => {
+    expect(assetProblem(asset('Rally-1.7.0-x64.exe'))).toBeNull()
+  })
+
+  it('rejects a name that is not a bare file name', () => {
+    expect(assetProblem(asset('../Rally.exe'))).toMatch(/plain file name/)
+    expect(assetProblem(asset('dir\\Rally.exe'))).toMatch(/plain file name/)
+    expect(assetProblem(asset('.hidden.exe'))).toMatch(/plain file name/)
+  })
+
+  it('rejects a URL outside the Rally release downloads', () => {
+    expect(assetProblem(asset('Rally.exe', 'https://github.com/someone/else/releases/download/v1/Rally.exe'))).toMatch(/doesn't download from/)
+    expect(assetProblem(asset('Rally.exe', 'http://github.com/TannerYohe/rally/releases/download/v1/Rally.exe'))).toMatch(/doesn't download from/)
+  })
+
+  it('rejects a URL that names a different file', () => {
+    expect(assetProblem(asset('Rally.exe', 'https://github.com/TannerYohe/rally/releases/download/v1.7.0/Other.exe'))).toMatch(/doesn't download from/)
   })
 })

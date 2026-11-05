@@ -143,7 +143,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         {drafts.verdict}
       </span>
     ),
-    threads: threadResolution.rows.length > 0 && <TabCount count={threadResolution.selectedIds.length} />,
+    threads: threadResolution.selectedIds.length > 0 && <TabCount count={threadResolution.selectedIds.length} />,
     drafts: drafts && <TabCount count={keptComments} />,
   }
 

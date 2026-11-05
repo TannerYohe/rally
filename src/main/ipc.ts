@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain } from 'electron'
+import type { DraftChanges } from '@shared/feedback'
 import { IPC } from '@shared/ipc'
 import type { Config, Health, PrRef, ReviewEvent } from '@shared/types'
 import { errorMessage } from '@shared/errors'
@@ -38,8 +39,8 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.getByPr(key))
   ipcMain.handle(IPC.startReview, (_event, pr: PrRef) => reviewSessions.start(pr))
   ipcMain.handle(IPC.sendFeedback, (_event, id: string, message: string) => reviewSessions.feedback(id, message))
-  ipcMain.handle(IPC.submitReview, (_event, id: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]) =>
-    reviewSessions.submit(id, event, notes, resolveThreadIds),
+  ipcMain.handle(IPC.submitReview, (_event, id: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]) =>
+    reviewSessions.submit(id, event, changes, resolveThreadIds),
   )
   ipcMain.handle(IPC.getReviewThreads, (_event, id: string) => reviewSessions.threads(id))
   ipcMain.handle(IPC.resolveThreads, (_event, id: string, threadIds: string[]) => reviewSessions.resolveThreads(id, threadIds))
@@ -56,8 +57,8 @@ export function registerIpc(): void {
   prList.setReviewStatusLookup((key) => reviewSessions.statusOf(key))
   reviewSessions.on('changed', (session) => {
     broadcast(IPC.sessionChanged, session)
-    prList.reapplyReviewStatus()
+    prList.reapplyPhases()
   })
-  reviewSessions.on('removed', () => prList.reapplyReviewStatus())
+  reviewSessions.on('removed', () => prList.reapplyPhases())
   updater.on('changed', (state) => broadcast(IPC.updateChanged, state))
 }

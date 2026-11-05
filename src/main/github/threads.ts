@@ -1,4 +1,4 @@
-import type { PrRef, ReviewThread, ThreadResolution } from '@shared/types'
+import { isSamePr, type PrRef, type ReviewThread, type ThreadResolution } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { github, GITHUB_TIMEOUT_MS } from './client'
 import { fetchNodes } from './queries'
@@ -41,7 +41,7 @@ export function lookupThread(node: RawThread | null, viewer: string, pr: PrRef):
   const first = node.comments?.nodes?.[0]
   const onPr = node.pullRequest
   if (!node.id || !first?.author || !onPr) return { kind: 'not_own' }
-  const samePr = onPr.number === pr.number && sameLogin(onPr.repository.name, pr.repo) && sameLogin(onPr.repository.owner.login, pr.owner)
+  const samePr = isSamePr({ owner: onPr.repository.owner.login, repo: onPr.repository.name, number: onPr.number }, pr)
   if (!samePr || !sameLogin(first.author.login, viewer)) return { kind: 'not_own' }
   return { kind: 'own', thread: { id: node.id, url: first.url, isResolved: Boolean(node.isResolved), isOutdated: Boolean(node.isOutdated) } }
 }

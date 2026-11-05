@@ -13,6 +13,7 @@ export const PHASE_LABELS: Record<Phase, string> = {
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
 
 export interface MyReview {
+  databaseId: number | null
   state: ReviewState
   submittedAt: string | null
   commitOid: string | null
@@ -231,6 +232,10 @@ export interface ReviewSession {
   threadsToResolveOnSubmit?: string[]
   createdAt: string
   updatedAt: string
+}
+
+export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {
+  return a.number === b.number && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
 }
 
 export function prKey(owner: string, repo: string, number: number): string {

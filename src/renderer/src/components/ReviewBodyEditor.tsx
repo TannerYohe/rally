@@ -1,4 +1,4 @@
-import { bodyEdited } from '../lib/feedback'
+import { bodyEdited } from '@shared/feedback'
 import { BodyTextarea } from './BodyTextarea'
 
 interface Props {

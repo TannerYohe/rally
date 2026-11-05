@@ -1,3 +1,4 @@
+import type { DraftChanges } from './feedback'
 import type { AppInfo, Config, Health, InstallAttempt, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution, UpdateState } from './types'
 
 export interface RallyApi {
@@ -10,7 +11,7 @@ export interface RallyApi {
   getSession(prKey: string): Promise<ReviewSession | null>
   startReview(pr: PrRef): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
-  submitReview(sessionId: string, event: ReviewEvent, notes: string, resolveThreadIds: string[]): Promise<void>
+  submitReview(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void>
   getReviewThreads(sessionId: string): Promise<ReviewThread[]>
   resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution>
   cancelReview(sessionId: string): Promise<void>

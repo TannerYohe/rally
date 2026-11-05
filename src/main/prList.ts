@@ -1,15 +1,19 @@
 import { EventEmitter } from 'node:events'
-import { headKey, prKey, type Pr, type PrListState, type SessionStatus } from '@shared/types'
+import { headKey, prKey, type MyReview, type Pr, type PrListState, type SessionStatus } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { buildSearchQueries } from './github/search'
-import { configFile, headsSeenFile, prCacheFile, summariesFile } from './store'
+import { configFile, headsSeenFile, prCacheFile, rallyReviewsFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
 type ReviewStatusLookup = (key: string) => SessionStatus | null
+
+function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
+  return reviews.map((r) => (r.replyOnly && r.databaseId !== null && rallyReviewIds.includes(r.databaseId) ? { ...r, replyOnly: false } : r))
+}
 
 class PrList extends EventEmitter {
   private state: PrListState
@@ -41,11 +45,17 @@ class PrList extends EventEmitter {
 
   setReviewStatusLookup(lookup: ReviewStatusLookup): void {
     this.reviewStatusOf = lookup
-    this.reapplyReviewStatus()
+    this.reapplyPhases()
   }
 
-  reapplyReviewStatus(): void {
-    const prs = this.withReviewStatus(this.state.prs)
+  recordRallyReview(key: string, reviewId: number): void {
+    const recorded = rallyReviewsFile.get()
+    const ids = recorded[key] ?? []
+    if (!ids.includes(reviewId)) rallyReviewsFile.set({ ...recorded, [key]: [...ids, reviewId] })
+  }
+
+  reapplyPhases(): void {
+    const prs = this.withPhases(this.state.prs, false)
     const changed = prs.some((pr, i) => pr.phase !== this.state.prs[i].phase || pr.reviewStatus !== this.state.prs[i].reviewStatus)
     if (changed) this.update({ prs })
   }
@@ -74,7 +84,7 @@ class PrList extends EventEmitter {
   }
 
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
-    return this.withReviewStatus(this.withSummaries(this.withHeadTimes(prs, prune), prune))
+    return this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune), prune)
   }
 
   private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {
@@ -92,11 +102,18 @@ class PrList extends EventEmitter {
     return result
   }
 
-  private withReviewStatus(prs: Omit<Pr, 'phase' | 'reviewStatus'>[]): Pr[] {
+  private withPhases(prs: Omit<Pr, 'phase' | 'reviewStatus'>[], prune: boolean): Pr[] {
+    const rallyReviews = rallyReviewsFile.get()
+    if (prune) {
+      const current = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
+      rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviews).filter(([key]) => current.has(key))))
+    }
     return prs.map((pr) => {
-      const reviewStatus = this.reviewStatusOf(prKey(pr.owner, pr.repo, pr.number))
+      const key = prKey(pr.owner, pr.repo, pr.number)
+      const reviewStatus = this.reviewStatusOf(key)
       const reviewInProgress = reviewStatus !== null && reviewStatus !== 'submitted'
-      return { ...pr, reviewStatus, phase: computePhase({ ...pr, reviewInProgress }) }
+      const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviews[key] ?? [])
+      return { ...pr, reviewStatus, phase: computePhase({ ...pr, myReviews, reviewInProgress }) }
     })
   }
 

@@ -5,7 +5,7 @@ import { computePhase, MY_REVIEW_WINDOW } from './phase'
 const HEAD = 'head-sha'
 
 function review(state: MyReview['state'], commitOid: string, submittedAt: string | null = '2026-10-01T00:00:00Z'): MyReview {
-  return { state, commitOid, submittedAt, replyOnly: false }
+  return { databaseId: null, state, commitOid, submittedAt, replyOnly: false }
 }
 
 function threadReply(commitOid: string, submittedAt: string): MyReview {

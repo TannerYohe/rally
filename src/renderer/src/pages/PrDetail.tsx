@@ -137,6 +137,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
   const threadResolution = useThreadResolution(session)
   const resolvingThreads = threadResolution.resolving
+  const resolution = session.threadResolution ?? null
   const emptyTabs = emptyReviewTabs({ hasDrafts, commentCount: drafts?.comments.length ?? 0, threadCount: threadResolution.rows.length })
   const tabBadges: Record<ReviewTab, ReactNode> = {
     activity: busy && <BusyDot className="h-2 w-2 bg-primary-400" />,
@@ -228,6 +229,14 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           </span>
           {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
           {resolvingThreads && <span className="text-ink-300">Resolving threads…</span>}
+          {!resolvingThreads && resolution && resolution.resolved.length > 0 && (
+            <span className="text-emerald-300">Resolved {resolution.resolved.length} thread(s).</span>
+          )}
+          {!resolvingThreads && resolution && resolution.failed.length > 0 && (
+            <button className="text-rose-300 underline hover:text-rose-200" onClick={() => reviewTab.select('threads')}>
+              Couldn't resolve {resolution.failed.length} thread(s)
+            </button>
+          )}
           <button
             className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`}
             disabled={resolvingThreads}
@@ -268,7 +277,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         ) : (
           <PriorConcernList
             state={threadResolution}
-            resolution={session.threadResolution ?? null}
+            resolution={resolution}
             disabled={busy || resolvingThreads}
             submitted={submitted}
           />

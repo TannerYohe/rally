@@ -137,7 +137,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
   const threadResolution = useThreadResolution(session)
   const resolvingThreads = threadResolution.resolving
-  const emptyTabs = emptyReviewTabs({ hasDrafts, threadCount: threadResolution.rows.length })
+  const emptyTabs = emptyReviewTabs({ hasDrafts, commentCount: drafts?.comments.length ?? 0, threadCount: threadResolution.rows.length })
   const tabBadges: Record<ReviewTab, ReactNode> = {
     activity: busy && <BusyDot className="h-2 w-2 bg-primary-400" />,
     report: drafts && (
@@ -146,7 +146,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       </span>
     ),
     threads: threadResolution.selectedIds.length > 0 && <TabCount count={threadResolution.selectedIds.length} />,
-    drafts: drafts && <TabCount count={keptComments} />,
+    drafts: !emptyTabs.drafts && <TabCount count={keptComments} />,
   }
 
   const run = async (action: () => Promise<void>): Promise<boolean> => {
@@ -276,30 +276,26 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       </ReviewTabPanel>
 
       <ReviewTabPanel id="drafts" tab={reviewTab.tab}>
-        {emptyTabs.drafts ? (
-          <EmptyTab>Claude hasn't drafted any comments yet.</EmptyTab>
-        ) : (
-          drafts && (
-            <div className="space-y-2">
-              {drafts.comments.length === 0 ? (
-                <EmptyTab>No draft comments.</EmptyTab>
-              ) : (
-                <DraftList
-                  drafts={drafts}
-                  edits={edits}
-                  disabled={busy || submitted}
-                  onEdit={(id, edit) => setEdits(({ [id]: _removed, ...rest }) => (edit ? { ...rest, [id]: edit } : rest))}
-                />
-              )}
-              {drafts.summaryBody && (
-                <div className="rounded-md border border-ink-800 bg-ink-900 p-3 text-sm">
-                  <div className="mb-1 text-xs text-ink-500">Review body</div>
-                  {drafts.summaryBody}
-                </div>
-              )}
+        <div className="space-y-2">
+          {emptyTabs.drafts ? (
+            <EmptyTab>{hasDrafts ? 'No draft comments.' : "Claude hasn't drafted any comments yet."}</EmptyTab>
+          ) : (
+            drafts && (
+              <DraftList
+                drafts={drafts}
+                edits={edits}
+                disabled={busy || submitted}
+                onEdit={(id, edit) => setEdits(({ [id]: _removed, ...rest }) => (edit ? { ...rest, [id]: edit } : rest))}
+              />
+            )
+          )}
+          {drafts?.summaryBody && (
+            <div className="rounded-md border border-ink-800 bg-ink-900 p-3 text-sm">
+              <div className="mb-1 text-xs text-ink-500">Review body</div>
+              {drafts.summaryBody}
             </div>
-          )
-        )}
+          )}
+        </div>
       </ReviewTabPanel>
 
       {!submitted && (

@@ -89,10 +89,14 @@ describe('reviewTabReducer', () => {
 
 describe('emptyReviewTabs', () => {
   it('marks Report and Drafts empty until drafts exist, and never Activity', () => {
-    expect(emptyReviewTabs({ hasDrafts: false, threadCount: 1 })).toEqual({ activity: false, report: true, threads: false, drafts: true })
+    expect(emptyReviewTabs({ hasDrafts: false, commentCount: 0, threadCount: 1 })).toEqual({ activity: false, report: true, threads: false, drafts: true })
+  })
+
+  it('marks Drafts empty when the review has no comments', () => {
+    expect(emptyReviewTabs({ hasDrafts: true, commentCount: 0, threadCount: 1 })).toEqual({ activity: false, report: false, threads: false, drafts: true })
   })
 
   it('marks Threads empty when there are no earlier comments', () => {
-    expect(emptyReviewTabs({ hasDrafts: true, threadCount: 0 })).toEqual({ activity: false, report: false, threads: true, drafts: false })
+    expect(emptyReviewTabs({ hasDrafts: true, commentCount: 2, threadCount: 0 })).toEqual({ activity: false, report: false, threads: true, drafts: false })
   })
 })

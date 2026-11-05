@@ -69,9 +69,10 @@ export function reviewTabReducer(state: ReviewTabState, action: ReviewTabAction)
 
 interface EmptyTabInput {
   hasDrafts: boolean
+  commentCount: number
   threadCount: number
 }
 
-export function emptyReviewTabs({ hasDrafts, threadCount }: EmptyTabInput): Record<ReviewTab, boolean> {
-  return { activity: false, report: !hasDrafts, threads: threadCount === 0, drafts: !hasDrafts }
+export function emptyReviewTabs({ hasDrafts, commentCount, threadCount }: EmptyTabInput): Record<ReviewTab, boolean> {
+  return { activity: false, report: !hasDrafts, threads: threadCount === 0, drafts: commentCount === 0 }
 }

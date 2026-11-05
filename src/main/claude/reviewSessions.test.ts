@@ -59,7 +59,9 @@ vi.mock('../store', () => ({
   configFile: { get: () => ({ reviewSkill: 'review-pr' }) },
   sessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
 }))
-vi.mock('../prList', () => ({ prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview } }))
+vi.mock('../prList', () => ({
+  prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
+}))
 vi.mock('../github/threads', () => ({ fetchOwnThreads: vi.fn(), resolveOwnThreads: mocks.resolveOwnThreads }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
@@ -89,6 +91,11 @@ mocks.stored = [
   storedSession(10, { drafts: { ...drafts(['T1']), summaryBody: '  ' } }),
   storedSession(11, { drafts: { ...drafts(['T1']), summaryBody: '', comments: [THREAD_REPLY] } }),
   storedSession(12, { drafts: { ...drafts(['T1']), comments: [THREAD_REPLY] } }),
+  storedSession(13, {
+    status: 'submitting',
+    timeline: [{ kind: 'user', id: 'u1', text: 'SUBMIT as "Comment"', at: '2026-11-05T15:24:23.272Z', turn: 'submit' }],
+  }),
+  storedSession(14),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -218,6 +225,38 @@ describe('submit', () => {
     const { prompt } = mocks.query.mock.calls[0][0] as { prompt: string }
     expect(prompt).toContain('- Remove the review body.\n- Drop #1.\n\nAdd a thank-you body.')
     await vi.waitFor(() => expect(session(12).status).toBe('error'))
+  })
+
+  it('checks for the earlier attempt when a submit was interrupted by Rally closing', async () => {
+    expect(session(13).status).toBe('error')
+    mocks.query.mockImplementation(turn({ submits: false }))
+    await reviewSessions.submit('test-session-13', 'COMMENT', NO_CHANGES, [])
+    const { prompt } = mocks.query.mock.calls[0][0] as { prompt: string }
+    expect(prompt).toContain('An earlier submit attempt in this session started at 2026-11-05T15:24:23.272Z')
+    expect(prompt).toContain('If one of the reviews by me was submitted at or after that time')
+    expect(prompt).toContain('Delete every PENDING review in that list')
+    await vi.waitFor(() => expect(session(13).status).toBe('error'))
+  })
+
+  it('checks for the earlier attempt after a cancelled submit', async () => {
+    let release: () => void = () => {}
+    mocks.query.mockImplementationOnce(async function* () {
+      await new Promise<void>((resolve) => (release = resolve))
+      throw new Error('aborted')
+    })
+    await reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])
+    const firstPrompt = (mocks.query.mock.calls[0][0] as { prompt: string }).prompt
+    expect(firstPrompt).not.toContain('earlier submit attempt')
+    reviewSessions.cancel('test-session-14')
+    release()
+    await vi.waitFor(() => expect(session(14).status).toBe('cancelled'))
+
+    const attemptAt = session(14).timeline.findLast((entry) => entry.kind === 'user')!.at
+    mocks.query.mockImplementation(turn({ submits: false }))
+    await reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])
+    const retryPrompt = (mocks.query.mock.calls[1][0] as { prompt: string }).prompt
+    expect(retryPrompt).toContain(`An earlier submit attempt in this session started at ${attemptAt}`)
+    await vi.waitFor(() => expect(session(14).status).toBe('error'))
   })
 
   it('resolves the selected threads once the review is submitted', async () => {

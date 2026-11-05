@@ -56,6 +56,10 @@ function restoreThreadState(stored: ReviewSession): ReviewSession {
   return stored.submitted && pending.length > 0 ? { ...session, threadResolution: failedResolution(pending, INTERRUPTED_RESOLVE_ERROR) } : session
 }
 
+function lastSubmitAttemptAt(timeline: TimelineEntry[]): string | null {
+  return timeline.findLast((entry) => entry.kind === 'user' && entry.turn === 'submit')?.at ?? null
+}
+
 function restoreSession(stored: ReviewSession): ReviewSession {
   const session = restoreThreadState(stored)
   if (!ACTIVE_STATUSES.has(session.status)) return session
@@ -112,12 +116,13 @@ class ReviewSessions extends EventEmitter {
 
   async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
-    const { drafts, pr, submitted } = this.byId(sessionId)
+    const { drafts, pr, submitted, timeline } = this.byId(sessionId)
     if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
     if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
     const notes = feedbackMessage(drafts, changes.edits, changes.summaryBodyEdit, changes.instructions)
     this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
-    void this.runTurn(sessionId, submitPrompt(pr, event, notes), 'submit')
+    const context = { viewer: prList.get().viewer, earlierAttemptAt: lastSubmitAttemptAt(timeline) }
+    void this.runTurn(sessionId, submitPrompt(pr, event, notes, context), 'submit')
   }
 
   async threads(sessionId: string): Promise<ReviewThread[]> {

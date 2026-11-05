@@ -32,10 +32,7 @@ export function PrDetail() {
   const [session, setSession] = useSession(key)
   const url = pr?.url ?? `https://github.com/${owner}/${repo}/pull/${number}`
 
-  const start = async () => {
-    if (pr?.hidden) await window.rally.unhidePr(pr.id)
-    setSession(await window.rally.startReview({ owner, repo, number, url }))
-  }
+  const start = async () => setSession(await window.rally.startReview({ owner, repo, number, url }))
   const startFollowUp = async (previous: ReviewSession) => {
     await window.rally.discardSession(previous.id)
     await start()

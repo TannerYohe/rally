@@ -63,6 +63,14 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api repos/acme/api/pulls/12/reviews/99/events --method POST -f event=COMMENT', SUBMITTING)).toBe(true)
   })
 
+  it('allows deleting a pending review only during submit', () => {
+    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method DELETE', SUBMITTING)).toBe(true)
+    expect(bash('gh api -X DELETE repos/acme/api/pulls/12/reviews/99', SUBMITTING)).toBe(true)
+    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method DELETE')).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/12/comments/5 --method DELETE', SUBMITTING)).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/12 --method DELETE', SUBMITTING)).toBe(false)
+  })
+
   it('blocks standalone thread replies during submit', () => {
     expect(bash("gh api repos/acme/api/pulls/12/comments/5/replies --method POST -f body='still broken'", SUBMITTING)).toBe(false)
   })

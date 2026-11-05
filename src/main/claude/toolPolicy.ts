@@ -119,6 +119,8 @@ const SUBMIT_REST_PATHS = [
   /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews\/\d+\/events$/,
 ]
 
+const PENDING_REVIEW_PATH = /^\/?repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews\/\d+$/
+
 const SUBMIT_GRAPHQL_MUTATIONS = [
   'addPullRequestReview',
   'addPullRequestReviewThread',
@@ -478,9 +480,10 @@ function decideGhApi(args: string[], segment: string, context: PolicyContext): T
   const method = requestMethod(args, GH_API_METHOD_FLAGS, GH_API_BODY_FLAGS)
   if (method === 'GET') return ALLOW
   if (context.submitting && method === 'POST' && SUBMIT_REST_PATHS.some((p) => p.test(endpoint))) return ALLOW
+  if (context.submitting && method === 'DELETE' && PENDING_REVIEW_PATH.test(endpoint)) return ALLOW
   return deny(
     context.submitting
-      ? `Rally only permits creating and submitting reviews; thread replies go into the pending review through graphql. \`${method} ${endpoint}\` is blocked.`
+      ? `Rally only permits creating, submitting, and deleting pending reviews; thread replies go into the pending review through graphql. \`${method} ${endpoint}\` is blocked.`
       : 'GitHub writes are blocked until the user submits the review from Rally.',
   )
 }

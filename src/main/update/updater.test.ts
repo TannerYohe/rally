@@ -253,6 +253,23 @@ describe('updater', () => {
       }
     })
 
+    it('still starts when removing the previous app fails', async () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+      Object.defineProperty(process, 'platform', { value: 'darwin' })
+      try {
+        mocks.app.getVersion.mockReturnValue('1.7.0')
+        mocks.updateFile.set({ pending: { version: '1.7.0', logPath: '/fake/userData/update.log' }, failed: null })
+        mocks.removePreviousMacApp.mockImplementation(() => {
+          throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+        })
+        const updater = await loadUpdater()
+        expect(() => updater.start()).not.toThrow()
+        expect(mocks.updateFile.get()).toEqual({ pending: null, failed: null })
+      } finally {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    })
+
     it('records a pending install that did not reach the new version as failed', async () => {
       const attempt = { version: '1.7.0', logPath: '/fake/userData/update.log' }
       mocks.updateFile.set({ pending: attempt, failed: null })

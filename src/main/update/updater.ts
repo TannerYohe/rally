@@ -114,7 +114,13 @@ class Updater extends EventEmitter {
     if (!pending) return
     const reachedVersion = pending.version === app.getVersion()
     updateFile.set({ pending: null, failed: reachedVersion ? null : pending })
-    if (reachedVersion && process.platform === 'darwin' && app.isPackaged) removePreviousMacApp(app.getPath('exe'))
+    if (reachedVersion && process.platform === 'darwin' && app.isPackaged) {
+      try {
+        removePreviousMacApp(app.getPath('exe'))
+      } catch (error) {
+        console.error('Removing the previous app failed', { version: pending.version, error })
+      }
+    }
   }
 
   get(): UpdateState {

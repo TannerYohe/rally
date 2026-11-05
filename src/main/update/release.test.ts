@@ -79,6 +79,6 @@ describe('toReleaseInfo', () => {
   it('tolerates a release without notes or a publish time', () => {
     const info = toReleaseInfo({ ...release, body: null, published_at: null }, 'darwin', 'arm64')
     expect(info.notes).toBe('')
-    expect(info.publishedAt).toBe('')
+    expect(info.publishedAt).toBeNull()
   })
 })

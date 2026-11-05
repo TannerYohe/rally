@@ -1,7 +1,5 @@
 import type { ReleaseAsset, ReleaseInfo } from '@shared/types'
 
-export const RELEASE_REPO = 'TannerYohe/rally'
-
 interface Version {
   core: number[]
   prerelease: string | null
@@ -58,7 +56,7 @@ export function toReleaseInfo(release: GithubRelease, platform: NodeJS.Platform,
     version: release.tag_name.replace(/^v/, ''),
     url: release.html_url,
     notes: release.body ?? '',
-    publishedAt: release.published_at ?? '',
+    publishedAt: release.published_at,
     asset: asset ? toAsset(asset) : null,
   }
 }

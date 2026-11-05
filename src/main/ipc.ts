@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { DraftChanges } from '@shared/feedback'
 import { IPC } from '@shared/ipc'
-import type { Config, Health, PrRef, ReviewEvent } from '@shared/types'
+import type { Config, Health, HideMode, PrRef, ReviewEvent } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { reviewSessions } from './claude/reviewSessions'
@@ -36,6 +36,8 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getHealth, () => health())
   ipcMain.handle(IPC.getPrs, () => prList.get())
   ipcMain.handle(IPC.refreshPrs, () => prList.refresh())
+  ipcMain.handle(IPC.hidePr, (_event, id: string, mode: HideMode) => prList.hide(id, mode))
+  ipcMain.handle(IPC.unhidePr, (_event, id: string) => prList.unhide(id))
   ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.getByPr(key))
   ipcMain.handle(IPC.startReview, (_event, pr: PrRef) => reviewSessions.start(pr))
   ipcMain.handle(IPC.sendFeedback, (_event, id: string, message: string) => reviewSessions.feedback(id, message))

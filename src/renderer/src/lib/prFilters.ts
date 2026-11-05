@@ -45,6 +45,26 @@ export function applySecondaryFilters(prs: Pr[], filters: PrFilters): Pr[] {
   )
 }
 
+export interface DashboardView {
+  visible: Pr[]
+  hiddenPrs: Pr[]
+  phaseCounts: Record<Phase, number>
+  allMatchingHidden: boolean
+}
+
+export function dashboardView(prs: Pr[], filters: PrFilters, sort: PrSort): DashboardView {
+  const filtered = applySecondaryFilters(prs, filters)
+  const shown = filtered.filter((pr) => !pr.hidden)
+  const phaseCounts = Object.fromEntries(PHASE_ORDER.map((phase) => [phase, 0])) as Record<Phase, number>
+  for (const pr of shown) phaseCounts[pr.phase]++
+  return {
+    visible: sortPrs(shown.filter((pr) => !filters.hiddenPhases.includes(pr.phase)), sort),
+    hiddenPrs: sortPrs(filtered.filter((pr) => pr.hidden), sort),
+    phaseCounts,
+    allMatchingHidden: shown.length === 0 && filtered.length > 0,
+  }
+}
+
 function compareField(a: Pr, b: Pr, field: SortField): number {
   switch (field) {
     case 'phase':

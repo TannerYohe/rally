@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Pr } from '@shared/types'
-import { applySecondaryFilters, DEFAULT_FILTERS, filterOptions, sortPrs } from './prFilters'
+import { applySecondaryFilters, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, filterOptions, sortPrs } from './prFilters'
 
 function pr(overrides: Partial<Pr>): Pr {
   return {
@@ -31,6 +31,7 @@ function pr(overrides: Partial<Pr>): Pr {
     reviewStatus: null,
     summary: null,
     summaryError: null,
+    hidden: null,
     ...overrides,
   }
 }
@@ -84,5 +85,33 @@ describe('filterOptions', () => {
       { value: 'web', count: 1 },
       { value: 'gone', count: 0 },
     ])
+  })
+})
+
+describe('dashboardView', () => {
+  const hiddenAt = '2026-11-01T00:00:00Z'
+  const withHidden = [
+    ...prs,
+    pr({ id: 'd', phase: 'unreviewed', hidden: { mode: 'indefinite', at: hiddenAt } }),
+    pr({ id: 'e', author: 'bob', phase: 'approved', hidden: { mode: 'snooze', at: hiddenAt } }),
+  ]
+
+  it('moves hidden PRs out of the list and the phase counts', () => {
+    const view = dashboardView(withHidden, DEFAULT_FILTERS, DEFAULT_SORT)
+    expect(ids(view.visible)).toEqual(['b', 'c', 'a'])
+    expect(ids(view.hiddenPrs)).toEqual(['d', 'e'])
+    expect(view.phaseCounts).toEqual({ in_progress: 1, awaiting_rereview: 0, unreviewed: 1, pending_changes: 0, approved: 1 })
+    expect(view.allMatchingHidden).toBe(false)
+  })
+
+  it('applies author filters but not phase toggles to hidden PRs', () => {
+    const view = dashboardView(withHidden, { ...DEFAULT_FILTERS, authors: ['bob'], hiddenPhases: ['approved'] }, DEFAULT_SORT)
+    expect(ids(view.visible)).toEqual(['b'])
+    expect(ids(view.hiddenPrs)).toEqual(['e'])
+  })
+
+  it('reports when every matching PR is hidden', () => {
+    expect(dashboardView(withHidden.slice(3), DEFAULT_FILTERS, DEFAULT_SORT).allMatchingHidden).toBe(true)
+    expect(dashboardView([], DEFAULT_FILTERS, DEFAULT_SORT).allMatchingHidden).toBe(false)
   })
 })

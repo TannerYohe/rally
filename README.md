@@ -65,6 +65,13 @@ Each row shows author, title, repo, age, phase, and a one-line summary. Claude H
 
 The phase chips above the list show a count per phase and toggle that phase on or off. **Filters** narrows the list by author, repo, and draft state, with a count next to each option. **Sort** orders by phase, opened, updated, size (lines changed), author, or repo, ascending or descending; ties fall back to the oldest PR first. Filters and sort are saved between launches.
 
+Hovering a row shows **Snooze** and **Hide**, which are also on the PR page:
+
+- **Snooze** hides the PR until its head commit changes or the author requests your review again. A request that was already open when you snoozed doesn't count; a new one after it clears does. Use it for a PR you know needs more work before your next round.
+- **Hide** keeps the PR hidden until you unhide it. Use it for a PR you'll never review.
+
+Hidden PRs leave the main list and the phase counts and collect in a collapsed **hidden** section at the bottom, which respects the author, repo, and draft filters. Each shows how it was hidden and an **Unhide** button. A PR with a review in progress always shows in the main list and hides again once the review is submitted or discarded. Hides are stored in `hidden-prs.json`. A snooze is dropped when its PR no longer appears in the list; a hide is kept for 30 days after its PR was last listed, so narrowing the repo or author lists doesn't lose it.
+
 ### Phases
 
 In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads. A reply-only review that Rally submitted still counts, since it is a review of the PR. Rally keeps the ids of the reviews it submits in `rally-reviews.json`, so this holds after a follow-up review or **Start over** replaces the session. If your last 20 reviews are all thread replies, the latest reply counts, since an earlier real review is out of view.

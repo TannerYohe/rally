@@ -1,5 +1,18 @@
 import type { DraftChanges } from './feedback'
-import type { AppInfo, Config, Health, InstallAttempt, PrListState, PrRef, ReviewEvent, ReviewSession, ReviewThread, ThreadResolution, UpdateState } from './types'
+import type {
+  AppInfo,
+  Config,
+  Health,
+  HideMode,
+  InstallAttempt,
+  PrListState,
+  PrRef,
+  ReviewEvent,
+  ReviewSession,
+  ReviewThread,
+  ThreadResolution,
+  UpdateState,
+} from './types'
 
 export interface RallyApi {
   getConfig(): Promise<Config>
@@ -8,6 +21,8 @@ export interface RallyApi {
   getPrs(): Promise<PrListState>
   refreshPrs(): Promise<void>
   onPrsChanged(listener: (state: PrListState) => void): () => void
+  hidePr(id: string, mode: HideMode): Promise<void>
+  unhidePr(id: string): Promise<void>
   getSession(prKey: string): Promise<ReviewSession | null>
   startReview(pr: PrRef): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
@@ -33,6 +48,8 @@ export const IPC = {
   getPrs: 'prs:get',
   refreshPrs: 'prs:refresh',
   prsChanged: 'prs:changed',
+  hidePr: 'prs:hide',
+  unhidePr: 'prs:unhide',
   getSession: 'session:get',
   startReview: 'session:start',
   sendFeedback: 'session:feedback',

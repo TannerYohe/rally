@@ -9,6 +9,7 @@ import { Markdown } from '../components/Markdown'
 import { Avatar } from '../components/Avatar'
 import { BusyDot } from '../components/BusyDot'
 import { DiffStat } from '../components/DiffStat'
+import { HideControls } from '../components/HideControls'
 import { PhaseBadge } from '../components/PhaseBadge'
 import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
@@ -65,6 +66,7 @@ export function PrDetail() {
               <a className="text-primary-400 hover:text-primary-300" href={url} target="_blank" rel="noreferrer">
                 Open on GitHub ↗
               </a>
+              {pr && <HideControls pr={pr} className="ml-auto" />}
             </div>
           </div>
         </div>

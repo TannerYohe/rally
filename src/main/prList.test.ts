@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
       prCacheFile: file({ viewer: null, refreshedAt: null, prs: [] }),
       summariesFile: file<Record<string, string>>({}),
       headsSeenFile: file<Record<string, string>>({}),
+      hiddenPrsFile: file<Record<string, unknown>>({}),
       rallyReviewsFile: file<Record<string, number[]>>({}),
     },
     searchPrs: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('./github/search', () => ({ buildSearchQueries: () => ['query'] }))
 vi.mock('./claude/summarize', () => ({ summarizePr: mocks.summarizePr }))
 
 const { prList } = await import('./prList')
+const { newHide, UNLISTED_HIDE_RETENTION_DAYS } = await import('./hiddenPrs')
 
 function githubPr(overrides: Partial<GithubPr> = {}): GithubPr {
   return {
@@ -59,6 +61,7 @@ describe('prList', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.summarizePr.mockReset()
+    mocks.store.hiddenPrsFile.set({})
     mocks.summarizePr.mockResolvedValue('A summary')
     mocks.store.rallyReviewsFile.set({})
     prList.setReviewStatusLookup(() => null)
@@ -77,6 +80,100 @@ describe('prList', () => {
     mocks.fetchPr.mockResolvedValue(githubPr())
     await prList.refreshOne('acme', 'api', 1)
     expect(mocks.store.summariesFile.get()).toEqual({ 'pr1:old': 'stale', 'other:h': 'other' })
+  })
+
+  it('hides a PR until it is unhidden', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    prList.hide('pr1', 'indefinite')
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'indefinite' })
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ headRefOid: 'newer' })] })
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'indefinite' })
+
+    prList.unhide('pr1')
+    expect(prList.get().prs[0].hidden).toBeNull()
+    expect(mocks.store.hiddenPrsFile.get()).toEqual({})
+  })
+
+  it('ends a snooze when the PR gets new commits', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    prList.hide('pr1', 'snooze')
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'snooze' })
+
+    mocks.fetchPr.mockResolvedValue(githubPr({ headRefOid: 'newer' }))
+    await prList.refreshOne('acme', 'api', 1)
+    expect(prList.get().prs[0].hidden).toBeNull()
+    expect(mocks.store.hiddenPrsFile.get()).toEqual({})
+  })
+
+  it('keeps other hides when refreshing one PR', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr(), githubPr({ id: 'pr2', number: 2 })] })
+    await prList.refresh()
+    prList.hide('pr2', 'snooze')
+
+    mocks.fetchPr.mockResolvedValue(githubPr())
+    await prList.refreshOne('acme', 'api', 1)
+    expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr2'])
+  })
+
+  it('drops snoozes for unlisted PRs on a full refresh and keeps recent indefinite hides', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr(), githubPr({ id: 'pr2', number: 2 })] })
+    await prList.refresh()
+    prList.hide('pr1', 'snooze')
+    prList.hide('pr2', 'indefinite')
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [] })
+    await prList.refresh()
+    expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr2'])
+  })
+
+  it('ages out indefinite hides for PRs unlisted past the retention window', async () => {
+    const lastListedAt = new Date(Date.now() - (UNLISTED_HIDE_RETENTION_DAYS + 1) * 24 * 60 * 60_000).toISOString()
+    mocks.store.hiddenPrsFile.set({ gone: newHide(githubPr(), 'indefinite', lastListedAt) })
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [] })
+    await prList.refresh()
+    expect(mocks.store.hiddenPrsFile.get()).toEqual({})
+  })
+
+  it('ends a snooze on a re-request after the request it was taken under cleared', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ reviewRequestedFromMe: true })] })
+    await prList.refresh()
+    prList.hide('pr1', 'snooze')
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'snooze' })
+
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ reviewRequestedFromMe: true })] })
+    await prList.refresh()
+    expect(prList.get().prs[0].hidden).toBeNull()
+  })
+
+  it('does not write hides when review status changes', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    prList.hide('pr1', 'indefinite')
+    const write = vi.spyOn(mocks.store.hiddenPrsFile, 'set')
+
+    prList.reapplyPhases()
+    expect(write).not.toHaveBeenCalled()
+    write.mockRestore()
+  })
+
+  it('shows a hidden PR while its review is in progress', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
+    await prList.refresh()
+    prList.hide('pr1', 'indefinite')
+
+    prList.setReviewStatusLookup(() => 'awaiting_feedback')
+    expect(prList.get().prs[0].hidden).toBeNull()
+
+    prList.setReviewStatusLookup(() => null)
+    expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'indefinite' })
   })
 
   it('shows a summary error until a later summary succeeds', async () => {

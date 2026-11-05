@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
-import { headKey, prKey, type MyReview, type Pr, type PrListState, type SessionStatus } from '@shared/types'
+import { headKey, prKey, type HideMode, type MyReview, type Pr, type PrListState, type SessionStatus, type StoredHide } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { summarizePr } from './claude/summarize'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { buildSearchQueries } from './github/search'
-import { configFile, headsSeenFile, prCacheFile, rallyReviewsFile, summariesFile } from './store'
+import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
+import { configFile, headsSeenFile, hiddenPrsFile, prCacheFile, rallyReviewsFile, summariesFile } from './store'
 
 const SUMMARY_CONCURRENCY = 3
 
@@ -25,7 +26,7 @@ class PrList extends EventEmitter {
   constructor() {
     super()
     const cache = prCacheFile.get()
-    this.state = { prs: cache.prs, viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
+    this.state = { prs: this.withHidden(cache.prs), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
   }
 
   get(): PrListState {
@@ -55,8 +56,13 @@ class PrList extends EventEmitter {
   }
 
   reapplyPhases(): void {
-    const prs = this.withPhases(this.state.prs, false)
-    const changed = prs.some((pr, i) => pr.phase !== this.state.prs[i].phase || pr.reviewStatus !== this.state.prs[i].reviewStatus)
+    const prs = this.withHidden(this.withPhases(this.state.prs, false))
+    const changed = prs.some(
+      (pr, i) =>
+        pr.phase !== this.state.prs[i].phase ||
+        pr.reviewStatus !== this.state.prs[i].reviewStatus ||
+        pr.hidden?.mode !== this.state.prs[i].hidden?.mode,
+    )
     if (changed) this.update({ prs })
   }
 
@@ -83,8 +89,49 @@ class PrList extends EventEmitter {
     prCacheFile.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
+  hide(id: string, mode: HideMode): void {
+    const pr = this.state.prs.find((p) => p.id === id)
+    if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
+    hiddenPrsFile.set({ ...hiddenPrsFile.get(), [id]: newHide(pr, mode, new Date().toISOString()) })
+    this.reapplyHidden()
+  }
+
+  unhide(id: string): void {
+    const { [id]: _removed, ...rest } = hiddenPrsFile.get()
+    hiddenPrsFile.set(rest)
+    this.reapplyHidden()
+  }
+
+  private reapplyHidden(): void {
+    this.update({ prs: this.withHidden(this.state.prs) })
+  }
+
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
-    return this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune), prune)
+    this.syncHides(prs, prune)
+    return this.withHidden(this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune), prune))
+  }
+
+  private syncHides(prs: GithubPr[], prune: boolean): void {
+    const now = new Date().toISOString()
+    const stored = hiddenPrsFile.get()
+    const listed = new Set(prs.map((pr) => pr.id))
+    const kept: Record<string, StoredHide> = Object.fromEntries(
+      Object.entries(stored).filter(([id, hide]) => !listed.has(id) && (!prune || keepsUnlistedHide(hide, now))),
+    )
+    for (const pr of prs) {
+      const hide = stored[pr.id] && refreshHide(stored[pr.id], pr, now)
+      if (hide) kept[pr.id] = hide
+    }
+    if (JSON.stringify(kept) !== JSON.stringify(stored)) hiddenPrsFile.set(kept)
+  }
+
+  private withHidden(prs: Omit<Pr, 'hidden'>[]): Pr[] {
+    const stored = hiddenPrsFile.get()
+    return prs.map((pr) => {
+      const hide = stored[pr.id]
+      const shown = !hide || !isHideActive(hide, pr) || pr.phase === 'in_progress'
+      return { ...pr, hidden: shown ? null : { mode: hide.mode, at: hide.at } }
+    })
   }
 
   private withHeadTimes(prs: GithubPr[], prune: boolean): (GithubPr & { headKnownSince: string })[] {
@@ -102,7 +149,7 @@ class PrList extends EventEmitter {
     return result
   }
 
-  private withPhases(prs: Omit<Pr, 'phase' | 'reviewStatus'>[], prune: boolean): Pr[] {
+  private withPhases(prs: Omit<Pr, 'phase' | 'reviewStatus' | 'hidden'>[], prune: boolean): Omit<Pr, 'hidden'>[] {
     const rallyReviews = rallyReviewsFile.get()
     if (prune) {
       const current = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))

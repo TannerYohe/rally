@@ -89,12 +89,12 @@ function EmptyState({ children }: { children: ReactNode }) {
 interface PrListProps {
   prs: Pr[]
   visible: Pr[]
-  allHidden: boolean
+  allMatchingHidden: boolean
   refreshing: boolean
   onOpen(pr: Pr): void
 }
 
-function PrList({ prs, visible, allHidden, refreshing, onOpen }: PrListProps) {
+function PrList({ prs, visible, allMatchingHidden, refreshing, onOpen }: PrListProps) {
   if (prs.length === 0 && !refreshing) {
     return (
       <EmptyState>
@@ -106,7 +106,7 @@ function PrList({ prs, visible, allHidden, refreshing, onOpen }: PrListProps) {
       </EmptyState>
     )
   }
-  if (visible.length === 0) return <EmptyState>{allHidden ? 'All matching PRs are hidden.' : 'No PRs match these filters.'}</EmptyState>
+  if (visible.length === 0) return <EmptyState>{allMatchingHidden ? 'All matching PRs are hidden.' : 'No PRs match these filters.'}</EmptyState>
   return <PrCards prs={visible} onOpen={onOpen} />
 }
 
@@ -148,7 +148,7 @@ export function Dashboard() {
   const [showFilters, setShowFilters] = useState(false)
   const navigate = useNavigate()
 
-  const { visible, hidden, phaseCounts, allHidden } = useMemo(() => dashboardView(prs, filters, sort), [prs, filters, sort])
+  const { visible, hiddenPrs, phaseCounts, allMatchingHidden } = useMemo(() => dashboardView(prs, filters, sort), [prs, filters, sort])
   const activeCount = activeFilterCount(filters)
   const openPr = (pr: Pr) => navigate(`/pr/${pr.owner}/${pr.repo}/${pr.number}`)
 
@@ -220,8 +220,8 @@ export function Dashboard() {
 
       {error && <div className="rounded-lg bg-rose-950/80 px-4 py-2 text-sm text-rose-200 ring-1 ring-rose-500/30">GitHub refresh failed: {error}</div>}
 
-      <PrList prs={prs} visible={visible} allHidden={allHidden} refreshing={refreshing} onOpen={openPr} />
-      <HiddenPrs prs={hidden} onOpen={openPr} />
+      <PrList prs={prs} visible={visible} allMatchingHidden={allMatchingHidden} refreshing={refreshing} onOpen={openPr} />
+      <HiddenPrs prs={hiddenPrs} onOpen={openPr} />
     </div>
   )
 }

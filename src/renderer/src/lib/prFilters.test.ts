@@ -99,19 +99,19 @@ describe('dashboardView', () => {
   it('moves hidden PRs out of the list and the phase counts', () => {
     const view = dashboardView(withHidden, DEFAULT_FILTERS, DEFAULT_SORT)
     expect(ids(view.visible)).toEqual(['b', 'c', 'a'])
-    expect(ids(view.hidden)).toEqual(['d', 'e'])
+    expect(ids(view.hiddenPrs)).toEqual(['d', 'e'])
     expect(view.phaseCounts).toEqual({ in_progress: 1, awaiting_rereview: 0, unreviewed: 1, pending_changes: 0, approved: 1 })
-    expect(view.allHidden).toBe(false)
+    expect(view.allMatchingHidden).toBe(false)
   })
 
   it('applies author filters but not phase toggles to hidden PRs', () => {
     const view = dashboardView(withHidden, { ...DEFAULT_FILTERS, authors: ['bob'], hiddenPhases: ['approved'] }, DEFAULT_SORT)
     expect(ids(view.visible)).toEqual(['b'])
-    expect(ids(view.hidden)).toEqual(['e'])
+    expect(ids(view.hiddenPrs)).toEqual(['e'])
   })
 
   it('reports when every matching PR is hidden', () => {
-    expect(dashboardView(withHidden.slice(3), DEFAULT_FILTERS, DEFAULT_SORT).allHidden).toBe(true)
-    expect(dashboardView([], DEFAULT_FILTERS, DEFAULT_SORT).allHidden).toBe(false)
+    expect(dashboardView(withHidden.slice(3), DEFAULT_FILTERS, DEFAULT_SORT).allMatchingHidden).toBe(true)
+    expect(dashboardView([], DEFAULT_FILTERS, DEFAULT_SORT).allMatchingHidden).toBe(false)
   })
 })

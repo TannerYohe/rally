@@ -47,9 +47,9 @@ export function applySecondaryFilters(prs: Pr[], filters: PrFilters): Pr[] {
 
 export interface DashboardView {
   visible: Pr[]
-  hidden: Pr[]
+  hiddenPrs: Pr[]
   phaseCounts: Record<Phase, number>
-  allHidden: boolean
+  allMatchingHidden: boolean
 }
 
 export function dashboardView(prs: Pr[], filters: PrFilters, sort: PrSort): DashboardView {
@@ -59,9 +59,9 @@ export function dashboardView(prs: Pr[], filters: PrFilters, sort: PrSort): Dash
   for (const pr of shown) phaseCounts[pr.phase]++
   return {
     visible: sortPrs(shown.filter((pr) => !filters.hiddenPhases.includes(pr.phase)), sort),
-    hidden: sortPrs(filtered.filter((pr) => pr.hidden), sort),
+    hiddenPrs: sortPrs(filtered.filter((pr) => pr.hidden), sort),
     phaseCounts,
-    allHidden: shown.length === 0 && filtered.length > 0,
+    allMatchingHidden: shown.length === 0 && filtered.length > 0,
   }
 }
 

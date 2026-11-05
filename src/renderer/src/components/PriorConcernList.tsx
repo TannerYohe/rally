@@ -34,7 +34,6 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
   const concernId = (threadId: string) => rows.find((row) => row.concern.threadId === threadId)?.concern.id ?? threadId
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold">Earlier comments</h3>
       <ul className="space-y-2">
         {rows.map((row) => (
           <li key={row.concern.id} className="flex gap-3 rounded-xl border border-white/5 bg-ink-900/60 p-3 text-sm">

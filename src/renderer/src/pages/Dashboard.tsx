@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { PHASE_LABELS, PHASE_ORDER, type Phase, type Pr, type SessionStatus } from '@shared/types'
 import { Avatar } from '../components/Avatar'
+import { BusyDot } from '../components/BusyDot'
 import { DiffStat } from '../components/DiffStat'
 import { FilterPanel } from '../components/FilterPanel'
 import { PhaseBadge } from '../components/PhaseBadge'
@@ -26,7 +27,7 @@ function ReviewStatusNote({ status }: { status: SessionStatus }) {
   const busy = BUSY_STATUSES.includes(status)
   return (
     <span className={`inline-flex items-center gap-1.5 text-[11px] ${status === 'error' ? 'text-rose-300' : 'text-highlight-300/80'}`}>
-      {busy && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-highlight-400" />}
+      {busy && <BusyDot className="h-1.5 w-1.5 bg-highlight-400" />}
       {SESSION_STATUS_LABELS[status]}
     </span>
   )

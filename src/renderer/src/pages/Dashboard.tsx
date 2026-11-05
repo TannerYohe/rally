@@ -11,15 +11,7 @@ import { RepoChip } from '../components/RepoChip'
 import { SortControl } from '../components/SortControl'
 import { age } from '../lib/format'
 import { usePersistentState, usePrs } from '../lib/hooks'
-import {
-  activeFilterCount,
-  applySecondaryFilters,
-  DEFAULT_FILTERS,
-  DEFAULT_SORT,
-  sortPrs,
-  type PrFilters,
-  type PrSort,
-} from '../lib/prFilters'
+import { activeFilterCount, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, type PrFilters, type PrSort } from '../lib/prFilters'
 import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { settingsPath } from '../lib/settingsSections'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
@@ -40,7 +32,7 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
     <li className={`group relative ${pr.hidden ? 'opacity-60 hover:opacity-100' : ''}`}>
       <button
         onClick={onOpen}
-        className="relative flex w-full gap-4 overflow-hidden rounded-xl border border-white/5 bg-ink-900/60 p-4 pl-5 text-left transition hover:border-white/10 hover:bg-ink-900"
+        className={`relative flex w-full gap-4 overflow-hidden rounded-xl border border-white/5 bg-ink-900/60 p-4 pl-5 text-left transition hover:border-white/10 hover:bg-ink-900 ${pr.hidden ? 'pb-11' : ''}`}
       >
         <span className={`absolute inset-y-0 left-0 w-1 ${theme.accent}`} />
         <Avatar login={pr.author} url={pr.authorAvatarUrl} ringClass={theme.ring} />
@@ -83,7 +75,7 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
       </button>
       <HideControls
         pr={pr}
-        className={`absolute bottom-3 right-3 rounded-lg bg-ink-900 p-1 transition ${pr.hidden ? '' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'}`}
+        className={`absolute bottom-3 right-3 p-1 ${pr.hidden ? '' : 'rounded-lg bg-ink-900 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100'}`}
       />
     </li>
   )
@@ -155,18 +147,7 @@ export function Dashboard() {
   const [showFilters, setShowFilters] = useState(false)
   const navigate = useNavigate()
 
-  const filtered = useMemo(() => applySecondaryFilters(prs, filters), [prs, filters])
-  const shown = useMemo(() => filtered.filter((pr) => !pr.hidden), [filtered])
-  const hidden = useMemo(() => sortPrs(filtered.filter((pr) => pr.hidden), sort), [filtered, sort])
-  const counts = useMemo(() => {
-    const result = Object.fromEntries(PHASE_ORDER.map((p) => [p, 0])) as Record<Phase, number>
-    for (const pr of shown) result[pr.phase]++
-    return result
-  }, [shown])
-  const visible = useMemo(
-    () => sortPrs(shown.filter((pr) => !filters.hiddenPhases.includes(pr.phase)), sort),
-    [shown, filters.hiddenPhases, sort],
-  )
+  const { visible, hidden, phaseCounts, allHidden } = useMemo(() => dashboardView(prs, filters, sort), [prs, filters, sort])
   const activeCount = activeFilterCount(filters)
   const openPr = (pr: Pr) => navigate(`/pr/${pr.owner}/${pr.repo}/${pr.number}`)
 
@@ -210,7 +191,7 @@ export function Dashboard() {
             >
               <span className={`h-2 w-2 rounded-full ${active ? theme.dot : 'bg-ink-700'}`} />
               {PHASE_LABELS[phase]}
-              <span className="font-semibold">{counts[phase]}</span>
+              <span className="font-semibold">{phaseCounts[phase]}</span>
             </button>
           )
         })}
@@ -236,7 +217,7 @@ export function Dashboard() {
 
       {error && <div className="rounded-lg bg-rose-950/80 px-4 py-2 text-sm text-rose-200 ring-1 ring-rose-500/30">GitHub refresh failed: {error}</div>}
 
-      <PrList prs={prs} visible={visible} allHidden={shown.length === 0 && hidden.length > 0} refreshing={refreshing} onOpen={openPr} />
+      <PrList prs={prs} visible={visible} allHidden={allHidden} refreshing={refreshing} onOpen={openPr} />
       <HiddenPrs prs={hidden} onOpen={openPr} />
     </div>
   )

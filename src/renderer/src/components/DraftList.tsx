@@ -18,7 +18,7 @@ const SEVERITY_ACCENTS: Record<Severity, string> = {
 
 function location(comment: DraftComment): string {
   if (comment.kind === 'reply') return `Reply to comment ${comment.replyToCommentId ?? '?'}`
-  if (!comment.path) return 'Review body'
+  if (!comment.path) return 'General comment'
   const lines = comment.startLine ? `${comment.startLine}-${comment.line}` : `${comment.line ?? ''}`
   return `${comment.path}${lines ? `:${lines}` : ''}`
 }

@@ -3,6 +3,7 @@ import { Link, useBlocker, useParams } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
   type AppInfo,
+  type InstallAttempt,
   EFFORT_LABELS,
   MODEL_LABELS,
   type Config,
@@ -12,17 +13,19 @@ import {
   type ReleaseInfo,
   type UpdateState,
 } from '@shared/types'
+import { errorMessage } from '@shared/errors'
+import { RALLY_REPO_URL } from '@shared/repo'
 import logo from '../../../../resources/icon.svg'
 import { Avatar } from '../components/Avatar'
 import { Switch } from '../components/Switch'
 import { TagInput } from '../components/TagInput'
 import { Markdown } from '../components/Markdown'
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog'
-import { clockTime, megabytes } from '../lib/format'
-import { useUpdateState } from '../lib/hooks'
+import { calendarDate, clockTime, megabytes } from '../lib/format'
+import { useFailedInstall, useUpdateState } from '../lib/hooks'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
 import { SKIN_IDS, SKINS, parseSkinId, useSkinPreview } from '../lib/skins'
-import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
   'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
@@ -31,8 +34,6 @@ const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> =
   accounts: { label: 'Accounts', icon: <PersonIcon /> },
   about: { label: 'About', icon: <InfoIcon /> },
 }
-
-const REPO_URL = 'https://github.com/TannerYohe/rally'
 
 export function Settings() {
   const section = sectionFromParam(useParams().section)
@@ -66,7 +67,7 @@ export function Settings() {
     try {
       await window.rally.saveConfig(config)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       setSaveError(message)
       return message
     }
@@ -318,6 +319,7 @@ function AccountsSection({ health }: SectionProps) {
 function AboutSection() {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const update = useUpdateState()
+  const [failedInstall, dismissFailedInstall] = useFailedInstall()
 
   useEffect(() => {
     window.rally.getAppInfo().then(setInfo)
@@ -335,6 +337,7 @@ function AboutSection() {
         </div>
       </div>
       <Card title="Updates" description="Rally checks GitHub releases when you ask.">
+        {failedInstall && <FailedInstallRow attempt={failedInstall} onDismiss={dismissFailedInstall} />}
         <UpdateRow state={update} currentVersion={info.version} />
         {update.status === 'available' && <ReleaseNotes release={update.release} />}
       </Card>
@@ -346,21 +349,19 @@ function AboutSection() {
         <InfoRow label="Data folder" value={info.userDataDir} />
       </Card>
       <p className="flex gap-4 px-1 text-xs">
-        <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
+        <a href={RALLY_REPO_URL} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
           GitHub
         </a>
-        <a href={`${REPO_URL}/releases`} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
+        <a href={`${RALLY_REPO_URL}/releases`} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
           Releases
         </a>
-        <a href={`${REPO_URL}/blob/main/LICENSE.md`} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
+        <a href={`${RALLY_REPO_URL}/blob/main/LICENSE.md`} target="_blank" rel="noreferrer" className="text-secondary-300 hover:underline">
           License
         </a>
       </p>
     </>
   )
 }
-
-const SECONDARY_BUTTON_CLASS = 'rounded-md bg-ink-800 px-3 py-1.5 text-sm hover:bg-ink-700 disabled:opacity-40'
 
 function UpdateRow({ state, currentVersion }: { state: UpdateState; currentVersion: string }) {
   const check = () => window.rally.checkForUpdates()
@@ -397,9 +398,15 @@ function UpdateRow({ state, currentVersion }: { state: UpdateState; currentVersi
             `You have ${currentVersion}. Rally quits and reopens to install it. A running Claude turn stops; send feedback to resume it.`
           }
         >
-          <button className={`px-3 py-1.5 text-sm ${PRIMARY_BUTTON_CLASS}`} disabled={state.installBlocker !== null} onClick={install}>
-            Download and install
-          </button>
+          {state.installBlocker ? (
+            <button className={SECONDARY_BUTTON_CLASS} onClick={check}>
+              Check again
+            </button>
+          ) : (
+            <button className={`px-3 py-1.5 text-sm ${PRIMARY_BUTTON_CLASS}`} onClick={install}>
+              Download and install
+            </button>
+          )}
         </Row>
       )
     case 'downloading':
@@ -414,15 +421,40 @@ function UpdateRow({ state, currentVersion }: { state: UpdateState; currentVersi
           <StatusText tone="pending">Installing…</StatusText>
         </Row>
       )
-    case 'error':
+    case 'check_failed':
       return (
-        <Row label={state.release ? `Couldn't install Rally ${state.release.version}` : "Couldn't check for updates"} description={state.error}>
-          <button className={SECONDARY_BUTTON_CLASS} onClick={state.release ? install : check}>
+        <Row label="Couldn't check for updates" description={state.error}>
+          <button className={SECONDARY_BUTTON_CLASS} onClick={check}>
+            Try again
+          </button>
+        </Row>
+      )
+    case 'install_failed':
+      return (
+        <Row label={`Couldn't install Rally ${state.release.version}`} description={state.error}>
+          <button className={SECONDARY_BUTTON_CLASS} onClick={install}>
             Try again
           </button>
         </Row>
       )
   }
+}
+
+function FailedInstallRow({ attempt, onDismiss }: { attempt: InstallAttempt; onDismiss(): void }) {
+  const description = attempt.logPath
+    ? `Rally reopened on the previous version. The install log is at ${attempt.logPath}.`
+    : "The installer didn't finish. Try again, or download the installer from the release page."
+  return (
+    <div className="flex items-center gap-6 bg-amber-950/30 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm text-amber-200">Rally {attempt.version} didn't install</div>
+        <div className="select-text break-all text-xs text-amber-300/70">{description}</div>
+      </div>
+      <button className={SECONDARY_BUTTON_CLASS} onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  )
 }
 
 function ProgressBar({ fraction }: { fraction: number }) {
@@ -441,7 +473,9 @@ function ReleaseNotes({ release }: { release: ReleaseInfo }) {
   return (
     <div className="space-y-2 px-4 py-3">
       <div className="flex items-baseline justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-ink-500">What's new</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-ink-500">
+          What's new{release.publishedAt && <span className="normal-case tracking-normal"> · {calendarDate(release.publishedAt)}</span>}
+        </span>
         <a href={release.url} target="_blank" rel="noreferrer" className="text-xs text-secondary-300 hover:underline">
           View release on GitHub
         </a>

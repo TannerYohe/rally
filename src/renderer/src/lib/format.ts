@@ -33,6 +33,10 @@ export function clockTime(iso: string, now = new Date()): string {
   return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
 }
 
+export function calendarDate(iso: string): string {
+  return new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 export function fullTime(iso: string): string {
   return new Date(iso).toLocaleString()
 }

@@ -17,7 +17,9 @@ export function reviewPrompt(pr: PrRef, skill: string): string {
 }
 
 const REVIEW_THREADS_QUERY =
-  'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id comments(first: 100) { nodes { databaseId } } } } } } }'
+  'query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { id comments(first: 100) { nodes { databaseId } } } } } } }'
+
+const REVIEW_THREADS_JQ = '.data.repository.pullRequest.reviewThreads.nodes[] | {id, commentIds: [.comments.nodes[].databaseId]}'
 
 const THREAD_REPLY_MUTATION =
   'mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }'
@@ -29,8 +31,8 @@ export function submitPrompt(pr: PrRef, event: ReviewEvent, notes: string): stri
 The drafts as last published are final.${edits}
 Every inline comment and thread reply goes into one pending review, which is then submitted. Do not use the comments/<comment_id>/replies endpoint: it posts each reply as a separate review.
 1. Write the inline comments and summary body to a JSON file in the working directory with "commit_id" (the PR's current head SHA), "body", and "comments" (each with "path", "line", "side", and "start_line" for ranges; an empty array when there are none). Omit "event" so the review stays pending. Create it with: gh api ${pullPath}/reviews --method POST --input <file>. Keep the response's "id" and "node_id". If GitHub rejects a comment for an out-of-diff line, move it into the body and retry.
-2. If there are thread replies, list the PR's review threads with: gh api graphql -f owner=${pr.owner} -f repo=${pr.repo} -F number=${pr.number} -f query='${REVIEW_THREADS_QUERY}'
-Each reply belongs to the thread whose comments include its reply-to comment id.
+2. If there are thread replies, list every review thread on the PR with: gh api graphql --paginate -f owner=${pr.owner} -f repo=${pr.repo} -F number=${pr.number} -f query='${REVIEW_THREADS_QUERY}' --jq '${REVIEW_THREADS_JQ}'
+Each reply belongs to the thread whose commentIds include its reply-to comment id.
 3. Add each reply to the pending review with: gh api graphql -f review=<node_id> -f thread=<thread id> -f body='<reply>' -f query='${THREAD_REPLY_MUTATION}'
 4. Submit the pending review: gh api ${pullPath}/reviews/<id>/events --method POST -f event=${event}
 5. Call ${REVIEW_SUBMITTED_TOOL} with the review id, its html_url, and the event.

@@ -18,7 +18,8 @@ function graphqlFlagNames(command: string): string[] {
 
 function declaredVariables(command: string): string[] {
   const signature = command.match(/query='(?:query|mutation)\(([^)]*)\)/)?.[1] ?? ''
-  return [...signature.matchAll(/\$(\w+):/g)].map((m) => m[1])
+  const names = [...signature.matchAll(/\$(\w+):/g)].map((m) => m[1])
+  return command.includes('--paginate') ? names.filter((name) => name !== 'endCursor') : names
 }
 
 describe('reviewPrompt', () => {
@@ -39,7 +40,7 @@ describe('submitPrompt', () => {
   it('spells out every GitHub call without relying on the review skill', () => {
     const prompt = submitPrompt(pr, 'APPROVE', '')
     expect(prompt).toContain('gh api repos/acme/api/pulls/12/reviews --method POST --input')
-    expect(prompt).toContain('gh api graphql -f owner=acme -f repo=api -F number=12 -f query=')
+    expect(prompt).toContain('gh api graphql --paginate -f owner=acme -f repo=api -F number=12 -f query=')
     expect(prompt).toContain('addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review')
     expect(prompt).toContain('gh api repos/acme/api/pulls/12/reviews/<id>/events --method POST -f event=APPROVE')
     expect(prompt).not.toMatch(/step \d|F5/)
@@ -59,6 +60,12 @@ describe('submitPrompt', () => {
       ['Submitting review', { allow: true }],
       ['Deleting pending review', { allow: true }],
     ])
+  })
+
+  it('pages through every review thread', () => {
+    const [threads] = submitCommands().filter((command) => command.includes('reviewThreads'))
+    expect(threads).toContain('gh api graphql --paginate ')
+    expect(threads).toContain('reviewThreads(first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor }')
   })
 
   it('passes exactly the variables each graphql command declares', () => {

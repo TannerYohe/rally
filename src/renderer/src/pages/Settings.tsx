@@ -441,9 +441,7 @@ function UpdateRow({ state, currentVersion }: { state: UpdateState; currentVersi
 }
 
 function FailedInstallRow({ attempt, onDismiss }: { attempt: InstallAttempt; onDismiss(): void }) {
-  const description = attempt.logPath
-    ? `Rally reopened on the previous version. The install log is at ${attempt.logPath}.`
-    : "The installer didn't finish. Try again, or download the installer from the release page."
+  const description = `Rally is still on the previous version. The install log is at ${attempt.logPath}.`
   return (
     <div className="flex items-center gap-6 bg-amber-950/30 px-4 py-3">
       <div className="min-w-0 flex-1">

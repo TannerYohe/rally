@@ -276,9 +276,8 @@ class ReviewSessions extends EventEmitter {
     const cwd = sessionDir(sessionId)
     mkdirSync(cwd, { recursive: true })
 
-    const { pr } = this.byId(sessionId)
     const decide = (toolName: string, input: unknown) =>
-      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { submitting: false, cwd, pr })
+      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd })
 
     const preToolUse: HookCallback = async (input) => {
       if (input.hook_event_name !== 'PreToolUse') return {}

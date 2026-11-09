@@ -1,7 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
-import { isSamePr, type PrRef } from '@shared/types'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { topLevelMutationFields } from './graphqlMutations'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
@@ -9,9 +8,7 @@ import { parseShellWords, splitShellCommand, type Redirect } from './shellComman
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
 export interface PolicyContext {
-  submitting: boolean
   cwd: string
-  pr: Pick<PrRef, 'owner' | 'repo' | 'number'>
 }
 
 interface ShellState {
@@ -116,15 +113,7 @@ const WGET_METHOD_FLAGS = ['--method']
 const WGET_BODY_FLAGS = ['--post-data', '--post-file', '--body-data', '--body-file']
 const READ_METHODS = new Set(['GET', 'HEAD'])
 
-const PR_REVIEWS_PATH = /^\/?repos\/([\w.-]+)\/([\w.-]+)\/pulls\/(\d+)\/reviews(?:\/(\d+)(\/events)?)?$/
-
-const SUBMIT_GRAPHQL_MUTATIONS = [
-  'addPullRequestReview',
-  'addPullRequestReviewThread',
-  'addPullRequestReviewThreadReply',
-  'addPullRequestReviewComment',
-  'submitPullRequestReview',
-]
+const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts the drafts itself when the user clicks Post and submit.'
 
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
 
@@ -214,7 +203,7 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   const operands = args.filter((a) => !a.startsWith('-'))
   switch (program) {
     case 'gh':
-      return decideGh(args, segment, state, context)
+      return decideGh(args, state)
     case 'git':
       return decideGit(args, state)
     case 'curl':
@@ -420,13 +409,13 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
   return ALLOW
 }
 
-function decideGh(args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
-  if (args[0] === 'api') return decideGhApi(args.slice(1), segment, context)
+function decideGh(args: string[], state: ShellState): ToolDecision {
+  if (args[0] === 'api') return decideGhApi(args.slice(1))
   if (args[1] === 'checkout' && !(state.cwd && isTempPath(state.cwd, state))) {
     return deny('Rally only runs `gh pr checkout` in repos under the temp directory.')
   }
   if (args[0] === 'search' || READ_ONLY_GH_VERBS.has(args[1])) return ALLOW
-  return deny(`\`gh ${args.slice(0, 2).join(' ')}\` is not permitted in Rally. Use \`gh api\` for review posting.`)
+  return deny(`\`gh ${args.slice(0, 2).join(' ')}\` is not permitted in Rally.`)
 }
 
 function ghApiEndpoint(args: string[]): string {
@@ -458,22 +447,7 @@ function mutationFields(queries: string[]): string[] | null {
   return fields.some((f) => f === null) ? null : (fields.flat() as string[])
 }
 
-function isSubmitRestWrite(method: string, endpoint: string, pr: PolicyContext['pr']): boolean {
-  const match = endpoint.match(PR_REVIEWS_PATH)
-  if (!match) return false
-  const [, owner, repo, number, reviewId, events] = match
-  if (!isSamePr({ owner, repo, number: Number(number) }, pr)) return false
-  switch (method) {
-    case 'POST':
-      return !reviewId || Boolean(events)
-    case 'DELETE':
-      return Boolean(reviewId) && !events
-    default:
-      return false
-  }
-}
-
-function decideGhApi(args: string[], segment: string, context: PolicyContext): ToolDecision {
+function decideGhApi(args: string[]): ToolDecision {
   const endpoint = ghApiEndpoint(args)
   if (endpoint === 'graphql') {
     if (args.some((a) => matchesFlag(a, '--input')) || !graphqlQueries(args).every(isInlineGraphql)) {
@@ -481,20 +455,9 @@ function decideGhApi(args: string[], segment: string, context: PolicyContext): T
     }
     const fields = mutationFields(graphqlQueries(args))
     if (fields === null) return deny('Rally could not parse this graphql query, so it is blocked.')
-    if (fields.length === 0) return ALLOW
-    if (!context.submitting) return deny('GitHub mutations are blocked until the user submits the review from Rally.')
-    if (fields.every((field) => SUBMIT_GRAPHQL_MUTATIONS.includes(field))) return ALLOW
-    return deny(
-      `In the submit turn Rally only permits these graphql mutations: ${SUBMIT_GRAPHQL_MUTATIONS.join(', ')}. Rally resolves review threads itself.`,
-    )
+    return fields.length === 0 ? ALLOW : deny(GITHUB_WRITE_REASON)
   }
 
   const method = requestMethod(args, GH_API_METHOD_FLAGS, GH_API_BODY_FLAGS)
-  if (method === 'GET') return ALLOW
-  if (context.submitting && isSubmitRestWrite(method, endpoint, context.pr)) return ALLOW
-  return deny(
-    context.submitting
-      ? `Rally only permits creating, submitting, and deleting pending reviews on ${context.pr.owner}/${context.pr.repo}#${context.pr.number}; thread replies go into the pending review through graphql. \`${method} ${endpoint}\` is blocked.`
-      : 'GitHub writes are blocked until the user submits the review from Rally.',
-  )
+  return method === 'GET' ? ALLOW : deny(GITHUB_WRITE_REASON)
 }

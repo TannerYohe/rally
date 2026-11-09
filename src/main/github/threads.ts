@@ -34,7 +34,7 @@ export type ThreadLookup = { kind: 'own'; thread: ReviewThread } | { kind: 'not_
 const NOT_FOUND_ERROR = 'Review thread not found'
 const NOT_OWN_ERROR = 'Not a review thread you started on this PR'
 
-const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+export const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 export function lookupThread(node: RawThread | null, viewer: string, pr: PrRef): ThreadLookup {
   if (!node) return { kind: 'not_found' }

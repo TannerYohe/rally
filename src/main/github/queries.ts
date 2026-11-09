@@ -1,6 +1,6 @@
 import { GraphqlResponseError } from '@octokit/graphql'
 import type { MyReview, Pr, ReviewState } from '@shared/types'
-import { github } from './client'
+import { github, timeoutRequest, type GithubClient } from './client'
 import { MY_REVIEW_WINDOW } from './phase'
 
 export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError' | 'hidden'>
@@ -92,12 +92,10 @@ export function isReplyOnly(review: Pick<RawReview, 'state' | 'body'>, comments:
   return mightBeReplyOnly(review) && comments.length > 0 && comments.every((c) => c.replyTo)
 }
 
-type GithubClient = Awaited<ReturnType<typeof github>>
-
 export async function fetchNodes<T>(gh: GithubClient, query: string, ids: string[], timeoutMs?: number): Promise<(T | null)[]> {
   const nodes: (T | null)[] = []
   for (let i = 0; i < ids.length; i += MAX_NODE_IDS) {
-    const request = timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : undefined
+    const request = timeoutMs ? timeoutRequest(timeoutMs) : undefined
     try {
       const response = await gh.graphql<{ nodes: (T | null)[] }>(query, { ids: ids.slice(i, i + MAX_NODE_IDS), request })
       nodes.push(...response.nodes)

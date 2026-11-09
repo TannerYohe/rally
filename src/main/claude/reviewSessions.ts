@@ -4,7 +4,14 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
-import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, type DraftChanges } from '@shared/feedback'
+import {
+  EMPTY_COMMENT_REVIEW_ERROR,
+  finalReview,
+  isEmptyCommentReview,
+  submitBlockedReason,
+  type DraftChanges,
+  type FinalReview,
+} from '@shared/feedback'
 import {
   priorConcernThreadIds,
   prKey,
@@ -19,11 +26,12 @@ import {
   type TurnMode,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
+import { submitReview } from '../github/submitReview'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList } from '../prList'
 import { configFile, sessionsDir } from '../store'
 import { claudeExecutable } from './executable'
-import { APP_PROTOCOL, reviewPrompt, submitPrompt } from './prompts'
+import { APP_PROTOCOL, reviewPrompt } from './prompts'
 import { reviewModelOptions } from './modelOptions'
 import { createRallyServer, RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
@@ -57,20 +65,21 @@ function restoreThreadState(stored: ReviewSession): ReviewSession {
   return stored.submitted && pending.length > 0 ? { ...session, threadResolution: failedResolution(pending, INTERRUPTED_RESOLVE_ERROR) } : session
 }
 
-function lastSubmitAttemptAt(timeline: TimelineEntry[]): string | null {
-  return timeline.findLast((entry) => entry.kind === 'user' && entry.turn === 'submit')?.at ?? null
-}
+const INTERRUPTED_SUBMIT_ERROR =
+  'Rally closed while submitting this review. Submit again; Rally checks whether the earlier attempt went through first.'
 
 function restoreSession(stored: ReviewSession): ReviewSession {
   const session = restoreThreadState(stored)
   if (!ACTIVE_STATUSES.has(session.status)) return session
   if (session.submitted) return { ...session, status: 'submitted', error: null }
+  if (session.status === 'submitting') return { ...session, status: 'error', error: INTERRUPTED_SUBMIT_ERROR }
   return { ...session, status: 'error', error: 'Interrupted when Rally closed. Send feedback to resume.' }
 }
 
 class ReviewSessions extends EventEmitter {
   private sessions: Map<string, ReviewSession>
   private controllers = new Map<string, AbortController>()
+  private posting = new Set<string>()
   private pendingFlush: NodeJS.Timeout | null = null
   private dirty = new Set<string>()
 
@@ -117,13 +126,31 @@ class ReviewSessions extends EventEmitter {
 
   async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
-    const { drafts, pr, submitted, timeline } = this.byId(sessionId)
+    const { drafts, pr, submitted, submitAttemptReviewId } = this.byId(sessionId)
     if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
-    if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-    const notes = feedbackMessage(drafts, changes)
-    this.patch(sessionId, () => ({ threadsToResolveOnSubmit: resolveThreadIds }), true)
-    const context = { viewer: prList.get().viewer, earlierAttemptAt: lastSubmitAttemptAt(timeline) }
-    void this.runTurn(sessionId, submitPrompt(pr, event, notes, context), 'submit')
+    if (!drafts) throw new Error('Claude has not drafted this review yet.')
+    const blocked = submitBlockedReason(changes.instructions)
+    if (blocked) throw new Error(blocked)
+    if (isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
+    this.posting.add(sessionId)
+    try {
+      this.patch(sessionId, () => ({ status: 'submitting', error: null, threadsToResolveOnSubmit: resolveThreadIds }), true)
+      await this.post(sessionId, pr, event, finalReview(drafts, changes), submitAttemptReviewId ?? null)
+    } finally {
+      this.posting.delete(sessionId)
+    }
+  }
+
+  private async post(sessionId: string, pr: PrRef, event: ReviewEvent, review: FinalReview, attemptReviewId: number | null): Promise<void> {
+    const onPendingReview = (reviewId: number | null) => this.patch(sessionId, () => ({ submitAttemptReviewId: reviewId ?? undefined }), true)
+    let submitted: SubmittedReview
+    try {
+      submitted = await submitReview(pr, event, review, { attemptReviewId, onPendingReview })
+    } catch (error) {
+      this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error), threadsToResolveOnSubmit: undefined }), true)
+      throw error
+    }
+    this.completeSubmit(sessionId, submitted)
   }
 
   async threads(sessionId: string): Promise<ReviewThread[]> {
@@ -161,6 +188,7 @@ class ReviewSessions extends EventEmitter {
   discard(sessionId: string): void {
     const session = this.byId(sessionId)
     if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
+    if (this.posting.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
     this.cancel(sessionId)
     this.sessions.delete(session.prKey)
     sessionsDir.remove(session.prKey)
@@ -171,6 +199,7 @@ class ReviewSessions extends EventEmitter {
   private assertIdle(sessionId: string): void {
     this.byId(sessionId)
     if (this.controllers.has(sessionId)) throw new Error('A turn is already running for this review')
+    if (this.posting.has(sessionId)) throw new Error('Rally is already submitting this review')
   }
 
   private find(sessionId: string): ReviewSession | undefined {
@@ -219,14 +248,12 @@ class ReviewSessions extends EventEmitter {
   private async runTurn(sessionId: string, prompt: string, mode: TurnMode): Promise<void> {
     const controller = new AbortController()
     this.controllers.set(sessionId, controller)
-    const submitting = mode === 'submit'
-    let submitted: SubmittedReview | null = null
     let resultOk = false
 
     this.patch(
       sessionId,
       (s) => ({
-        status: submitting ? 'submitting' : 'running',
+        status: 'running',
         error: null,
         timeline: [...s.timeline, { kind: 'user', id: randomUUID(), text: prompt, at: now(), turn: mode }],
       }),
@@ -236,9 +263,8 @@ class ReviewSessions extends EventEmitter {
     const cwd = sessionDir(sessionId)
     mkdirSync(cwd, { recursive: true })
 
-    const { pr } = this.byId(sessionId)
     const decide = (toolName: string, input: unknown) =>
-      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { submitting, cwd, pr })
+      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd })
 
     const preToolUse: HookCallback = async (input) => {
       if (input.hook_event_name !== 'PreToolUse') return {}
@@ -263,11 +289,6 @@ class ReviewSessions extends EventEmitter {
 
     const rallyServer = createRallyServer({
       onDrafts: (drafts) => this.patch(sessionId, () => ({ drafts }), true),
-      onSubmitted: (review) => {
-        submitted = review
-        prList.recordRallyReview(this.byId(sessionId).prKey, review.reviewId)
-        this.patch(sessionId, () => ({ submitted: review }), true)
-      },
     })
 
     try {
@@ -294,12 +315,8 @@ class ReviewSessions extends EventEmitter {
         if (message.type === 'result') resultOk = message.subtype === 'success' && !message.is_error
         this.updateTimeline(sessionId, (timeline) => reduceTimeline(timeline, message, now()))
       }
-      this.finishTurn(sessionId, mode, resultOk, submitted)
+      this.finishTurn(sessionId, resultOk)
     } catch (error) {
-      if (submitted) {
-        this.finishTurn(sessionId, mode, resultOk, submitted)
-        return
-      }
       const cancelled = controller.signal.aborted
       this.patch(
         sessionId,
@@ -311,33 +328,23 @@ class ReviewSessions extends EventEmitter {
       )
     } finally {
       this.controllers.delete(sessionId)
-      if (!this.find(sessionId)?.submitted) this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }))
       this.patch(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()
     }
   }
 
-  private finishTurn(sessionId: string, mode: TurnMode, resultOk: boolean, submitted: SubmittedReview | null): void {
-    if (mode !== 'submit') {
-      this.patch(
-        sessionId,
-        () => (resultOk ? { status: 'awaiting_feedback' } : { status: 'error', error: 'The Claude turn ended with an error.' }),
-        true,
-      )
-      return
-    }
-    if (!submitted) {
-      this.patch(
-        sessionId,
-        () => ({
-          status: 'error',
-          error: 'Claude finished the submit turn without confirming the review was submitted. Check GitHub, then retry or send feedback.',
-        }),
-        true,
-      )
-      return
-    }
-    this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
+  private finishTurn(sessionId: string, resultOk: boolean): void {
+    this.patch(
+      sessionId,
+      () => (resultOk ? { status: 'awaiting_feedback' } : { status: 'error', error: 'The Claude turn ended with an error.' }),
+      true,
+    )
+  }
+
+  private completeSubmit(sessionId: string, submitted: SubmittedReview): void {
+    const session = this.find(sessionId)
+    if (session) prList.recordRallyReview(session.prKey, submitted.reviewId)
+    this.patch(sessionId, () => ({ status: 'submitted', submitted, submitAttemptReviewId: undefined }), true)
     const threadIds = this.find(sessionId)?.threadsToResolveOnSubmit ?? []
     const clearPending = () => this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }), true)
     if (threadIds.length === 0) clearPending()

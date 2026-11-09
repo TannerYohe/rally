@@ -200,7 +200,7 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
-export type TurnMode = 'review' | 'refine' | 'submit'
+export type TurnMode = 'review' | 'refine'
 
 export type TimelineEntry =
   | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }
@@ -227,6 +227,7 @@ export interface SubmittedReview {
   reviewId: number
   url: string
   event: ReviewEvent
+  foldedDraftIds?: string[]
 }
 
 export interface PrRef {
@@ -249,6 +250,7 @@ export interface ReviewSession {
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]
+  submitAttemptReviewId?: number
   createdAt: string
   updatedAt: string
 }

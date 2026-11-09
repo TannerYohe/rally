@@ -1,5 +1,5 @@
-import type { DraftComment, Drafts, Severity } from '@shared/types'
-import { bodyEdited, type DraftEdits } from '@shared/feedback'
+import type { Drafts, Severity } from '@shared/types'
+import { bodyEdited, commentLocation, type DraftEdits } from '@shared/feedback'
 import { BodyTextarea } from './BodyTextarea'
 
 const SEVERITY_STYLES: Record<Severity, string> = {
@@ -14,13 +14,6 @@ const SEVERITY_ACCENTS: Record<Severity, string> = {
   high: 'border-l-orange-400',
   medium: 'border-l-yellow-300',
   nit: 'border-l-ink-500',
-}
-
-function location(comment: DraftComment): string {
-  if (comment.kind === 'reply') return `Reply to comment ${comment.replyToCommentId ?? '?'}`
-  if (!comment.path) return 'General comment'
-  const lines = comment.startLine ? `${comment.startLine}-${comment.line}` : `${comment.line ?? ''}`
-  return `${comment.path}${lines ? `:${lines}` : ''}`
 }
 
 interface Props {
@@ -46,7 +39,7 @@ export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
             <div className="mb-2 flex items-center gap-2 text-xs">
               <span className="font-semibold text-ink-200">#{comment.id}</span>
               <span className={`rounded px-1.5 py-0.5 ${SEVERITY_STYLES[comment.severity]}`}>{comment.severity}</span>
-              <span className="truncate font-mono text-ink-400">{location(comment)}</span>
+              <span className="truncate font-mono text-ink-400">{commentLocation(comment)}</span>
               {edited && <span className="text-amber-300">edited</span>}
               <div className="ml-auto flex gap-2">
                 {(edited || dropped) && (

@@ -5,12 +5,13 @@ const EVENTS: ReviewEvent[] = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES']
 
 interface Props {
   disabled: boolean
+  blockedReason: string | null
   commentCount: number
   threadCount: number
   onSubmit(event: ReviewEvent): void
 }
 
-export function SubmitBar({ disabled, commentCount, threadCount, onSubmit }: Props) {
+export function SubmitBar({ disabled, blockedReason, commentCount, threadCount, onSubmit }: Props) {
   const [event, setEvent] = useState<ReviewEvent>('COMMENT')
   const submit = () => {
     const label = REVIEW_EVENT_LABELS[event]
@@ -26,9 +27,10 @@ export function SubmitBar({ disabled, commentCount, threadCount, onSubmit }: Pro
           {REVIEW_EVENT_LABELS[option]}
         </label>
       ))}
+      {blockedReason && <span className="ml-auto text-xs text-ink-500">{blockedReason}</span>}
       <button
-        className="ml-auto rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
-        disabled={disabled}
+        className={`${blockedReason ? '' : 'ml-auto '}rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-40`}
+        disabled={disabled || Boolean(blockedReason)}
         onClick={submit}
       >
         Post and submit

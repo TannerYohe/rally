@@ -15,7 +15,15 @@ import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { ReviewTabBar, ReviewTabPanel } from '../components/ReviewTabBar'
 import { SubmitBar } from '../components/SubmitBar'
-import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, keptCommentCount, type DraftChanges, type DraftEdits } from '@shared/feedback'
+import {
+  EMPTY_COMMENT_REVIEW_ERROR,
+  feedbackMessage,
+  isEmptyCommentReview,
+  keptCommentCount,
+  submitBlockedReason,
+  type DraftChanges,
+  type DraftEdits,
+} from '@shared/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
@@ -209,7 +217,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           </span>
         )}
         <div className="ml-auto flex gap-2">
-          {busy && (
+          {session.status === 'running' && (
             <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={() => window.rally.cancelReview(session.id)}>
               Cancel
             </button>
@@ -239,6 +247,11 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </a>
           </span>
           {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
+          {session.submitted.foldedDraftIds && session.submitted.foldedDraftIds.length > 0 && (
+            <span className="text-amber-300" title="GitHub couldn't place these on a line or thread, so they were posted in the review body">
+              Moved {session.submitted.foldedDraftIds.map((id) => `#${id}`).join(', ')} into the review body.
+            </span>
+          )}
           {resolvingThreads && <span className="text-ink-300">Resolving threads…</span>}
           {!resolvingThreads && resolution && resolution.resolved.length > 0 && (
             <span className="text-emerald-300">Resolved {resolution.resolved.length} thread(s).</span>
@@ -336,7 +349,15 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               Send to Claude
             </button>
           </div>
-          {drafts && <SubmitBar disabled={busy || resolvingThreads} commentCount={keptComments} threadCount={threadResolution.selectedIds.length} onSubmit={submit} />}
+          {drafts && (
+            <SubmitBar
+              disabled={busy || resolvingThreads}
+              blockedReason={submitBlockedReason(feedback)}
+              commentCount={keptComments}
+              threadCount={threadResolution.selectedIds.length}
+              onSubmit={submit}
+            />
+          )}
         </div>
       )}
     </section>

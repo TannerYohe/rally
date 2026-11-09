@@ -1,6 +1,6 @@
 import { isSamePr, type PrRef, type ReviewThread, type ThreadResolution } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { github, GITHUB_TIMEOUT_MS } from './client'
+import { github, GITHUB_TIMEOUT_MS, timeoutRequest } from './client'
 import { fetchNodes } from './queries'
 
 const THREADS_QUERY = `
@@ -34,7 +34,7 @@ export type ThreadLookup = { kind: 'own'; thread: ReviewThread } | { kind: 'not_
 const NOT_FOUND_ERROR = 'Review thread not found'
 const NOT_OWN_ERROR = 'Not a review thread you started on this PR'
 
-const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+export const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 export function lookupThread(node: RawThread | null, viewer: string, pr: PrRef): ThreadLookup {
   if (!node) return { kind: 'not_found' }
@@ -73,7 +73,7 @@ export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise
     else if (lookup.thread.isResolved) result.resolved.push(threadId)
     else {
       try {
-        await gh.graphql(RESOLVE_MUTATION, { threadId, request: { signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS) } })
+        await gh.graphql(RESOLVE_MUTATION, { threadId, request: timeoutRequest() })
         result.resolved.push(threadId)
       } catch (error) {
         fail(threadId, errorMessage(error))

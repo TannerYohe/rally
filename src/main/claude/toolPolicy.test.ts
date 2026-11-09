@@ -5,9 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { decideToolUse } from './toolPolicy'
 
 const SESSION_CWD = join(tmpdir(), 'rally', 'test-session')
-const PR = { owner: 'acme', repo: 'api', number: 12 }
-const REVIEWING = { submitting: false, cwd: SESSION_CWD, pr: PR }
-const SUBMITTING = { submitting: true, cwd: SESSION_CWD, pr: PR }
+const REVIEWING = { cwd: SESSION_CWD }
 
 const WORK = '/tmp/review-pr-api-12-abcd'
 const SET_WORK = 'WORK=$(mktemp -d "${TMPDIR:-/tmp}/review-pr-api-12-XXXX"); '
@@ -37,7 +35,7 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash(command)).toBe(true)
   })
 
-  it('blocks posting a review before submit', () => {
+  it('blocks posting a review', () => {
     expect(bash('gh api repos/acme/api/pulls/12/reviews --method POST --input "$WORK/review.json"')).toBe(false)
     expect(bash('gh api repos/acme/api/pulls/12/reviews -f event=APPROVE')).toBe(false)
     expect(bash('gh pr review 12 --approve')).toBe(false)
@@ -59,48 +57,18 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash('gh api repos/acme/api/pulls/12/reviews -XPOST')).toBe(false)
   })
 
-  it('allows posting reviews and events during submit', () => {
-    expect(bash('gh api repos/acme/api/pulls/12/reviews --method POST --input "$WORK/review.json"', SUBMITTING)).toBe(true)
-    expect(bash('gh api repos/acme/api/pulls/12/reviews/99/events --method POST -f event=COMMENT', SUBMITTING)).toBe(true)
-  })
-
-  it('allows deleting a pending review only during submit', () => {
-    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method DELETE', SUBMITTING)).toBe(true)
-    expect(bash('gh api -X DELETE repos/acme/api/pulls/12/reviews/99', SUBMITTING)).toBe(true)
+  it('blocks every review write Rally makes itself on submit', () => {
+    expect(bash('gh api repos/acme/api/pulls/12/reviews --method POST --input "$WORK/review.json"')).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/12/reviews/99/events --method POST -f event=COMMENT')).toBe(false)
     expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method DELETE')).toBe(false)
-    expect(bash('gh api repos/acme/api/pulls/12/comments/5 --method DELETE', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/acme/api/pulls/12 --method DELETE', SUBMITTING)).toBe(false)
-  })
-
-  it('only allows review writes on the PR being submitted', () => {
-    expect(bash('gh api repos/acme/other/pulls/12/reviews --method POST --input x.json', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/acme/api/pulls/13/reviews/99/events --method POST -f event=COMMENT', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/ACME/Api/pulls/12/reviews/99 --method DELETE', SUBMITTING)).toBe(true)
-    expect(bash('gh api repos/other/api/pulls/12/reviews --method POST --input x.json', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/acme/api/pulls/13/reviews/99 --method DELETE', SUBMITTING)).toBe(false)
-  })
-
-  it('only allows each review write on the path shape it belongs to', () => {
-    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method POST -f body=x', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/acme/api/pulls/12/reviews --method DELETE', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/acme/api/pulls/12/reviews/99/events --method DELETE', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method PUT -f body=x', SUBMITTING)).toBe(false)
-  })
-
-  it('blocks review paths with query or fragment characters that gh would cut the path at', () => {
-    expect(bash("gh api -X DELETE 'repos/acme/api?/pulls/12/reviews/1'", SUBMITTING)).toBe(false)
-    expect(bash("gh api -X DELETE 'repos/acme/api#/pulls/12/reviews/1'", SUBMITTING)).toBe(false)
-    expect(bash("gh api --method POST 'repos/acme/api?x=/pulls/12/reviews' --input x.json", SUBMITTING)).toBe(false)
-  })
-
-  it('blocks standalone thread replies during submit', () => {
-    expect(bash("gh api repos/acme/api/pulls/12/comments/5/replies --method POST -f body='still broken'", SUBMITTING)).toBe(false)
+    expect(bash('gh api -X DELETE repos/acme/api/pulls/12/reviews/99')).toBe(false)
+    expect(bash('gh api repos/acme/api/pulls/12/reviews/99 --method PUT -f body=x')).toBe(false)
+    expect(bash("gh api repos/acme/api/pulls/12/comments/5/replies --method POST -f body='still broken'")).toBe(false)
   })
 
   it('finds the endpoint after flag values', () => {
-    expect(bash('gh api -X POST repos/acme/api/pulls/12/reviews --input x.json', SUBMITTING)).toBe(true)
-    expect(bash('gh api -H "Accept: application/json" --method POST repos/acme/api/pulls/12/reviews/9/events -f event=COMMENT', SUBMITTING)).toBe(true)
-    expect(bash('gh api --jq .id -X POST repos/acme/api/pulls/12/merge', SUBMITTING)).toBe(false)
+    expect(bash('gh api -H "Accept: application/json" repos/acme/api/pulls/12/reviews')).toBe(true)
+    expect(bash('gh api --jq .id -X POST repos/acme/api/pulls/12/merge')).toBe(false)
   })
 
   it('blocks graphql queries Rally cannot read inline', () => {
@@ -108,50 +76,30 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash("gh api graphql -F query=@- <<'EOF'\nmutation { mergePullRequest(input:{pullRequestId:\"x\"}) { clientMutationId } }\nEOF")).toBe(false)
     expect(bash('gh api graphql -f query="$(cat mutation.graphql)"')).toBe(false)
     expect(bash('Q=$(cat m.graphql); gh api graphql -f query="$Q"')).toBe(false)
-    expect(bash('gh api graphql -F query=@mutation.graphql', SUBMITTING)).toBe(false)
     expect(bash("gh api graphql -f query='query { viewer { login } }'")).toBe(true)
   })
 
-  it('allows only review mutations through graphql during submit', () => {
-    const submit = `gh api graphql -f query='mutation { submitPullRequestReview(input:{pullRequestReviewId:"x", event:COMMENT}) { pullRequestReview { id } } }'`
-    const merge = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
-    expect(bash(submit, SUBMITTING)).toBe(true)
-    expect(bash(merge, SUBMITTING)).toBe(false)
+  it('blocks every graphql mutation, including the review mutations Rally uses on submit', () => {
+    const mutation = (field: string) => `gh api graphql -f query='mutation($id: ID!) { done: ${field}(input:{pullRequestReviewId:$id}) { clientMutationId } }' -f id=x`
+    for (const field of ['addPullRequestReview', 'addPullRequestReviewThread', 'addPullRequestReviewThreadReply', 'submitPullRequestReview', 'resolveReviewThread']) {
+      expect(bash(mutation(field))).toBe(false)
+    }
   })
 
-  it('blocks a disallowed mutation sent alongside an allowed one during submit', () => {
-    const withResolve = `gh api graphql -f query='mutation { submitPullRequestReview(input:{pullRequestReviewId:"x", event:COMMENT}) { clientMutationId } resolveReviewThread(input:{threadId:"y"}) { thread { id } } }'`
-    const withMerge = `gh api graphql -f query='mutation { addPullRequestReviewThread(input:{}) { clientMutationId } mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
-    expect(bash(withResolve, SUBMITTING)).toBe(false)
-    expect(bash(withMerge, SUBMITTING)).toBe(false)
-  })
-
-  it('does not count allowed names inside strings or nested selections', () => {
-    const inString = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"submitPullRequestReview"}) { clientMutationId } }'`
-    const aliasedMerge = `gh api graphql -f query='mutation { submitPullRequestReview: mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }'`
-    expect(bash(inString, SUBMITTING)).toBe(false)
-    expect(bash(aliasedMerge, SUBMITTING)).toBe(false)
-  })
-
-  it('allows aliased and parameterized review mutations during submit', () => {
-    const withVariables = `gh api graphql -f query='mutation($id: ID!) { done: submitPullRequestReview(input:{pullRequestReviewId:$id, event:COMMENT}) { pullRequestReview { id } } }' -f id=x`
-    expect(bash(withVariables, SUBMITTING)).toBe(true)
+  it('does not count mutation names inside strings as queries', () => {
+    const inString = `gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"query"}) { clientMutationId } }'`
+    expect(bash(inString)).toBe(false)
   })
 
   it('allows read-only graphql queries that use variables', () => {
     expect(bash("gh api graphql -f owner=acme -f query='query($owner: String!) { repository(owner: $owner, name: \"api\") { id } }'")).toBe(true)
   })
 
-  it('leaves resolving review threads to Rally even during submit', () => {
-    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"x"}) { thread { id } } }'`
-    expect(bash(resolve, SUBMITTING)).toBe(false)
-  })
-
-  it('blocks unrelated writes even during submit', () => {
-    expect(bash('gh api repos/acme/api/pulls/12/merge --method PUT', SUBMITTING)).toBe(false)
-    expect(bash('gh api repos/acme/api/issues/12/comments -f body=hi', SUBMITTING)).toBe(false)
-    expect(bash('gh pr merge 12', SUBMITTING)).toBe(false)
-    expect(bash('git push origin HEAD', SUBMITTING)).toBe(false)
+  it('blocks unrelated writes', () => {
+    expect(bash('gh api repos/acme/api/pulls/12/merge --method PUT')).toBe(false)
+    expect(bash('gh api repos/acme/api/issues/12/comments -f body=hi')).toBe(false)
+    expect(bash('gh pr merge 12')).toBe(false)
+    expect(bash('git push origin HEAD')).toBe(false)
   })
 
   it('finds gh and git behind wrappers and nested shells', () => {

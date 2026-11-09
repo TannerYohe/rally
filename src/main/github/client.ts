@@ -7,6 +7,8 @@ const run = promisify(execFile)
 
 export const GITHUB_TIMEOUT_MS = 15_000
 
+export const timeoutRequest = (timeoutMs = GITHUB_TIMEOUT_MS) => ({ signal: AbortSignal.timeout(timeoutMs) })
+
 let cached: { token: string; graphql: typeof graphql; rest: Octokit; login: string } | null = null
 
 export async function github() {
@@ -23,6 +25,8 @@ export async function github() {
   }
   return cached
 }
+
+export type GithubClient = Awaited<ReturnType<typeof github>>
 
 export function resetGithubClient(): void {
   cached = null

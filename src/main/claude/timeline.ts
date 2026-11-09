@@ -1,6 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { TimelineEntry } from '@shared/types'
-import { PUBLISH_DRAFTS_TOOL, REVIEW_SUBMITTED_TOOL } from './rallyTools'
+import { PUBLISH_DRAFTS_TOOL } from './rallyTools'
 
 const QUIET_TOOLS = new Set(['Read', 'Grep', 'Glob', 'ToolSearch', 'TodoWrite'])
 
@@ -8,11 +8,7 @@ const BASH_STEPS: [RegExp, string][] = [
   [/gh pr view/, 'Fetching PR metadata'],
   [/gh repo clone/, 'Cloning repository'],
   [/gh pr checkout/, 'Checking out PR'],
-  [/\/reviews\/\d+\/events/, 'Submitting review'],
-  [/addPullRequestReviewThreadReply/, 'Posting thread reply'],
-  [/\/reviews\/\d+\b.*(--method\s+DELETE|-X\s*DELETE)|(--method\s+DELETE|-X\s*DELETE).*\/reviews\/\d+/, 'Deleting pending review'],
-  [/\/reviews\b.*(--method\s+POST|-X\s*POST|--input)/, 'Posting pending review'],
-  [/gh api graphql/, 'Querying review threads'],
+  [/gh api graphql/, 'Querying GitHub'],
   [/gh api \S*\/(comments|reviews)/, 'Reading PR conversation'],
   [/git .*range-diff|git .*merge-base/, 'Building delta since last review'],
   [/git .*diff/, 'Building diff'],
@@ -24,7 +20,6 @@ const TOOL_LABELS: Record<string, string> = {
   Skill: 'Loading skill',
   Write: 'Writing file',
   [PUBLISH_DRAFTS_TOOL]: 'Publishing drafts to Rally',
-  [REVIEW_SUBMITTED_TOOL]: 'Confirming submission',
   mcp__claude_ai_Atlassian__getJiraIssue: 'Fetching Jira ticket',
   mcp__claude_ai_Slack__slack_search_public_and_private: 'Searching Slack',
   mcp__claude_ai_Slack__slack_read_thread: 'Reading Slack thread',

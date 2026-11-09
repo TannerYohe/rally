@@ -14,7 +14,7 @@ export const BUSY_STATUSES: SessionStatus[] = ['running', 'submitting']
 type TurnTiming = Pick<ReviewSession, 'timeline' | 'createdAt'>
 
 export function lastTurnStartedAt(session: TurnTiming): string {
-  return session.timeline.findLast((entry) => entry.kind === 'user' && entry.turn !== 'submit')?.at ?? session.createdAt
+  return session.timeline.findLast((entry) => entry.kind === 'user')?.at ?? session.createdAt
 }
 
 export function isSubmitted(session: Pick<ReviewSession, 'status' | 'submitted'>): boolean {

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_COMMENT_REVIEW_ERROR, SUBMIT_WITH_INSTRUCTIONS_ERROR, type DraftChanges } from '@shared/feedback'
 import type { DraftComment, Drafts, ReviewSession, SubmittedReview } from '@shared/types'
+import type { SubmitOptions } from '../github/submitReview'
 
 const SUBMITTED: SubmittedReview = { reviewId: 1, url: 'https://github.com/acme/api/pull/1#review-1', event: 'COMMENT' }
 
@@ -88,12 +89,10 @@ mocks.stored = [
   storedSession(10, { drafts: { ...drafts(['T1']), summaryBody: '  ' } }),
   storedSession(11, { drafts: { ...drafts(['T1']), summaryBody: '', comments: [THREAD_REPLY] } }),
   storedSession(12, { drafts: { ...drafts(['T1']), comments: [THREAD_REPLY] } }),
-  storedSession(13, {
-    status: 'submitting',
-    timeline: [{ kind: 'user', id: 'u1', text: 'Post and submit as "Comment"', at: '2026-11-05T15:24:23.272Z', turn: 'submit' }],
-  }),
+  storedSession(13, { status: 'submitting', submitAttemptReviewId: 55 }),
   storedSession(14),
   storedSession(15),
+  storedSession(16),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -208,7 +207,7 @@ describe('submit', () => {
       expect.objectContaining({ owner: 'acme', repo: 'api', number: 12 }),
       'REQUEST_CHANGES',
       { body: 'New body', inline: [], replies: [{ ...THREAD_REPLY, body: 'Rewritten.' }], folded: [] },
-      { earlierAttemptAt: null },
+      expect.objectContaining({ attemptReviewId: null }),
     )
   })
 
@@ -221,22 +220,36 @@ describe('submit', () => {
     expect(session(11).status).toBe('submitted')
   })
 
-  it('checks for the earlier attempt when a submit was interrupted by Rally closing', async () => {
+  it('checks the saved attempt when a submit was interrupted by Rally closing', async () => {
     expect(session(13)).toMatchObject({ status: 'error', error: expect.stringContaining('Rally closed while submitting') })
     mocks.submitReview.mockResolvedValue(SUBMITTED)
     await reviewSessions.submit('test-session-13', 'COMMENT', NO_CHANGES, [])
-    expect(mocks.submitReview.mock.calls[0][3]).toEqual({ earlierAttemptAt: '2026-11-05T15:24:23.272Z' })
+    expect(mocks.submitReview.mock.calls[0][3]).toMatchObject({ attemptReviewId: 55 })
+    expect(session(13).submitAttemptReviewId).toBeUndefined()
   })
 
-  it('checks for the earlier attempt after a failed submit', async () => {
-    mocks.submitReview.mockRejectedValueOnce(new Error('timeout'))
+  it('saves the pending review id while posting and checks it on retry when cleanup failed', async () => {
+    mocks.submitReview.mockImplementationOnce(async (_pr, _event, _review, options: SubmitOptions) => {
+      options.onPendingReview(88)
+      throw new Error('timeout')
+    })
     await expect(reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('timeout')
-    expect(mocks.submitReview.mock.calls[0][3]).toEqual({ earlierAttemptAt: null })
-    const attemptAt = session(14).timeline.findLast((entry) => entry.kind === 'user')!.at
+    expect(mocks.submitReview.mock.calls[0][3]).toMatchObject({ attemptReviewId: null })
+    expect(session(14).submitAttemptReviewId).toBe(88)
 
     mocks.submitReview.mockResolvedValue(SUBMITTED)
     await reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])
-    expect(mocks.submitReview.mock.calls[1][3]).toEqual({ earlierAttemptAt: attemptAt })
+    expect(mocks.submitReview.mock.calls[1][3]).toMatchObject({ attemptReviewId: 88 })
+  })
+
+  it('forgets the attempt once cleanup deleted its pending review', async () => {
+    mocks.submitReview.mockImplementationOnce(async (_pr, _event, _review, options: SubmitOptions) => {
+      options.onPendingReview(89)
+      options.onPendingReview(null)
+      throw new Error('Validation Failed')
+    })
+    await expect(reviewSessions.submit('test-session-16', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('Validation Failed')
+    expect(session(16).submitAttemptReviewId).toBeUndefined()
   })
 
   it('blocks another submit, a feedback turn, and discarding while posting', async () => {

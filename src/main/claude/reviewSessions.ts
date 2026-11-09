@@ -15,7 +15,6 @@ import {
 import {
   priorConcernThreadIds,
   prKey,
-  REVIEW_EVENT_LABELS,
   type PrRef,
   type ReviewEvent,
   type ReviewSession,
@@ -68,10 +67,6 @@ function restoreThreadState(stored: ReviewSession): ReviewSession {
 
 const INTERRUPTED_SUBMIT_ERROR =
   'Rally closed while submitting this review. Submit again; Rally checks whether the earlier attempt went through first.'
-
-function lastSubmitAttemptAt(timeline: TimelineEntry[]): string | null {
-  return timeline.findLast((entry) => entry.kind === 'user' && entry.turn === 'submit')?.at ?? null
-}
 
 function restoreSession(stored: ReviewSession): ReviewSession {
   const session = restoreThreadState(stored)
@@ -131,35 +126,26 @@ class ReviewSessions extends EventEmitter {
 
   async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
-    const { drafts, pr, submitted, timeline } = this.byId(sessionId)
+    const { drafts, pr, submitted, submitAttemptReviewId } = this.byId(sessionId)
     if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
     if (!drafts) throw new Error('Claude has not drafted this review yet.')
     const blocked = submitBlockedReason(changes.instructions)
     if (blocked) throw new Error(blocked)
     if (isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-    const earlierAttemptAt = lastSubmitAttemptAt(timeline)
     this.posting.add(sessionId)
     try {
-      this.patch(
-        sessionId,
-        (s) => ({
-          status: 'submitting',
-          error: null,
-          threadsToResolveOnSubmit: resolveThreadIds,
-          timeline: [...s.timeline, { kind: 'user', id: randomUUID(), text: `Post and submit as "${REVIEW_EVENT_LABELS[event]}"`, at: now(), turn: 'submit' }],
-        }),
-        true,
-      )
-      await this.post(sessionId, pr, event, finalReview(drafts, changes), earlierAttemptAt)
+      this.patch(sessionId, () => ({ status: 'submitting', error: null, threadsToResolveOnSubmit: resolveThreadIds }), true)
+      await this.post(sessionId, pr, event, finalReview(drafts, changes), submitAttemptReviewId ?? null)
     } finally {
       this.posting.delete(sessionId)
     }
   }
 
-  private async post(sessionId: string, pr: PrRef, event: ReviewEvent, review: FinalReview, earlierAttemptAt: string | null): Promise<void> {
+  private async post(sessionId: string, pr: PrRef, event: ReviewEvent, review: FinalReview, attemptReviewId: number | null): Promise<void> {
+    const onPendingReview = (reviewId: number | null) => this.patch(sessionId, () => ({ submitAttemptReviewId: reviewId ?? undefined }), true)
     let submitted: SubmittedReview
     try {
-      submitted = await submitReview(pr, event, review, { earlierAttemptAt })
+      submitted = await submitReview(pr, event, review, { attemptReviewId, onPendingReview })
     } catch (error) {
       this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error), threadsToResolveOnSubmit: undefined }), true)
       throw error
@@ -259,7 +245,7 @@ class ReviewSessions extends EventEmitter {
     this.dirty.clear()
   }
 
-  private async runTurn(sessionId: string, prompt: string, mode: Exclude<TurnMode, 'submit'>): Promise<void> {
+  private async runTurn(sessionId: string, prompt: string, mode: TurnMode): Promise<void> {
     const controller = new AbortController()
     this.controllers.set(sessionId, controller)
     let resultOk = false
@@ -358,7 +344,7 @@ class ReviewSessions extends EventEmitter {
   private completeSubmit(sessionId: string, submitted: SubmittedReview): void {
     const session = this.find(sessionId)
     if (session) prList.recordRallyReview(session.prKey, submitted.reviewId)
-    this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
+    this.patch(sessionId, () => ({ status: 'submitted', submitted, submitAttemptReviewId: undefined }), true)
     const threadIds = this.find(sessionId)?.threadsToResolveOnSubmit ?? []
     const clearPending = () => this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }), true)
     if (threadIds.length === 0) clearPending()

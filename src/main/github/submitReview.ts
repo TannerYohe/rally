@@ -64,13 +64,16 @@ function submittedEvent(state: string): ReviewEvent | null {
   }
 }
 
-export function reviewSubmittedSince(reviews: ListedReview[], viewer: string, since: string): SubmittedReview | null {
-  const ownSubmitted = reviews.filter((r) => r.user && sameLogin(r.user.login, viewer) && r.submitted_at && r.submitted_at >= since)
-  for (const review of ownSubmitted.reverse()) {
-    const event = submittedEvent(review.state)
-    if (event) return { reviewId: review.id, url: review.html_url, event }
-  }
-  return null
+export function submittedAttempt(reviews: ListedReview[], attemptReviewId: number): SubmittedReview | null {
+  const review = reviews.find((r) => r.id === attemptReviewId)
+  const event = review ? submittedEvent(review.state) : null
+  return review && event ? { reviewId: review.id, url: review.html_url, event } : null
+}
+
+export function isValidationError(error: unknown): boolean {
+  if (!(error instanceof GraphqlResponseError)) return false
+  const errors = error.errors ?? []
+  return errors.length > 0 && errors.every((e) => e.type === 'UNPROCESSABLE')
 }
 
 async function step<T>(pr: PrRef, name: string, action: () => Promise<T>): Promise<T> {
@@ -105,18 +108,20 @@ async function addInlineComment(gh: GithubClient, reviewNodeId: string, comment:
   })
 }
 
-async function addInlineComments(gh: GithubClient, pr: PrRef, reviewNodeId: string, comments: DraftComment[]): Promise<DraftComment[]> {
+async function addOrFold(pr: PrRef, comments: DraftComment[], add: (comment: DraftComment) => Promise<void>): Promise<DraftComment[]> {
   const rejected: DraftComment[] = []
   for (const comment of comments) {
     try {
-      await addInlineComment(gh, reviewNodeId, comment)
+      await add(comment)
     } catch (error) {
-      if (!(error instanceof GraphqlResponseError)) throw error
-      console.warn('GitHub rejected an inline comment, folding it into the review body', {
+      if (!isValidationError(error)) throw error
+      console.warn('GitHub rejected a review comment, folding it into the review body', {
         pr: pr.url,
         draftId: comment.id,
+        kind: comment.kind,
         path: comment.path,
         line: comment.line,
+        replyToCommentId: comment.replyToCommentId,
         error: errorMessage(error),
       })
       rejected.push(comment)
@@ -145,25 +150,31 @@ async function threadIdsByCommentId(gh: GithubClient, pr: PrRef): Promise<Map<nu
   return threads
 }
 
-async function addReplies(gh: GithubClient, pr: PrRef, reviewNodeId: string, replies: DraftComment[]): Promise<void> {
-  if (replies.length === 0) return
+async function addReplies(gh: GithubClient, pr: PrRef, reviewNodeId: string, replies: DraftComment[]): Promise<DraftComment[]> {
+  if (replies.length === 0) return []
   const threads = await threadIdsByCommentId(gh, pr)
-  for (const reply of replies) {
-    const thread = reply.replyToCommentId === null ? undefined : threads.get(reply.replyToCommentId)
-    if (!thread) throw new Error(`draft #${reply.id} replies to a comment that is not in a review thread on this PR`)
-    await gh.graphql(THREAD_REPLY_MUTATION, { review: reviewNodeId, thread, body: reply.body, request: timeoutRequest() })
+  const orphans = replies.filter((reply) => reply.replyToCommentId === null || !threads.has(reply.replyToCommentId))
+  if (orphans.length > 0) {
+    console.warn('Folding thread replies whose comment is not in a review thread', { pr: pr.url, draftIds: orphans.map((r) => r.id) })
   }
+  const threaded = replies.filter((reply) => !orphans.includes(reply))
+  const rejected = await addOrFold(pr, threaded, async (reply) => {
+    const thread = threads.get(reply.replyToCommentId as number)
+    await gh.graphql(THREAD_REPLY_MUTATION, { review: reviewNodeId, thread, body: reply.body, request: timeoutRequest() })
+  })
+  return [...orphans, ...rejected]
 }
 
 export interface SubmitOptions {
-  earlierAttemptAt: string | null
+  attemptReviewId: number | null
+  onPendingReview(reviewId: number | null): void
 }
 
 export async function submitReview(pr: PrRef, event: ReviewEvent, review: FinalReview, options: SubmitOptions): Promise<SubmittedReview> {
   const gh = await github()
   const reviews = await step(pr, 'listing your reviews', () => listReviews(gh, pr))
-  if (options.earlierAttemptAt) {
-    const earlier = reviewSubmittedSince(reviews, gh.login, options.earlierAttemptAt)
+  if (options.attemptReviewId !== null) {
+    const earlier = submittedAttempt(reviews, options.attemptReviewId)
     if (earlier) return earlier
   }
   const pending = reviews.filter((r) => r.state === 'PENDING' && r.user && sameLogin(r.user.login, gh.login))
@@ -175,9 +186,13 @@ export async function submitReview(pr: PrRef, event: ReviewEvent, review: FinalR
   const { data: created } = await step(pr, 'creating the pending review', () =>
     gh.rest.pulls.createReview({ ...pullParams(pr), commit_id: pull.head.sha, body, request: timeoutRequest() }),
   )
+  options.onPendingReview(created.id)
   try {
-    const rejected = await step(pr, 'adding inline comments', () => addInlineComments(gh, pr, created.node_id, review.inline))
-    await step(pr, 'adding thread replies', () => addReplies(gh, pr, created.node_id, review.replies))
+    const rejectedInline = await step(pr, 'adding inline comments', () =>
+      addOrFold(pr, review.inline, (comment) => addInlineComment(gh, created.node_id, comment)),
+    )
+    const rejectedReplies = await step(pr, 'adding thread replies', () => addReplies(gh, pr, created.node_id, review.replies))
+    const rejected = [...rejectedInline, ...rejectedReplies]
     if (rejected.length > 0) {
       await step(pr, 'updating the review body', () =>
         gh.rest.pulls.updateReview({ ...pullParams(pr), review_id: created.id, body: foldIntoBody(body, rejected), request: timeoutRequest() }),
@@ -186,11 +201,15 @@ export async function submitReview(pr: PrRef, event: ReviewEvent, review: FinalR
     const { data: submitted } = await step(pr, 'submitting the review', () =>
       gh.rest.pulls.submitReview({ ...pullParams(pr), review_id: created.id, event, request: timeoutRequest() }),
     )
-    return { reviewId: submitted.id, url: submitted.html_url, event }
+    const foldedDraftIds = [...review.folded, ...rejected].map((c) => c.id)
+    return { reviewId: submitted.id, url: submitted.html_url, event, foldedDraftIds }
   } catch (error) {
-    await deletePendingReview(gh, pr, created.id).catch((deleteError) => {
+    try {
+      await deletePendingReview(gh, pr, created.id)
+      options.onPendingReview(null)
+    } catch (deleteError) {
       console.error('Deleting the pending review after a failed submit failed', { pr: pr.url, reviewId: created.id, error: deleteError })
-    })
+    }
     throw error
   }
 }

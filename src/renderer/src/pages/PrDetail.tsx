@@ -247,6 +247,11 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </a>
           </span>
           {needsRereview && <span className="text-amber-300">The PR changed since this review.</span>}
+          {session.submitted.foldedDraftIds && session.submitted.foldedDraftIds.length > 0 && (
+            <span className="text-amber-300" title="GitHub couldn't place these on a line or thread, so they were posted in the review body">
+              Moved {session.submitted.foldedDraftIds.map((id) => `#${id}`).join(', ')} into the review body.
+            </span>
+          )}
           {resolvingThreads && <span className="text-ink-300">Resolving threads…</span>}
           {!resolvingThreads && resolution && resolution.resolved.length > 0 && (
             <span className="text-emerald-300">Resolved {resolution.resolved.length} thread(s).</span>

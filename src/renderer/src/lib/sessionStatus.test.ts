@@ -25,11 +25,6 @@ describe('lastTurnStartedAt', () => {
     ]
     expect(lastTurnStartedAt({ createdAt, timeline })).toBe('2026-11-04T19:00:00.000Z')
   })
-
-  it('skips submit turns', () => {
-    const timeline = [user('feedback', '2026-11-04T19:00:00.000Z', 'refine'), user('submit', '2026-11-04T19:10:00.000Z', 'submit')]
-    expect(lastTurnStartedAt({ createdAt, timeline })).toBe('2026-11-04T19:00:00.000Z')
-  })
 })
 
 describe('prUpdatedSinceLastTurn', () => {
@@ -53,8 +48,8 @@ describe('prUpdatedSinceLastTurn', () => {
     expect(prUpdatedSinceLastTurn(session(), null)).toBe(false)
   })
 
-  it('ignores a submit turn that posted to GitHub before erroring', () => {
-    const timeline = [user('review', '2026-11-04T19:00:00.000Z', 'review'), user('submit', '2026-11-04T19:10:00.000Z', 'submit')]
+  it('is false once the review is submitted, even if the session later errored', () => {
+    const timeline = [user('review', '2026-11-04T19:00:00.000Z', 'review')]
     const submitted = { reviewId: 1, url: 'https://github.com/o/r/pull/1#review', event: 'COMMENT' as const }
     expect(prUpdatedSinceLastTurn(session({ timeline, status: 'error', submitted }), '2026-11-04T19:10:05Z')).toBe(false)
   })

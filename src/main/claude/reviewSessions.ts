@@ -8,7 +8,7 @@ import {
   EMPTY_COMMENT_REVIEW_ERROR,
   finalReview,
   isEmptyCommentReview,
-  SUBMIT_WITH_INSTRUCTIONS_ERROR,
+  submitBlockedReason,
   type DraftChanges,
   type FinalReview,
 } from '@shared/feedback'
@@ -134,7 +134,8 @@ class ReviewSessions extends EventEmitter {
     const { drafts, pr, submitted, timeline } = this.byId(sessionId)
     if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
     if (!drafts) throw new Error('Claude has not drafted this review yet.')
-    if (changes.instructions.trim()) throw new Error(SUBMIT_WITH_INSTRUCTIONS_ERROR)
+    const blocked = submitBlockedReason(changes.instructions)
+    if (blocked) throw new Error(blocked)
     if (isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
     const earlierAttemptAt = lastSubmitAttemptAt(timeline)
     this.posting.add(sessionId)

@@ -47,13 +47,32 @@ export function feedbackMessage(drafts: Drafts | null, changes: DraftChanges): s
   return [describeEdits(drafts, changes.edits, changes.summaryBodyEdit), changes.instructions.trim()].filter(Boolean).join('\n\n')
 }
 
+function keptComments(drafts: Drafts, edits: DraftEdits): DraftComment[] {
+  return drafts.comments.flatMap((comment) => {
+    const edit = edits[comment.id]
+    const body = (edit?.body ?? comment.body).trim()
+    return edit?.dropped || !body ? [] : [{ ...comment, body }]
+  })
+}
+
 export function keptCommentCount(drafts: Drafts | null, edits: DraftEdits): number {
-  return drafts?.comments.filter((c) => !edits[c.id]?.dropped).length ?? 0
+  return drafts ? keptComments(drafts, edits).length : 0
 }
 
 export function isEmptyCommentReview(event: ReviewEvent, drafts: Drafts, changes: DraftChanges): boolean {
   const summaryBody = changes.summaryBodyEdit ?? drafts.summaryBody
   return event === 'COMMENT' && !summaryBody.trim() && keptCommentCount(drafts, changes.edits) === 0
+}
+
+export function submitBlockedReason(instructions: string): string | null {
+  return instructions.trim() ? SUBMIT_WITH_INSTRUCTIONS_ERROR : null
+}
+
+export function commentLocation(comment: DraftComment): string {
+  if (comment.kind === 'reply') return `Reply to comment ${comment.replyToCommentId ?? '?'}`
+  if (!comment.path) return 'General comment'
+  if (comment.line === null) return comment.path
+  return comment.startLine === null ? `${comment.path}:${comment.line}` : `${comment.path}:${comment.startLine}-${comment.line}`
 }
 
 export interface FinalReview {
@@ -63,28 +82,28 @@ export interface FinalReview {
   folded: DraftComment[]
 }
 
-const hasLocation = (comment: DraftComment) => Boolean(comment.path) && comment.line !== null
+const canPostInline = (comment: DraftComment) => comment.kind === 'inline' && Boolean(comment.path) && comment.line !== null
+
+const canPostReply = (comment: DraftComment) => comment.kind === 'reply' && comment.replyToCommentId !== null
 
 export function finalReview(drafts: Drafts, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdit'>): FinalReview {
-  const kept = drafts.comments.flatMap((comment) => {
-    const edit = changes.edits[comment.id]
-    if (edit?.dropped) return []
-    return [{ ...comment, body: (edit?.body ?? comment.body).trim() }]
-  })
-  const inline = kept.filter((c) => c.kind === 'inline')
+  const kept = keptComments(drafts, changes.edits)
   return {
     body: (changes.summaryBodyEdit ?? drafts.summaryBody).trim(),
-    inline: inline.filter(hasLocation),
-    replies: kept.filter((c) => c.kind === 'reply'),
-    folded: inline.filter((c) => !hasLocation(c)),
+    inline: kept.filter(canPostInline),
+    replies: kept.filter(canPostReply),
+    folded: kept.filter((c) => !canPostInline(c) && !canPostReply(c)),
   }
 }
 
+function foldedHeading(comment: DraftComment): string | null {
+  if (comment.kind === 'reply') return comment.replyToCommentId === null ? null : `**${commentLocation(comment)}**`
+  return comment.path ? `**\`${commentLocation(comment)}\`**` : null
+}
+
 function foldedComment(comment: DraftComment): string {
-  if (!comment.path) return comment.body
-  const lines = comment.startLine !== null && comment.line !== null ? `${comment.startLine}-${comment.line}` : comment.line
-  const location = lines === null ? comment.path : `${comment.path}:${lines}`
-  return `**\`${location}\`**\n\n${comment.body}`
+  const heading = foldedHeading(comment)
+  return heading ? `${heading}\n\n${comment.body}` : comment.body
 }
 
 export function foldIntoBody(body: string, comments: DraftComment[]): string {

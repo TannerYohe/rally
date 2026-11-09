@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { Drafts } from './types'
-import { feedbackMessage, finalReview, foldIntoBody, isEmptyCommentReview, type DraftChanges } from './feedback'
+import {
+  commentLocation,
+  feedbackMessage,
+  finalReview,
+  foldIntoBody,
+  isEmptyCommentReview,
+  keptCommentCount,
+  SUBMIT_WITH_INSTRUCTIONS_ERROR,
+  submitBlockedReason,
+  type DraftChanges,
+} from './feedback'
 
 const drafts: Drafts = {
   mode: 'full',
@@ -113,6 +123,20 @@ describe('finalReview', () => {
   it('uses the edited review body', () => {
     expect(finalReview(mixed, { edits: {}, summaryBodyEdit: '' }).body).toBe('')
   })
+
+  it('treats a draft whose final body is blank as dropped', () => {
+    const review = finalReview(mixed, { edits: { '1': { body: '  ' }, '4': { body: '' } }, summaryBodyEdit: undefined })
+    expect(review.inline.map((c) => c.id)).toEqual(['2', '3'])
+    expect(review.replies).toEqual([])
+    expect(keptCommentCount(mixed, { '1': { body: '  ' }, '4': { body: '' } })).toBe(3)
+  })
+
+  it('folds a reply with no target comment', () => {
+    const orphan = { ...reply, id: '6', replyToCommentId: null }
+    const review = finalReview({ ...mixed, comments: [orphan] }, { edits: {}, summaryBodyEdit: undefined })
+    expect(review.replies).toEqual([])
+    expect(review.folded.map((c) => c.id)).toEqual(['6'])
+  })
 })
 
 describe('foldIntoBody', () => {
@@ -127,5 +151,32 @@ describe('foldIntoBody', () => {
 
   it('skips an empty body', () => {
     expect(foldIntoBody('', [base])).toBe('**`a.rb:1`**\n\noriginal 1')
+  })
+
+  it('heads a folded reply with the comment it answers', () => {
+    const reply = { ...base, kind: 'reply' as const, path: null, line: null, body: 'Still broken.', replyToCommentId: 501 }
+    expect(foldIntoBody('', [reply, { ...reply, replyToCommentId: null, body: 'Orphan.' }])).toBe(
+      '**Reply to comment 501**\n\nStill broken.\n\nOrphan.',
+    )
+  })
+})
+
+describe('commentLocation', () => {
+  const base = drafts.comments[0]
+
+  it('formats a line, a range, a file, and comments with no location', () => {
+    expect(commentLocation(base)).toBe('a.rb:1')
+    expect(commentLocation({ ...base, startLine: 3, line: 5 })).toBe('a.rb:3-5')
+    expect(commentLocation({ ...base, line: null })).toBe('a.rb')
+    expect(commentLocation({ ...base, path: null })).toBe('General comment')
+    expect(commentLocation({ ...base, kind: 'reply', replyToCommentId: 7 })).toBe('Reply to comment 7')
+    expect(commentLocation({ ...base, kind: 'reply' })).toBe('Reply to comment ?')
+  })
+})
+
+describe('submitBlockedReason', () => {
+  it('blocks submit only while there is free-text feedback', () => {
+    expect(submitBlockedReason(' \n ')).toBeNull()
+    expect(submitBlockedReason('make 2 shorter')).toBe(SUBMIT_WITH_INSTRUCTIONS_ERROR)
   })
 })

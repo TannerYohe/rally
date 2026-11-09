@@ -20,7 +20,7 @@ import {
   feedbackMessage,
   isEmptyCommentReview,
   keptCommentCount,
-  SUBMIT_WITH_INSTRUCTIONS_ERROR,
+  submitBlockedReason,
   type DraftChanges,
   type DraftEdits,
 } from '@shared/feedback'
@@ -347,7 +347,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           {drafts && (
             <SubmitBar
               disabled={busy || resolvingThreads}
-              blockedReason={feedback.trim() ? SUBMIT_WITH_INSTRUCTIONS_ERROR : null}
+              blockedReason={submitBlockedReason(feedback)}
               commentCount={keptComments}
               threadCount={threadResolution.selectedIds.length}
               onSubmit={submit}

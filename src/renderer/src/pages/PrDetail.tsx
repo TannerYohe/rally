@@ -15,7 +15,15 @@ import { RepoChip } from '../components/RepoChip'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { ReviewTabBar, ReviewTabPanel } from '../components/ReviewTabBar'
 import { SubmitBar } from '../components/SubmitBar'
-import { EMPTY_COMMENT_REVIEW_ERROR, feedbackMessage, isEmptyCommentReview, keptCommentCount, type DraftChanges, type DraftEdits } from '@shared/feedback'
+import {
+  EMPTY_COMMENT_REVIEW_ERROR,
+  feedbackMessage,
+  isEmptyCommentReview,
+  keptCommentCount,
+  SUBMIT_WITH_INSTRUCTIONS_ERROR,
+  type DraftChanges,
+  type DraftEdits,
+} from '@shared/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
@@ -209,7 +217,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           </span>
         )}
         <div className="ml-auto flex gap-2">
-          {busy && (
+          {session.status === 'running' && (
             <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={() => window.rally.cancelReview(session.id)}>
               Cancel
             </button>
@@ -336,7 +344,15 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
               Send to Claude
             </button>
           </div>
-          {drafts && <SubmitBar disabled={busy || resolvingThreads} commentCount={keptComments} threadCount={threadResolution.selectedIds.length} onSubmit={submit} />}
+          {drafts && (
+            <SubmitBar
+              disabled={busy || resolvingThreads}
+              blockedReason={feedback.trim() ? SUBMIT_WITH_INSTRUCTIONS_ERROR : null}
+              commentCount={keptComments}
+              threadCount={threadResolution.selectedIds.length}
+              onSubmit={submit}
+            />
+          )}
         </div>
       )}
     </section>

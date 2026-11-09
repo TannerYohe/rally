@@ -1,10 +1,9 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import { CONCERN_STATUSES, type Drafts, type SubmittedReview } from '@shared/types'
+import { CONCERN_STATUSES, type Drafts } from '@shared/types'
 
 export interface RallyToolHandlers {
   onDrafts(drafts: Drafts): void
-  onSubmitted(review: SubmittedReview): void
 }
 
 const commentSchema = z.object({
@@ -20,12 +19,10 @@ const commentSchema = z.object({
 })
 
 const PUBLISH_DRAFTS = 'publish_drafts'
-const REVIEW_SUBMITTED = 'review_submitted'
 
 export const RALLY_SERVER = 'rally'
 export const RALLY_TOOL_PREFIX = `mcp__${RALLY_SERVER}__`
 export const PUBLISH_DRAFTS_TOOL = `${RALLY_TOOL_PREFIX}${PUBLISH_DRAFTS}`
-export const REVIEW_SUBMITTED_TOOL = `${RALLY_TOOL_PREFIX}${REVIEW_SUBMITTED}`
 
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] })
 
@@ -92,19 +89,5 @@ export function createRallyServer(handlers: RallyToolHandlers) {
     },
   )
 
-  const reviewSubmitted = tool(
-    REVIEW_SUBMITTED,
-    'Tell Rally the review was posted and submitted on GitHub. Call once at the end of a SUBMIT turn.',
-    {
-      review_id: z.number().int(),
-      html_url: z.string(),
-      event: z.enum(['COMMENT', 'APPROVE', 'REQUEST_CHANGES']),
-    },
-    async (args) => {
-      handlers.onSubmitted({ reviewId: args.review_id, url: args.html_url, event: args.event })
-      return ok('Rally recorded the submitted review.')
-    },
-  )
-
-  return createSdkMcpServer({ name: RALLY_SERVER, version: '1.0.0', tools: [publishDrafts, reviewSubmitted] })
+  return createSdkMcpServer({ name: RALLY_SERVER, version: '1.0.0', tools: [publishDrafts] })
 }

@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EMPTY_COMMENT_REVIEW_ERROR, type DraftChanges } from '@shared/feedback'
+import { EMPTY_COMMENT_REVIEW_ERROR, SUBMIT_WITH_INSTRUCTIONS_ERROR, type DraftChanges } from '@shared/feedback'
 import type { DraftComment, Drafts, ReviewSession, SubmittedReview } from '@shared/types'
 
 const SUBMITTED: SubmittedReview = { reviewId: 1, url: 'https://github.com/acme/api/pull/1#review-1', event: 'COMMENT' }
@@ -51,8 +51,8 @@ const mocks = vi.hoisted(() => ({
   stored: [] as ReviewSession[],
   resolveOwnThreads: vi.fn(),
   query: vi.fn(),
+  submitReview: vi.fn(),
   recordRallyReview: vi.fn(),
-  handlers: null as null | { onSubmitted(review: SubmittedReview): void },
 }))
 
 vi.mock('../store', () => ({
@@ -63,6 +63,7 @@ vi.mock('../prList', () => ({
   prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
 }))
 vi.mock('../github/threads', () => ({ fetchOwnThreads: vi.fn(), resolveOwnThreads: mocks.resolveOwnThreads }))
+vi.mock('../github/submitReview', () => ({ submitReview: mocks.submitReview }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
 vi.mock('./modelOptions', () => ({ reviewModelOptions: () => ({}) }))
@@ -71,11 +72,7 @@ vi.mock('./rallyTools', () => ({
   RALLY_SERVER: 'rally',
   RALLY_TOOL_PREFIX: 'mcp__rally__',
   PUBLISH_DRAFTS_TOOL: 'mcp__rally__publish_drafts',
-  REVIEW_SUBMITTED_TOOL: 'mcp__rally__review_submitted',
-  createRallyServer: (handlers: { onSubmitted(review: SubmittedReview): void }) => {
-    mocks.handlers = handlers
-    return {}
-  },
+  createRallyServer: () => ({}),
 }))
 
 mocks.stored = [
@@ -93,25 +90,20 @@ mocks.stored = [
   storedSession(12, { drafts: { ...drafts(['T1']), comments: [THREAD_REPLY] } }),
   storedSession(13, {
     status: 'submitting',
-    timeline: [{ kind: 'user', id: 'u1', text: 'SUBMIT as "Comment"', at: '2026-11-05T15:24:23.272Z', turn: 'submit' }],
+    timeline: [{ kind: 'user', id: 'u1', text: 'Post and submit as "Comment"', at: '2026-11-05T15:24:23.272Z', turn: 'submit' }],
   }),
   storedSession(14),
+  storedSession(15),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
 
 const session = (number: number) => reviewSessions.getByPr(`acme/api#${number}`)!
 
-function turn(options: { submits: boolean }) {
-  return async function* () {
-    if (options.submits) mocks.handlers?.onSubmitted(SUBMITTED)
-    yield { type: 'result', subtype: 'success', is_error: false }
-  }
-}
-
 beforeEach(() => {
   mocks.resolveOwnThreads.mockReset()
   mocks.query.mockReset()
+  mocks.submitReview.mockReset()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -159,20 +151,20 @@ describe('discard', () => {
 })
 
 describe('submit', () => {
-  it('does not resolve threads when the submit turn ends without a submitted review', async () => {
-    mocks.query.mockImplementation(turn({ submits: false }))
-    await reviewSessions.submit('test-session-5', 'COMMENT', NO_CHANGES, ['T1'])
-    await vi.waitFor(() => expect(session(5).status).toBe('error'))
-    expect(mocks.resolveOwnThreads).not.toHaveBeenCalled()
+  it('reports the failure and does not resolve threads when posting fails', async () => {
+    mocks.submitReview.mockRejectedValue(new Error('Submitting the review failed while submitting the review: Validation Failed'))
+    await expect(reviewSessions.submit('test-session-5', 'COMMENT', NO_CHANGES, ['T1'])).rejects.toThrow('Validation Failed')
+    expect(session(5)).toMatchObject({ status: 'error', error: expect.stringContaining('Validation Failed'), submitted: null })
     expect(session(5).threadsToResolveOnSubmit).toBeUndefined()
+    expect(mocks.resolveOwnThreads).not.toHaveBeenCalled()
   })
 
   it('keeps the selection saved until the post-submit resolve settles', async () => {
     let finish: (value: unknown) => void = () => {}
-    mocks.query.mockImplementation(turn({ submits: true }))
+    mocks.submitReview.mockResolvedValue(SUBMITTED)
     mocks.resolveOwnThreads.mockReturnValue(new Promise((resolve) => (finish = resolve)))
     await reviewSessions.submit('test-session-9', 'COMMENT', NO_CHANGES, ['T1'])
-    await vi.waitFor(() => expect(session(9).status).toBe('submitted'))
+    expect(session(9).status).toBe('submitted')
     await vi.waitFor(() => expect(mocks.resolveOwnThreads).toHaveBeenCalled())
     const midResolve = { resolvingThreads: true, threadsToResolveOnSubmit: ['T1'], submitted: SUBMITTED }
     expect(session(9)).toMatchObject(midResolve)
@@ -183,84 +175,86 @@ describe('submit', () => {
   })
 
   it('records the submitted review id for the PR', async () => {
-    mocks.query.mockImplementation(turn({ submits: true }))
-    mocks.resolveOwnThreads.mockResolvedValue({ resolved: [], failed: [] })
+    mocks.submitReview.mockResolvedValue(SUBMITTED)
     await reviewSessions.submit('test-session-4', 'COMMENT', NO_CHANGES, [])
-    await vi.waitFor(() => expect(session(4).status).toBe('submitted'))
+    expect(session(4).status).toBe('submitted')
     expect(mocks.recordRallyReview).toHaveBeenCalledWith('acme/api#4', SUBMITTED.reviewId)
   })
 
-  it('rejects a Comment review with nothing to post before starting the turn', async () => {
+  it('rejects a Comment review with nothing to post before posting', async () => {
     await expect(reviewSessions.submit('test-session-10', 'COMMENT', NO_CHANGES, ['T1'])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
-    expect(mocks.query).not.toHaveBeenCalled()
+    expect(mocks.submitReview).not.toHaveBeenCalled()
     expect(session(10).status).toBe('awaiting_feedback')
   })
 
-  it('submits an empty review when the event is not Comment, or when the user sent final edits', async () => {
-    mocks.query.mockImplementation(turn({ submits: false }))
-    await reviewSessions.submit('test-session-10', 'APPROVE', NO_CHANGES, [])
-    await vi.waitFor(() => expect(session(10).status).toBe('error'))
-    await reviewSessions.submit('test-session-10', 'COMMENT', { ...NO_CHANGES, instructions: 'Add a thank-you body.' }, [])
-    expect(mocks.query).toHaveBeenCalledTimes(2)
-    await vi.waitFor(() => expect(session(10).status).toBe('error'))
-  })
-
-  it('starts the turn for a Comment review whose only content is a thread reply', async () => {
-    mocks.query.mockImplementation(turn({ submits: false }))
-    await reviewSessions.submit('test-session-11', 'COMMENT', NO_CHANGES, [])
-    expect(mocks.query).toHaveBeenCalledTimes(1)
-    await vi.waitFor(() => expect(session(11).status).toBe('error'))
+  it('rejects free-text instructions, which only Claude can apply', async () => {
+    const changes = { ...NO_CHANGES, instructions: 'Add a thank-you body.' }
+    await expect(reviewSessions.submit('test-session-12', 'COMMENT', changes, [])).rejects.toThrow(SUBMIT_WITH_INSTRUCTIONS_ERROR)
+    expect(mocks.submitReview).not.toHaveBeenCalled()
+    expect(session(12).status).toBe('awaiting_feedback')
   })
 
   it('rejects a Comment review once the user drops every draft and clears the body', async () => {
     const dropAll: DraftChanges = { edits: { '1': { dropped: true } }, summaryBodyEdit: '', instructions: '' }
     await expect(reviewSessions.submit('test-session-12', 'COMMENT', dropAll, [])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
-    expect(mocks.query).not.toHaveBeenCalled()
+    expect(mocks.submitReview).not.toHaveBeenCalled()
   })
 
-  it('passes the user edits and instructions to the submit prompt', async () => {
-    mocks.query.mockImplementation(turn({ submits: false }))
-    const changes: DraftChanges = { edits: { '1': { dropped: true } }, summaryBodyEdit: '', instructions: 'Add a thank-you body.' }
-    await reviewSessions.submit('test-session-12', 'COMMENT', changes, [])
-    const { prompt } = mocks.query.mock.calls[0][0] as { prompt: string }
-    expect(prompt).toContain('- Remove the review body.\n- Drop #1.\n\nAdd a thank-you body.')
-    await vi.waitFor(() => expect(session(12).status).toBe('error'))
+  it('posts the drafts with the user edits applied', async () => {
+    mocks.submitReview.mockResolvedValue(SUBMITTED)
+    const changes: DraftChanges = { edits: { '1': { body: 'Rewritten.' } }, summaryBodyEdit: 'New body', instructions: '' }
+    await reviewSessions.submit('test-session-12', 'REQUEST_CHANGES', changes, [])
+    expect(mocks.submitReview).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: 'acme', repo: 'api', number: 12 }),
+      'REQUEST_CHANGES',
+      { body: 'New body', inline: [], replies: [{ ...THREAD_REPLY, body: 'Rewritten.' }], folded: [] },
+      { earlierAttemptAt: null },
+    )
+  })
+
+  it('posts an empty review when the event is not Comment, and a Comment whose only content is a thread reply', async () => {
+    mocks.submitReview.mockResolvedValue(SUBMITTED)
+    await reviewSessions.submit('test-session-10', 'APPROVE', NO_CHANGES, [])
+    await reviewSessions.submit('test-session-11', 'COMMENT', NO_CHANGES, [])
+    expect(mocks.submitReview).toHaveBeenCalledTimes(2)
+    expect(session(10).status).toBe('submitted')
+    expect(session(11).status).toBe('submitted')
   })
 
   it('checks for the earlier attempt when a submit was interrupted by Rally closing', async () => {
-    expect(session(13).status).toBe('error')
-    mocks.query.mockImplementation(turn({ submits: false }))
+    expect(session(13)).toMatchObject({ status: 'error', error: expect.stringContaining('Rally closed while submitting') })
+    mocks.submitReview.mockResolvedValue(SUBMITTED)
     await reviewSessions.submit('test-session-13', 'COMMENT', NO_CHANGES, [])
-    const { prompt } = mocks.query.mock.calls[0][0] as { prompt: string }
-    expect(prompt).toContain('An earlier submit attempt in this session started at 2026-11-05T15:24:23.272Z')
-    expect(prompt).toContain('If one of the reviews by me was submitted at or after that time')
-    expect(prompt).toContain('Delete every PENDING review in that list')
-    await vi.waitFor(() => expect(session(13).status).toBe('error'))
+    expect(mocks.submitReview.mock.calls[0][3]).toEqual({ earlierAttemptAt: '2026-11-05T15:24:23.272Z' })
   })
 
-  it('checks for the earlier attempt after a cancelled submit', async () => {
-    let release: () => void = () => {}
-    mocks.query.mockImplementationOnce(async function* () {
-      await new Promise<void>((resolve) => (release = resolve))
-      throw new Error('aborted')
-    })
-    await reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])
-    const firstPrompt = (mocks.query.mock.calls[0][0] as { prompt: string }).prompt
-    expect(firstPrompt).not.toContain('earlier submit attempt')
-    reviewSessions.cancel('test-session-14')
-    release()
-    await vi.waitFor(() => expect(session(14).status).toBe('cancelled'))
-
+  it('checks for the earlier attempt after a failed submit', async () => {
+    mocks.submitReview.mockRejectedValueOnce(new Error('timeout'))
+    await expect(reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('timeout')
+    expect(mocks.submitReview.mock.calls[0][3]).toEqual({ earlierAttemptAt: null })
     const attemptAt = session(14).timeline.findLast((entry) => entry.kind === 'user')!.at
-    mocks.query.mockImplementation(turn({ submits: false }))
+
+    mocks.submitReview.mockResolvedValue(SUBMITTED)
     await reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])
-    const retryPrompt = (mocks.query.mock.calls[1][0] as { prompt: string }).prompt
-    expect(retryPrompt).toContain(`An earlier submit attempt in this session started at ${attemptAt}`)
-    await vi.waitFor(() => expect(session(14).status).toBe('error'))
+    expect(mocks.submitReview.mock.calls[1][3]).toEqual({ earlierAttemptAt: attemptAt })
+  })
+
+  it('blocks another submit, a feedback turn, and discarding while posting', async () => {
+    let finish: (value: SubmittedReview) => void = () => {}
+    mocks.submitReview.mockReturnValue(new Promise((resolve) => (finish = resolve)))
+    const pending = reviewSessions.submit('test-session-15', 'COMMENT', NO_CHANGES, [])
+    expect(session(15).status).toBe('submitting')
+    await expect(reviewSessions.submit('test-session-15', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('already submitting')
+    await expect(reviewSessions.feedback('test-session-15', 'one more thing')).rejects.toThrow('already submitting')
+    expect(() => reviewSessions.discard('test-session-15')).toThrow('Wait for Rally to finish submitting')
+    finish(SUBMITTED)
+    await pending
+    expect(session(15).status).toBe('submitted')
+    expect(mocks.query).not.toHaveBeenCalled()
   })
 
   it('resolves the selected threads once the review is submitted', async () => {
-    mocks.query.mockImplementation(turn({ submits: true }))
+    mocks.submitReview.mockResolvedValue(SUBMITTED)
     mocks.resolveOwnThreads.mockResolvedValue({ resolved: ['T1'], failed: [] })
     await reviewSessions.submit('test-session-8', 'COMMENT', NO_CHANGES, ['T1'])
     await vi.waitFor(() => expect(session(8).threadResolution?.resolved).toEqual(['T1']))

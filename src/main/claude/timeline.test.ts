@@ -41,10 +41,8 @@ describe('reduceTimeline', () => {
     ])
   })
 
-  it('labels the graphql thread reply as posting rather than querying', () => {
-    const reply = `gh api graphql -f review=PRR_1 -f thread=PRRT_1 -f body='ok' -f query='mutation($review: ID!) { addPullRequestReviewThreadReply(input: {}) { comment { id } } }'`
-    expect(bashStepLabel(reply, undefined)).toBe('Posting thread reply')
-    expect(bashStepLabel(`gh api graphql -f query='query { viewer { login } }'`, undefined)).toBe('Querying review threads')
+  it('labels graphql calls as GitHub queries', () => {
+    expect(bashStepLabel(`gh api graphql -f query='query { viewer { login } }'`, undefined)).toBe('Querying GitHub')
   })
 
   it('falls back to the bash description for unknown commands', () => {

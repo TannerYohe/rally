@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
 const graphql = vi.hoisted(() => vi.fn())
-vi.mock('./client', () => ({ github: async () => ({ graphql, login: 'me' }) }))
+vi.mock('./client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./client')>()),
+  github: async () => ({ graphql, login: 'me' }),
+}))
 
 const { fetchPr, isReplyOnly } = await import('./queries')
 

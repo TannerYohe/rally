@@ -1,6 +1,6 @@
 import { isSamePr, type PrRef, type ReviewThread, type ThreadResolution } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { github, GITHUB_TIMEOUT_MS } from './client'
+import { github, GITHUB_TIMEOUT_MS, timeoutRequest } from './client'
 import { fetchNodes } from './queries'
 
 const THREADS_QUERY = `
@@ -73,7 +73,7 @@ export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise
     else if (lookup.thread.isResolved) result.resolved.push(threadId)
     else {
       try {
-        await gh.graphql(RESOLVE_MUTATION, { threadId, request: { signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS) } })
+        await gh.graphql(RESOLVE_MUTATION, { threadId, request: timeoutRequest() })
         result.resolved.push(threadId)
       } catch (error) {
         fail(threadId, errorMessage(error))

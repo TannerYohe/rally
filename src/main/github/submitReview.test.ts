@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => ({
   deletePendingReview: vi.fn(),
 }))
 
-vi.mock('./client', () => ({
-  GITHUB_TIMEOUT_MS: 15_000,
+vi.mock('./client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./client')>()),
   github: async () => ({
     login: 'me',
     graphql: mocks.graphql,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Drafts } from './types'
-import { feedbackMessage, isEmptyCommentReview, type DraftChanges } from './feedback'
+import { feedbackMessage, finalReview, foldIntoBody, isEmptyCommentReview, type DraftChanges } from './feedback'
 
 const drafts: Drafts = {
   mode: 'full',
@@ -78,10 +78,9 @@ describe('isEmptyCommentReview', () => {
     expect(isEmptyCommentReview('COMMENT', drafts, dropAll)).toBe(true)
   })
 
-  it('is false while a draft is kept, a body is set, or the user gave instructions', () => {
+  it('is false while a draft is kept or a body is set', () => {
     expect(isEmptyCommentReview('COMMENT', drafts, unchanged)).toBe(false)
     expect(isEmptyCommentReview('COMMENT', drafts, { ...dropAll, summaryBodyEdit: 'Thanks.' })).toBe(false)
-    expect(isEmptyCommentReview('COMMENT', drafts, { ...dropAll, instructions: 'Add a short thank-you.' })).toBe(false)
   })
 
   it('uses the edited body over the published one', () => {
@@ -92,5 +91,41 @@ describe('isEmptyCommentReview', () => {
   it('is false for Approve and Request changes', () => {
     expect(isEmptyCommentReview('APPROVE', drafts, dropAll)).toBe(false)
     expect(isEmptyCommentReview('REQUEST_CHANGES', drafts, dropAll)).toBe(false)
+  })
+})
+
+describe('finalReview', () => {
+  const reply = { ...drafts.comments[0], id: '4', kind: 'reply' as const, path: null, line: null, body: 'Did this land?', replyToCommentId: 99 }
+  const summaryOnly = { ...drafts.comments[0], id: '5', path: null, line: null, body: 'General point.' }
+  const mixed: Drafts = { ...drafts, summaryBody: ' Looks close. ', comments: [...drafts.comments, reply, summaryOnly] }
+
+  it('applies rewrites and drops and splits inline comments from replies', () => {
+    const review = finalReview(mixed, { edits: { '1': { body: 'shorter\n' }, '2': { dropped: true } }, summaryBodyEdit: undefined })
+    expect(review.body).toBe('Looks close.')
+    expect(review.inline.map((c) => [c.id, c.body])).toEqual([
+      ['1', 'shorter'],
+      ['3', 'original 3'],
+    ])
+    expect(review.replies.map((c) => [c.id, c.replyToCommentId])).toEqual([['4', 99]])
+    expect(review.folded.map((c) => c.id)).toEqual(['5'])
+  })
+
+  it('uses the edited review body', () => {
+    expect(finalReview(mixed, { edits: {}, summaryBodyEdit: '' }).body).toBe('')
+  })
+})
+
+describe('foldIntoBody', () => {
+  const base = drafts.comments[0]
+
+  it('appends each comment under its location', () => {
+    const ranged = { ...base, path: 'b.rb', startLine: 3, line: 5, body: 'Range note.' }
+    expect(foldIntoBody('Summary.', [base, ranged, { ...base, path: null, line: null, body: 'Loose note.' }])).toBe(
+      'Summary.\n\n**`a.rb:1`**\n\noriginal 1\n\n**`b.rb:3-5`**\n\nRange note.\n\nLoose note.',
+    )
+  })
+
+  it('skips an empty body', () => {
+    expect(foldIntoBody('', [base])).toBe('**`a.rb:1`**\n\noriginal 1')
   })
 })

@@ -1,4 +1,4 @@
-import type { Drafts, ReviewEvent } from './types'
+import type { DraftComment, Drafts, ReviewEvent } from './types'
 
 export interface DraftEdit {
   body?: string
@@ -15,6 +15,8 @@ export interface DraftChanges {
 
 export const EMPTY_COMMENT_REVIEW_ERROR =
   'There is nothing to post: a Comment review needs a body, an inline comment, or a thread reply. Use Resolve selected to resolve threads without a review.'
+
+export const SUBMIT_WITH_INSTRUCTIONS_ERROR = 'Send your feedback to Claude before submitting, or clear it.'
 
 export function bodyEdited(original: string, edit: string | undefined): boolean {
   return edit !== undefined && edit.trim() !== original.trim()
@@ -51,5 +53,40 @@ export function keptCommentCount(drafts: Drafts | null, edits: DraftEdits): numb
 
 export function isEmptyCommentReview(event: ReviewEvent, drafts: Drafts, changes: DraftChanges): boolean {
   const summaryBody = changes.summaryBodyEdit ?? drafts.summaryBody
-  return event === 'COMMENT' && !summaryBody.trim() && keptCommentCount(drafts, changes.edits) === 0 && !changes.instructions.trim()
+  return event === 'COMMENT' && !summaryBody.trim() && keptCommentCount(drafts, changes.edits) === 0
+}
+
+export interface FinalReview {
+  body: string
+  inline: DraftComment[]
+  replies: DraftComment[]
+  folded: DraftComment[]
+}
+
+const hasLocation = (comment: DraftComment) => Boolean(comment.path) && comment.line !== null
+
+export function finalReview(drafts: Drafts, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdit'>): FinalReview {
+  const kept = drafts.comments.flatMap((comment) => {
+    const edit = changes.edits[comment.id]
+    if (edit?.dropped) return []
+    return [{ ...comment, body: (edit?.body ?? comment.body).trim() }]
+  })
+  const inline = kept.filter((c) => c.kind === 'inline')
+  return {
+    body: (changes.summaryBodyEdit ?? drafts.summaryBody).trim(),
+    inline: inline.filter(hasLocation),
+    replies: kept.filter((c) => c.kind === 'reply'),
+    folded: inline.filter((c) => !hasLocation(c)),
+  }
+}
+
+function foldedComment(comment: DraftComment): string {
+  if (!comment.path) return comment.body
+  const lines = comment.startLine !== null && comment.line !== null ? `${comment.startLine}-${comment.line}` : comment.line
+  const location = lines === null ? comment.path : `${comment.path}:${lines}`
+  return `**\`${location}\`**\n\n${comment.body}`
+}
+
+export function foldIntoBody(body: string, comments: DraftComment[]): string {
+  return [body, ...comments.map(foldedComment)].filter((part) => part.trim()).join('\n\n')
 }

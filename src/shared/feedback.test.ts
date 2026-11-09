@@ -141,22 +141,23 @@ describe('finalReview', () => {
 
 describe('foldIntoBody', () => {
   const base = drafts.comments[0]
+  const prUrl = 'https://github.com/acme/api/pull/12'
 
   it('appends each comment under its location', () => {
     const ranged = { ...base, path: 'b.rb', startLine: 3, line: 5, body: 'Range note.' }
-    expect(foldIntoBody('Summary.', [base, ranged, { ...base, path: null, line: null, body: 'Loose note.' }])).toBe(
+    expect(foldIntoBody('Summary.', [base, ranged, { ...base, path: null, line: null, body: 'Loose note.' }], prUrl)).toBe(
       'Summary.\n\n**`a.rb:1`**\n\noriginal 1\n\n**`b.rb:3-5`**\n\nRange note.\n\nLoose note.',
     )
   })
 
   it('skips an empty body', () => {
-    expect(foldIntoBody('', [base])).toBe('**`a.rb:1`**\n\noriginal 1')
+    expect(foldIntoBody('', [base], prUrl)).toBe('**`a.rb:1`**\n\noriginal 1')
   })
 
-  it('heads a folded reply with the comment it answers', () => {
+  it('heads a folded reply with a link to the comment it answers', () => {
     const reply = { ...base, kind: 'reply' as const, path: null, line: null, body: 'Still broken.', replyToCommentId: 501 }
-    expect(foldIntoBody('', [reply, { ...reply, replyToCommentId: null, body: 'Orphan.' }])).toBe(
-      '**Reply to comment 501**\n\nStill broken.\n\nOrphan.',
+    expect(foldIntoBody('', [reply, { ...reply, replyToCommentId: null, body: 'Orphan.' }], prUrl)).toBe(
+      '**Reply to [this comment](https://github.com/acme/api/pull/12#discussion_r501)**\n\nStill broken.\n\nOrphan.',
     )
   })
 })

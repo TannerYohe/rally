@@ -93,8 +93,14 @@ const rejection = () => graphqlError('UNPROCESSABLE', 'Line could not be resolve
 function serveThreads(...pages: ThreadsPage[]) {
   const byCursor = new Map<string | null, ThreadsPage>(pages.map((page, i) => [i === 0 ? null : (pages[i - 1].endCursor ?? null), page]))
   mocks.graphql.mockImplementation(async (query: string, variables: { cursor?: string | null }) =>
-    query.includes('reviewThreads') ? threadsPage(byCursor.get(variables.cursor ?? null)!) : {},
+    query.includes('reviewThreads') ? threadsPage(byCursor.get(variables.cursor ?? null)!) : placed(query),
   )
+}
+
+function placed(query: string) {
+  if (query.includes('addPullRequestReviewThreadReply(')) return { addPullRequestReviewThreadReply: { comment: { id: 'PRRC_new' } } }
+  if (query.includes('addPullRequestReviewThread(')) return { addPullRequestReviewThread: { thread: { id: 'PRRT_new' } } }
+  return {}
 }
 
 const callsTo = (field: string) => mocks.graphql.mock.calls.filter(([query]) => (query as string).includes(`${field}(`))
@@ -113,7 +119,7 @@ beforeEach(() => {
   mocks.createReview.mockResolvedValue({ data: { id: 77, node_id: 'PRR_77' } })
   mocks.submitReview.mockResolvedValue({ data: { id: 77, html_url: 'https://github.com/acme/api/pull/12#pullrequestreview-77' } })
   mocks.deletePendingReview.mockResolvedValue({})
-  mocks.graphql.mockResolvedValue({})
+  mocks.graphql.mockImplementation(async (query: string) => placed(query))
 })
 
 describe('submitReview', () => {
@@ -161,11 +167,28 @@ describe('submitReview', () => {
     expect(callsTo('addPullRequestReviewThreadReply')[0][1]).toMatchObject({ thread: 'PRRT_2' })
   })
 
-  it('folds summary-only points into the body it creates the review with', async () => {
-    const result = await submitReview(pr, 'COMMENT', review({ folded: [comment({ id: '5', path: null, line: null, body: 'General point.' })] }), options())
+  it('folds summary-only points and replies with no target into the body, reporting only the replies', async () => {
+    const folded = [comment({ id: '5', path: null, line: null, body: 'General point.' }), reply({ id: '6', replyToCommentId: null, body: 'Orphan.' })]
 
-    expect(mocks.createReview).toHaveBeenCalledWith(expect.objectContaining({ body: 'Summary.\n\nGeneral point.' }))
-    expect(result.foldedDraftIds).toEqual(['5'])
+    const result = await submitReview(pr, 'COMMENT', review({ folded }), options())
+
+    expect(mocks.createReview).toHaveBeenCalledWith(expect.objectContaining({ body: 'Summary.\n\nGeneral point.\n\nOrphan.' }))
+    expect(result.foldedDraftIds).toEqual(['6'])
+  })
+
+  it('folds a comment or reply GitHub accepts without returning it', async () => {
+    mocks.graphql.mockImplementation(async (query: string) => {
+      if (query.includes('reviewThreads')) return threadsPage({ threads: [{ id: 'PRRT_9', commentIds: [501] }] })
+      if (query.includes('addPullRequestReviewThreadReply(')) return { addPullRequestReviewThreadReply: { comment: null } }
+      if (query.includes('addPullRequestReviewThread(')) return { addPullRequestReviewThread: { thread: null } }
+      return {}
+    })
+
+    const result = await submitReview(pr, 'COMMENT', review({ inline: [comment({ id: '1' })], replies: [reply({ id: '2' })] }), options())
+
+    expect(result.foldedDraftIds).toEqual(['1', '2'])
+    expect(mocks.updateReview).toHaveBeenCalledWith(expect.objectContaining({ body: expect.stringContaining('**`a.rb:10`**\n\nInline note.') }))
+    expect(mocks.submitReview).toHaveBeenCalled()
   })
 
   it('folds an inline comment GitHub rejects as invalid into the body and still submits', async () => {
@@ -205,14 +228,18 @@ describe('submitReview', () => {
     mocks.graphql.mockImplementation(async (query: string) => {
       if (query.includes('reviewThreads')) return threadsPage({ threads: [{ id: 'PRRT_9', commentIds: [501] }] })
       if (query.includes('addPullRequestReviewThreadReply(')) throw rejection()
-      return {}
+      return placed(query)
     })
 
     const result = await submitReview(pr, 'COMMENT', review({ replies: [reply({ id: '4', replyToCommentId: 999 }), reply({ id: '5' })] }), options())
 
     expect(callsTo('addPullRequestReviewThreadReply')).toHaveLength(1)
     expect(mocks.updateReview).toHaveBeenCalledWith(
-      expect.objectContaining({ body: 'Summary.\n\n**Reply to comment 999**\n\nThanks.\n\n**Reply to comment 501**\n\nThanks.' }),
+      expect.objectContaining({
+        body:
+          'Summary.\n\n**Reply to [this comment](https://github.com/acme/api/pull/12#discussion_r999)**\n\nThanks.' +
+          '\n\n**Reply to [this comment](https://github.com/acme/api/pull/12#discussion_r501)**\n\nThanks.',
+      }),
     )
     expect(result.foldedDraftIds).toEqual(['4', '5'])
   })

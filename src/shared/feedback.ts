@@ -96,16 +96,18 @@ export function finalReview(drafts: Drafts, changes: Pick<DraftChanges, 'edits' 
   }
 }
 
-function foldedHeading(comment: DraftComment): string | null {
-  if (comment.kind === 'reply') return comment.replyToCommentId === null ? null : `**${commentLocation(comment)}**`
+function foldedHeading(comment: DraftComment, prUrl: string): string | null {
+  if (comment.kind === 'reply') {
+    return comment.replyToCommentId === null ? null : `**Reply to [this comment](${prUrl}#discussion_r${comment.replyToCommentId})**`
+  }
   return comment.path ? `**\`${commentLocation(comment)}\`**` : null
 }
 
-function foldedComment(comment: DraftComment): string {
-  const heading = foldedHeading(comment)
+function foldedComment(comment: DraftComment, prUrl: string): string {
+  const heading = foldedHeading(comment, prUrl)
   return heading ? `${heading}\n\n${comment.body}` : comment.body
 }
 
-export function foldIntoBody(body: string, comments: DraftComment[]): string {
-  return [body, ...comments.map(foldedComment)].filter((part) => part.trim()).join('\n\n')
+export function foldIntoBody(body: string, comments: DraftComment[], prUrl: string): string {
+  return [body, ...comments.map((comment) => foldedComment(comment, prUrl))].filter((part) => part.trim()).join('\n\n')
 }

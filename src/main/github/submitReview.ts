@@ -95,8 +95,16 @@ async function deletePendingReview(gh: GithubClient, pr: PrRef, reviewId: number
   await gh.rest.pulls.deletePendingReview({ ...pullParams(pr), review_id: reviewId, request: timeoutRequest() })
 }
 
-async function addInlineComment(gh: GithubClient, reviewNodeId: string, comment: DraftComment): Promise<void> {
-  await gh.graphql(ADD_THREAD_MUTATION, {
+interface AddThreadResponse {
+  addPullRequestReviewThread: { thread: { id: string } | null } | null
+}
+
+interface AddReplyResponse {
+  addPullRequestReviewThreadReply: { comment: { id: string } | null } | null
+}
+
+async function addInlineComment(gh: GithubClient, reviewNodeId: string, comment: DraftComment): Promise<boolean> {
+  const response = await gh.graphql<AddThreadResponse>(ADD_THREAD_MUTATION, {
     review: reviewNodeId,
     path: comment.path,
     line: comment.line,
@@ -106,26 +114,33 @@ async function addInlineComment(gh: GithubClient, reviewNodeId: string, comment:
     body: comment.body,
     request: timeoutRequest(),
   })
+  return Boolean(response.addPullRequestReviewThread?.thread)
 }
 
-async function addOrFold(pr: PrRef, comments: DraftComment[], add: (comment: DraftComment) => Promise<void>): Promise<DraftComment[]> {
+async function addPlaced(add: () => Promise<boolean>): Promise<string | null> {
+  try {
+    return (await add()) ? null : 'GitHub returned no comment'
+  } catch (error) {
+    if (!isValidationError(error)) throw error
+    return errorMessage(error)
+  }
+}
+
+async function addOrFold(pr: PrRef, comments: DraftComment[], add: (comment: DraftComment) => Promise<boolean>): Promise<DraftComment[]> {
   const rejected: DraftComment[] = []
   for (const comment of comments) {
-    try {
-      await add(comment)
-    } catch (error) {
-      if (!isValidationError(error)) throw error
-      console.warn('GitHub rejected a review comment, folding it into the review body', {
-        pr: pr.url,
-        draftId: comment.id,
-        kind: comment.kind,
-        path: comment.path,
-        line: comment.line,
-        replyToCommentId: comment.replyToCommentId,
-        error: errorMessage(error),
-      })
-      rejected.push(comment)
-    }
+    const rejection = await addPlaced(() => add(comment))
+    if (rejection === null) continue
+    console.warn('GitHub did not place a review comment, folding it into the review body', {
+      pr: pr.url,
+      draftId: comment.id,
+      kind: comment.kind,
+      path: comment.path,
+      line: comment.line,
+      replyToCommentId: comment.replyToCommentId,
+      error: rejection,
+    })
+    rejected.push(comment)
   }
   return rejected
 }
@@ -160,7 +175,8 @@ async function addReplies(gh: GithubClient, pr: PrRef, reviewNodeId: string, rep
   const threaded = replies.filter((reply) => !orphans.includes(reply))
   const rejected = await addOrFold(pr, threaded, async (reply) => {
     const thread = threads.get(reply.replyToCommentId as number)
-    await gh.graphql(THREAD_REPLY_MUTATION, { review: reviewNodeId, thread, body: reply.body, request: timeoutRequest() })
+    const response = await gh.graphql<AddReplyResponse>(THREAD_REPLY_MUTATION, { review: reviewNodeId, thread, body: reply.body, request: timeoutRequest() })
+    return Boolean(response.addPullRequestReviewThreadReply?.comment)
   })
   return [...orphans, ...rejected]
 }
@@ -182,7 +198,7 @@ export async function submitReview(pr: PrRef, event: ReviewEvent, review: FinalR
     for (const r of pending) await deletePendingReview(gh, pr, r.id)
   })
   const { data: pull } = await step(pr, 'reading the PR head', () => gh.rest.pulls.get({ ...pullParams(pr), request: timeoutRequest() }))
-  const body = foldIntoBody(review.body, review.folded)
+  const body = foldIntoBody(review.body, review.folded, pr.url)
   const { data: created } = await step(pr, 'creating the pending review', () =>
     gh.rest.pulls.createReview({ ...pullParams(pr), commit_id: pull.head.sha, body, request: timeoutRequest() }),
   )
@@ -195,13 +211,14 @@ export async function submitReview(pr: PrRef, event: ReviewEvent, review: FinalR
     const rejected = [...rejectedInline, ...rejectedReplies]
     if (rejected.length > 0) {
       await step(pr, 'updating the review body', () =>
-        gh.rest.pulls.updateReview({ ...pullParams(pr), review_id: created.id, body: foldIntoBody(body, rejected), request: timeoutRequest() }),
+        gh.rest.pulls.updateReview({ ...pullParams(pr), review_id: created.id, body: foldIntoBody(body, rejected, pr.url), request: timeoutRequest() }),
       )
     }
     const { data: submitted } = await step(pr, 'submitting the review', () =>
       gh.rest.pulls.submitReview({ ...pullParams(pr), review_id: created.id, event, request: timeoutRequest() }),
     )
-    const foldedDraftIds = [...review.folded, ...rejected].map((c) => c.id)
+    const unplaced = [...review.folded.filter((c) => c.kind === 'reply'), ...rejected]
+    const foldedDraftIds = unplaced.map((c) => c.id)
     return { reviewId: submitted.id, url: submitted.html_url, event, foldedDraftIds }
   } catch (error) {
     try {

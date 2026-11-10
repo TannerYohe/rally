@@ -33,7 +33,7 @@ if [ -d "$current_app" ]; then relaunch=$current_app; else relaunch=$previous_ap
 open --env "RALLY_USER_DATA_DIR=$data_dir" "$relaunch"
 `
 
-export const WINDOWS_INSTALLER_ARGS = ['--updated', '/S', '--force-run']
+export const WINDOWS_INSTALLER_ARGS = ['--updated', '/S', '--force-run'] as const
 
 export function macBundlePath(exePath: string): string {
   return posix.resolve(exePath, '../../..')
@@ -74,7 +74,7 @@ export function installBlocker(release: ReleaseInfo, target: InstallTarget, canW
   return null
 }
 
-function spawnDetached(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
+function spawnDetached(command: string, args: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true, env })
     child.once('error', reject)

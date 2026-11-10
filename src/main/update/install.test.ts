@@ -21,8 +21,7 @@ const {
   macBundlePath,
   macPreviousAppPath,
   macSwapArgs,
-  WINDOWS_INSTALL_SCRIPT,
-  windowsInstallArgs,
+  WINDOWS_INSTALLER_ARGS,
 } = await import('./install')
 
 const release: ReleaseInfo = {
@@ -173,37 +172,20 @@ describe('handOffMacInstall', () => {
   })
 })
 
-describe('windowsInstallArgs', () => {
-  const decode = (args: string[]) => Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le')
-
-  it('runs the script as an encoded command, which execution policy does not apply to', () => {
-    const args = windowsInstallArgs('C:\\Temp\\Rally.exe', 'C:\\data\\update.log')
-    expect(args.slice(0, -1)).toEqual(['-NoProfile', '-NonInteractive', '-EncodedCommand'])
-    expect(decode(args)).toBe(`& {${WINDOWS_INSTALL_SCRIPT}} -Installer 'C:\\Temp\\Rally.exe' -Log 'C:\\data\\update.log'`)
-  })
-
-  it('doubles single quotes in paths', () => {
-    expect(decode(windowsInstallArgs("C:\\Users\\o'brien\\Rally.exe", 'C:\\log'))).toContain("-Installer 'C:\\Users\\o''brien\\Rally.exe'")
-  })
-})
-
 describe('handOffWindowsInstall', () => {
   beforeEach(() => {
     mocks.spawn.mockReset()
   })
 
-  it('starts PowerShell with the encoded install command', async () => {
+  it('starts the installer silently as a detached process', async () => {
     stubSpawn()
     const handOff = { downloadPath: 'C:\\Temp\\Rally.exe', workDir: 'C:\\Temp', exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' }
     await handOffWindowsInstall(handOff)
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      'powershell.exe',
-      windowsInstallArgs('C:\\Temp\\Rally.exe', 'C:\\data\\update.log'),
-      expect.objectContaining({ detached: true, windowsHide: true }),
-    )
+    expect(WINDOWS_INSTALLER_ARGS).toEqual(['--updated', '/S', '--force-run'])
+    expect(mocks.spawn).toHaveBeenCalledWith('C:\\Temp\\Rally.exe', WINDOWS_INSTALLER_ARGS, expect.objectContaining({ detached: true }))
   })
 
-  it('fails when PowerShell cannot start', async () => {
+  it('fails when the installer cannot start', async () => {
     stubSpawn('error')
     const handOff = { downloadPath: 'x.exe', workDir: 'C:\\Temp', exePath: 'C:\\Rally\\Rally.exe', dataDir: 'C:\\data', logPath: 'C:\\data\\update.log' }
     await expect(handOffWindowsInstall(handOff)).rejects.toThrow('spawn EACCES')

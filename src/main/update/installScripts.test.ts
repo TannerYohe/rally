@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs, windowsInstallArgs } from './install'
+import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs } from './install'
 
 describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
   let root: string
@@ -103,29 +103,5 @@ describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
     const { log } = runScript({ failMoves: [paths.currentApp] })
     expect(versionOf(paths.currentApp)).toBe('old')
     expect(log).toContain('could not move the current app aside')
-  })
-})
-
-describe.runIf(process.platform === 'win32')('WINDOWS_INSTALL_SCRIPT', () => {
-  let root: string
-
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'rally-windows-install-test-'))
-  })
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
-  })
-
-  it('runs the installer silently and logs its exit code, with quotes and spaces in the paths', () => {
-    const dir = join(root, "o'brien files")
-    mkdirSync(dir)
-    const installer = join(dir, 'fake-installer.cmd')
-    const log = join(dir, 'update.log')
-    writeFileSync(installer, '@echo %* > "%~dp0args.txt"\r\n@exit /b 3\r\n')
-    const result = spawnSync('powershell.exe', windowsInstallArgs(installer, log))
-    expect(result.status).toBe(0)
-    expect(readFileSync(join(dir, 'args.txt'), 'utf8').trim()).toBe('/S --force-run')
-    expect(readFileSync(log, 'utf8')).toContain('installer exited with code 3')
   })
 })

@@ -119,7 +119,7 @@ Settings → About shows the app version, the Electron, Chromium, and Node.js ve
 
 On both platforms Rally writes a hand-off line to `update.log` in the data folder before starting the install. On macOS the script appends its result; the Windows installer doesn't write to the log. The release's signature is ad-hoc, so the `codesign` check catches a corrupt download, not a build someone re-signed.
 
-Before handing off, Rally records the version it is installing in `update.json` in the data folder. If the next launch isn't on that version, the dashboard shows that the update didn't install, and Settings → About points to `update.log`. On launch, Rally also removes its own leftover download folders from the temp directory. Their names include a hash of the data folder, so a test instance with a different `RALLY_USER_DATA_DIR` doesn't touch another instance's download.
+Before handing off, Rally records the version it is installing in `update.json` in the data folder. If the next launch isn't on that version, the dashboard shows that the update didn't install, and Settings → About points to `update.log` on macOS, or to the release page on Windows so you can run the installer yourself. On launch, Rally also removes its own leftover download folders from the temp directory. Their names include a hash of the data folder, so a test instance with a different `RALLY_USER_DATA_DIR` doesn't touch another instance's download.
 
 Quitting stops any running Claude turn; the review shows as interrupted and resumes when you send feedback. The development build checks for updates but doesn't install them. A relaunched test instance keeps its `RALLY_USER_DATA_DIR`. The logic lives in `src/main/update/`.
 

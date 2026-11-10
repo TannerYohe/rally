@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs, windowsInstallArgs } from './install'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs, spawnDetached, WINDOWS_INSTALLER_ARGS } from './install'
 
 describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
   let root: string
@@ -106,26 +106,21 @@ describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
   })
 })
 
-describe.runIf(process.platform === 'win32')('WINDOWS_INSTALL_SCRIPT', () => {
+describe.runIf(process.platform === 'win32')('spawnDetached on Windows', () => {
   let root: string
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'rally-windows-install-test-'))
+    root = mkdtempSync(join(tmpdir(), 'rally-detached-test-'))
   })
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('runs the installer silently and logs its exit code, with quotes and spaces in the paths', () => {
-    const dir = join(root, "o'brien files")
-    mkdirSync(dir)
-    const installer = join(dir, 'fake-installer.cmd')
-    const log = join(dir, 'update.log')
-    writeFileSync(installer, '@echo %* > "%~dp0args.txt"\r\n@exit /b 3\r\n')
-    const result = spawnSync('powershell.exe', windowsInstallArgs(installer, log))
-    expect(result.status).toBe(0)
-    expect(readFileSync(join(dir, 'args.txt'), 'utf8').trim()).toBe('/S --force-run')
-    expect(readFileSync(log, 'utf8')).toContain('installer exited with code 3')
+  it('runs the detached child with the installer arguments', async () => {
+    const marker = join(root, 'args.txt')
+    const writeArgs = "require('fs').writeFileSync(process.argv[1], process.argv.slice(2).join(' '))"
+    await spawnDetached(process.execPath, ['-e', writeArgs, '--', marker, ...WINDOWS_INSTALLER_ARGS])
+    await vi.waitFor(() => expect(readFileSync(marker, 'utf8')).toBe('--updated /S --force-run'), { timeout: 10_000, interval: 100 })
   })
 })

@@ -33,27 +33,7 @@ if [ -d "$current_app" ]; then relaunch=$current_app; else relaunch=$previous_ap
 open --env "RALLY_USER_DATA_DIR=$data_dir" "$relaunch"
 `
 
-export const WINDOWS_INSTALL_SCRIPT = `
-param([string]$Installer, [string]$Log)
-"$(Get-Date -Format o) running $Installer" | Add-Content -LiteralPath $Log
-try {
-  $process = Start-Process -FilePath $Installer -ArgumentList '/S', '--force-run' -PassThru
-  $null = $process.Handle
-  $process.WaitForExit()
-  "installer exited with code $($process.ExitCode)" | Add-Content -LiteralPath $Log
-} catch {
-  "installer failed to start: $_" | Add-Content -LiteralPath $Log
-}
-`
-
-function powershellString(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`
-}
-
-export function windowsInstallArgs(installer: string, logPath: string): string[] {
-  const command = `& {${WINDOWS_INSTALL_SCRIPT}} -Installer ${powershellString(installer)} -Log ${powershellString(logPath)}`
-  return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')]
-}
+export const WINDOWS_INSTALLER_ARGS = ['--updated', '/S', '--force-run'] as const
 
 export function macBundlePath(exePath: string): string {
   return posix.resolve(exePath, '../../..')
@@ -94,7 +74,7 @@ export function installBlocker(release: ReleaseInfo, target: InstallTarget, canW
   return null
 }
 
-function spawnDetached(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
+export function spawnDetached(command: string, args: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true, env })
     child.once('error', reject)
@@ -153,8 +133,8 @@ export async function handOffMacInstall({ downloadPath, workDir, exePath, dataDi
   await spawnDetached('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'rally-update', ...args], MAC_SYSTEM_ENV)
 }
 
-export async function handOffWindowsInstall({ downloadPath, logPath }: HandOff): Promise<void> {
-  await spawnDetached('powershell.exe', windowsInstallArgs(downloadPath, logPath))
+export async function handOffWindowsInstall({ downloadPath }: HandOff): Promise<void> {
+  await spawnDetached(downloadPath, WINDOWS_INSTALLER_ARGS)
 }
 
 export async function handOffInstall(handOff: HandOff): Promise<void> {

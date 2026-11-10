@@ -273,6 +273,7 @@ export interface AppInfo {
   chrome: string
   node: string
   platform: string
+  platformId: string
   userDataDir: string
 }
 

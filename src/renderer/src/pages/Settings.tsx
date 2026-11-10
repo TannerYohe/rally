@@ -14,7 +14,7 @@ import {
   type UpdateState,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { RALLY_REPO_URL } from '@shared/repo'
+import { RALLY_REPO_URL, releasePageUrl } from '@shared/repo'
 import logo from '../../../../resources/icon.svg'
 import { Avatar } from '../components/Avatar'
 import { Switch } from '../components/Switch'
@@ -337,7 +337,7 @@ function AboutSection() {
         </div>
       </div>
       <Card title="Updates" description="Rally checks GitHub releases when you ask.">
-        {failedInstall && <FailedInstallRow attempt={failedInstall} onDismiss={dismissFailedInstall} />}
+        {failedInstall && <FailedInstallRow attempt={failedInstall} platformId={info.platformId} onDismiss={dismissFailedInstall} />}
         <UpdateRow state={update} currentVersion={info.version} />
         {update.status === 'available' && <ReleaseNotes release={update.release} />}
       </Card>
@@ -440,13 +440,25 @@ function UpdateRow({ state, currentVersion }: { state: UpdateState; currentVersi
   }
 }
 
-function FailedInstallRow({ attempt, onDismiss }: { attempt: InstallAttempt; onDismiss(): void }) {
-  const description = `Rally is still on the previous version. The install log is at ${attempt.logPath}.`
+function FailedInstallRow({ attempt, platformId, onDismiss }: { attempt: InstallAttempt; platformId: string; onDismiss(): void }) {
   return (
     <div className="flex items-center gap-6 bg-amber-950/30 px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="text-sm text-amber-200">Rally {attempt.version} didn't install</div>
-        <div className="select-text break-all text-xs text-amber-300/70">{description}</div>
+        <div className="select-text break-all text-xs text-amber-300/70">
+          Rally is still on the previous version.{' '}
+          {platformId === 'win32' ? (
+            <>
+              Download the installer from the{' '}
+              <a href={releasePageUrl(attempt.version)} target="_blank" rel="noreferrer" className="underline hover:text-amber-200">
+                release page
+              </a>{' '}
+              and run it.
+            </>
+          ) : (
+            <>The install log is at {attempt.logPath}.</>
+          )}
+        </div>
       </div>
       <button className={SECONDARY_BUTTON_CLASS} onClick={onDismiss}>
         Dismiss

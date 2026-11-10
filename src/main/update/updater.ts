@@ -27,6 +27,7 @@ export function appInfo(): AppInfo {
     chrome: process.versions.chrome,
     node: process.versions.node,
     platform: `${PLATFORM_LABELS[process.platform] ?? process.platform} ${process.arch}`,
+    platformId: process.platform,
     userDataDir: app.getPath('userData'),
   }
 }

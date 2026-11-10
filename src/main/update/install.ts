@@ -74,7 +74,7 @@ export function installBlocker(release: ReleaseInfo, target: InstallTarget, canW
   return null
 }
 
-function spawnDetached(command: string, args: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
+export function spawnDetached(command: string, args: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true, env })
     child.once('error', reject)

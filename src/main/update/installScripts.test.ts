@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs } from './install'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MAC_SWAP_SCRIPT, macPreviousAppPath, macSwapArgs, spawnDetached, WINDOWS_INSTALLER_ARGS } from './install'
 
 describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
   let root: string
@@ -103,5 +103,24 @@ describe.skipIf(process.platform === 'win32')('MAC_SWAP_SCRIPT', () => {
     const { log } = runScript({ failMoves: [paths.currentApp] })
     expect(versionOf(paths.currentApp)).toBe('old')
     expect(log).toContain('could not move the current app aside')
+  })
+})
+
+describe.runIf(process.platform === 'win32')('spawnDetached on Windows', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'rally-detached-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('runs the detached child with the installer arguments', async () => {
+    const marker = join(root, 'args.txt')
+    const writeArgs = "require('fs').writeFileSync(process.argv[1], process.argv.slice(2).join(' '))"
+    await spawnDetached(process.execPath, ['-e', writeArgs, '--', marker, ...WINDOWS_INSTALLER_ARGS])
+    await vi.waitFor(() => expect(readFileSync(marker, 'utf8')).toBe('--updated /S --force-run'), { timeout: 10_000, interval: 100 })
   })
 })

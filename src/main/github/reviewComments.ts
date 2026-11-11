@@ -86,7 +86,7 @@ export function hasReplies(drafts: Drafts): boolean {
 
 export function attachReplyTargets(drafts: Drafts, reviewComments: Map<number, ReviewComment>): Drafts {
   const comments = drafts.comments.map((comment) =>
-    canPostReply(comment) ? { ...comment, replyTarget: reviewComments.get(comment.replyToCommentId as number)?.target ?? null } : comment,
+    canPostReply(comment) ? { ...comment, replyTarget: reviewComments.get(comment.replyToCommentId)?.target ?? null } : comment,
   )
   return { ...drafts, comments }
 }

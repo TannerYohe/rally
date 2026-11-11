@@ -13,7 +13,7 @@ import {
   type RawRepliedComment,
   type ThreadComment,
 } from './reviewComments'
-import { threadsPage } from './reviewThreads.fixture'
+import { commentNodeId, threadsPage } from './reviewThreads.fixture'
 
 const mocks = vi.hoisted(() => ({ graphql: vi.fn() }))
 
@@ -133,20 +133,22 @@ describe('attachReplyTargets', () => {
 })
 
 describe('describeReplies', () => {
-  it('looks up only the comments the replies answer and attaches them', async () => {
+  it('looks up only the comments the replies answer and attaches each reply its own comment', async () => {
+    const rawFor = (id: string) => raw({ url: `https://github.com/acme/api/pull/12#discussion_${id}`, bodyText: `Comment ${id}` })
     mocks.graphql.mockImplementation(async (query: string, variables: { ids?: string[] }) => {
-      if (query.includes('reviewThreads')) return threadsPage({ threads: [{ id: 'PRRT_1', commentIds: [500, 501] }] })
-      return { nodes: (variables.ids ?? []).map(() => raw()) }
+      if (query.includes('reviewThreads')) return threadsPage({ threads: [{ id: 'PRRT_1', commentIds: [500, 501, 502] }] })
+      return { nodes: (variables.ids ?? []).map(rawFor) }
     })
-    const input = drafts([draft(), draft({ id: '2' }), draft({ id: '3', replyToCommentId: 999 })])
+    const input = drafts([draft(), draft({ id: '2', replyToCommentId: 500 }), draft({ id: '3' }), draft({ id: '4', replyToCommentId: 999 })])
 
     const result = await describeReplies(pr, input)
 
     const nodeLookups = mocks.graphql.mock.calls.filter(([query]) => !(query as string).includes('reviewThreads'))
-    expect(nodeLookups.map(([, variables]) => (variables as { ids: string[] }).ids)).toEqual([['PRRC_501']])
+    expect(nodeLookups.map(([, variables]) => (variables as { ids: string[] }).ids)).toEqual([[commentNodeId(501), commentNodeId(500)]])
     expect(result.comments.map((c) => c.replyTarget)).toEqual([
-      { found: true, comment: repliedComment(raw()) },
-      { found: true, comment: repliedComment(raw()) },
+      { found: true, comment: repliedComment(rawFor(commentNodeId(501))) },
+      { found: true, comment: repliedComment(rawFor(commentNodeId(500))) },
+      { found: true, comment: repliedComment(rawFor(commentNodeId(501))) },
       { found: false },
     ])
   })

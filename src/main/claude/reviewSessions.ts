@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback } from '@anthropic-ai/claude-agent-sdk'
@@ -45,11 +46,9 @@ const now = () => new Date().toISOString()
 const sessionDir = (sessionId: string) => join(tmpdir(), 'rally', sessionId)
 
 function removeSessionDir(sessionId: string): void {
-  try {
-    rmSync(sessionDir(sessionId), { recursive: true, force: true })
-  } catch (error) {
+  rm(sessionDir(sessionId), { recursive: true, force: true }).catch((error) => {
     console.error('Removing review session directory failed', { sessionId, error })
-  }
+  })
 }
 
 function failedResolution(threadIds: string[], error: string): ThreadResolution {

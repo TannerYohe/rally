@@ -109,6 +109,7 @@ mocks.stored = [
   storedSession(21),
   storedSession(22, { drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
   storedSession(23, { status: 'submitted', submitted: SUBMITTED, drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
+  storedSession(24, { drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -374,7 +375,7 @@ describe('publishing drafts', () => {
     expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
   })
 
-  it('looks up reply targets a restored or failed lookup left missing when the review is opened, once at a time', async () => {
+  it('looks up reply targets missing from a restored review when it is opened, once at a time', async () => {
     const finish = deferredLookup()
     reviewSessions.open('acme/api#22')
     reviewSessions.open('acme/api#22')
@@ -383,6 +384,16 @@ describe('publishing drafts', () => {
     await vi.waitFor(() => expect(session(22).drafts?.comments[0].replyTarget).toEqual(TARGET))
     reviewSessions.open('acme/api#22')
     expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a failed lookup the next time the review is opened', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mocks.describeReplies.mockRejectedValueOnce(new Error('offline')).mockImplementationOnce(async (_pr, d: Drafts) => withTargets(d))
+    reviewSessions.open('acme/api#24')
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalled())
+    reviewSessions.open('acme/api#24')
+    await vi.waitFor(() => expect(session(24).drafts?.comments[0].replyTarget).toEqual(TARGET))
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(2)
   })
 
   it('does not look up reply targets for a submitted review', () => {

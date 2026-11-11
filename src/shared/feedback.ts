@@ -68,11 +68,22 @@ export function submitBlockedReason(instructions: string): string | null {
   return instructions.trim() ? SUBMIT_WITH_INSTRUCTIONS_ERROR : null
 }
 
+function fileLocation(path: string, line: number | null, startLine: number | null = null): string {
+  if (line === null) return path
+  return startLine === null ? `${path}:${line}` : `${path}:${startLine}-${line}`
+}
+
+function replyLocation(comment: DraftComment): string {
+  const target = comment.replyTarget
+  if (!target) return `Reply to comment ${comment.replyToCommentId ?? '?'}`
+  const location = fileLocation(target.path, target.line)
+  return target.author ? `Reply to @${target.author} on ${location}` : `Reply on ${location}`
+}
+
 export function commentLocation(comment: DraftComment): string {
-  if (comment.kind === 'reply') return `Reply to comment ${comment.replyToCommentId ?? '?'}`
+  if (comment.kind === 'reply') return replyLocation(comment)
   if (!comment.path) return 'General comment'
-  if (comment.line === null) return comment.path
-  return comment.startLine === null ? `${comment.path}:${comment.line}` : `${comment.path}:${comment.startLine}-${comment.line}`
+  return fileLocation(comment.path, comment.line, comment.startLine)
 }
 
 export interface FinalReview {

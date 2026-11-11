@@ -173,6 +173,14 @@ describe('commentLocation', () => {
     expect(commentLocation({ ...base, kind: 'reply', replyToCommentId: 7 })).toBe('Reply to comment 7')
     expect(commentLocation({ ...base, kind: 'reply' })).toBe('Reply to comment ?')
   })
+
+  it('names the author and location of the comment a reply answers once Rally has looked it up', () => {
+    const target = { author: 'octocat', path: 'b.rb', line: 9, excerpt: 'Why?', url: 'https://github.com/acme/api/pull/12#discussion_r7' }
+    const reply = { ...base, kind: 'reply' as const, replyToCommentId: 7 }
+    expect(commentLocation({ ...reply, replyTarget: target })).toBe('Reply to @octocat on b.rb:9')
+    expect(commentLocation({ ...reply, replyTarget: { ...target, author: null, line: null } })).toBe('Reply on b.rb')
+    expect(commentLocation({ ...reply, replyTarget: null })).toBe('Reply to comment 7')
+  })
 })
 
 describe('submitBlockedReason', () => {

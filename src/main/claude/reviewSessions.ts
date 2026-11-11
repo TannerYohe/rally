@@ -84,6 +84,7 @@ class ReviewSessions extends EventEmitter {
   private posting = new Set<string>()
   private pendingFlush: NodeJS.Timeout | null = null
   private dirty = new Set<string>()
+  private replyLookups = new WeakSet<Drafts>()
 
   constructor() {
     super()
@@ -93,6 +94,12 @@ class ReviewSessions extends EventEmitter {
 
   getByPr(key: string): ReviewSession | null {
     return this.sessions.get(key) ?? null
+  }
+
+  open(key: string): ReviewSession | null {
+    const session = this.getByPr(key)
+    if (session?.drafts && !session.submitted) void this.lookUpReplyTargets(session.id, session.drafts)
+    return session
   }
 
   statusOf(key: string): SessionStatus | null {
@@ -340,12 +347,15 @@ class ReviewSessions extends EventEmitter {
 
   private async lookUpReplyTargets(sessionId: string, drafts: Drafts): Promise<void> {
     const session = this.find(sessionId)
-    if (!session || !needsReplyTargets(drafts)) return
+    if (!session || !needsReplyTargets(drafts) || this.replyLookups.has(drafts)) return
+    this.replyLookups.add(drafts)
     try {
       const described = await describeReplies(session.pr, drafts)
       if (this.find(sessionId)?.drafts === drafts) this.patch(sessionId, () => ({ drafts: described }), true)
     } catch (error) {
       console.warn('Looking up the comments that draft replies answer failed', { sessionId, pr: session.pr.url, error })
+    } finally {
+      this.replyLookups.delete(drafts)
     }
   }
 

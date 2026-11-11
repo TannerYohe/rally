@@ -38,7 +38,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.refreshPrs, () => prList.refresh())
   ipcMain.handle(IPC.hidePr, (_event, id: string, mode: HideMode) => prList.hide(id, mode))
   ipcMain.handle(IPC.unhidePr, (_event, id: string) => prList.unhide(id))
-  ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.getByPr(key))
+  ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.open(key))
   ipcMain.handle(IPC.startReview, (_event, pr: PrRef) => reviewSessions.start(pr))
   ipcMain.handle(IPC.sendFeedback, (_event, id: string, message: string) => reviewSessions.feedback(id, message))
   ipcMain.handle(IPC.submitReview, (_event, id: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]) =>

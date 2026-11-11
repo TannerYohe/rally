@@ -107,6 +107,8 @@ mocks.stored = [
   storedSession(19),
   storedSession(20),
   storedSession(21),
+  storedSession(22, { drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
+  storedSession(23, { status: 'submitted', submitted: SUBMITTED, drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -370,6 +372,22 @@ describe('publishing drafts', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(session(21).drafts).toEqual(second)
     expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
+  })
+
+  it('looks up reply targets a restored or failed lookup left missing when the review is opened, once at a time', async () => {
+    const finish = deferredLookup()
+    reviewSessions.open('acme/api#22')
+    reviewSessions.open('acme/api#22')
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
+    finish(withTargets(session(22).drafts!))
+    await vi.waitFor(() => expect(session(22).drafts?.comments[0].replyTarget).toEqual(TARGET))
+    reviewSessions.open('acme/api#22')
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not look up reply targets for a submitted review', () => {
+    reviewSessions.open('acme/api#23')
+    expect(mocks.describeReplies).not.toHaveBeenCalled()
   })
 
   it('ignores drafts published after the session was discarded', async () => {

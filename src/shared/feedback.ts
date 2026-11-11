@@ -84,7 +84,7 @@ export interface FinalReview {
 
 const canPostInline = (comment: DraftComment) => comment.kind === 'inline' && Boolean(comment.path) && comment.line !== null
 
-const canPostReply = (comment: DraftComment) => comment.kind === 'reply' && comment.replyToCommentId !== null
+export const canPostReply = (comment: DraftComment) => comment.kind === 'reply' && comment.replyToCommentId !== null
 
 export function finalReview(drafts: Drafts, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdit'>): FinalReview {
   const kept = keptComments(drafts, changes.edits)

@@ -1,5 +1,6 @@
-import type { PrRef, ReplyTarget } from '@shared/types'
-import { timeoutRequest, type GithubClient } from './client'
+import { canPostReply } from '@shared/feedback'
+import type { Drafts, PrRef, ReplyTarget } from '@shared/types'
+import { github, timeoutRequest, type GithubClient } from './client'
 
 const REVIEW_THREADS_QUERY = `
   query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
@@ -77,4 +78,19 @@ export async function fetchReviewComments(gh: GithubClient, pr: PrRef): Promise<
     cursor = pageInfo.hasNextPage ? pageInfo.endCursor : null
   } while (cursor)
   return comments
+}
+
+export function hasReplies(drafts: Drafts): boolean {
+  return drafts.comments.some(canPostReply)
+}
+
+export function attachReplyTargets(drafts: Drafts, reviewComments: Map<number, ReviewComment>): Drafts {
+  const comments = drafts.comments.map((comment) =>
+    canPostReply(comment) ? { ...comment, replyTarget: reviewComments.get(comment.replyToCommentId as number)?.target ?? null } : comment,
+  )
+  return { ...drafts, comments }
+}
+
+export async function describeReplies(pr: PrRef, drafts: Drafts): Promise<Drafts> {
+  return attachReplyTargets(drafts, await fetchReviewComments(await github(), pr))
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { excerpt, replyTarget, type RawReviewComment } from './reviewComments'
+import type { DraftComment, Drafts } from '@shared/types'
+import { attachReplyTargets, excerpt, hasReplies, replyTarget, type RawReviewComment } from './reviewComments'
 
 const raw = (overrides: Partial<RawReviewComment> = {}): RawReviewComment => ({
   databaseId: 501,
@@ -37,5 +38,34 @@ describe('replyTarget', () => {
 
   it('falls back to the original line on an outdated comment and tolerates a deleted author', () => {
     expect(replyTarget(raw({ line: null, author: null }))).toMatchObject({ author: null, line: 40 })
+  })
+})
+
+describe('attachReplyTargets', () => {
+  const draft = (overrides: Partial<DraftComment>): DraftComment => ({
+    id: '1',
+    kind: 'reply',
+    path: null,
+    line: null,
+    startLine: null,
+    side: 'RIGHT',
+    severity: 'medium',
+    body: 'Done?',
+    replyToCommentId: 501,
+    ...overrides,
+  })
+  const drafts = (comments: DraftComment[]): Drafts => ({ mode: 'followup', verdict: '', reportMarkdown: '', summaryBody: '', comments, priorConcerns: [] })
+  const target = replyTarget(raw())
+  const reviewComments = new Map([[501, { threadId: 'PRRT_1', target }]])
+
+  it('describes replies and marks ones whose comment is not in a review thread', () => {
+    const inline = draft({ id: '3', kind: 'inline', path: 'a.rb', line: 1, replyToCommentId: null })
+    const result = attachReplyTargets(drafts([draft({}), draft({ id: '2', replyToCommentId: 999 }), inline]), reviewComments)
+    expect(result.comments.map((c) => c.replyTarget)).toEqual([target, null, undefined])
+  })
+
+  it('only looks up drafts that reply to a comment', () => {
+    expect(hasReplies(drafts([draft({ replyToCommentId: null })]))).toBe(false)
+    expect(hasReplies(drafts([draft({})]))).toBe(true)
   })
 })

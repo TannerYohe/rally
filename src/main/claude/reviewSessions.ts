@@ -14,6 +14,7 @@ import {
 } from '@shared/feedback'
 import {
   priorConcernThreadIds,
+  type Drafts,
   prKey,
   type PrRef,
   type ReviewEvent,
@@ -26,6 +27,7 @@ import {
   type TurnMode,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
+import { describeReplies, hasReplies } from '../github/reviewComments'
 import { submitReview } from '../github/submitReview'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList } from '../prList'
@@ -288,7 +290,10 @@ class ReviewSessions extends EventEmitter {
     }
 
     const rallyServer = createRallyServer({
-      onDrafts: (drafts) => this.patch(sessionId, () => ({ drafts }), true),
+      onDrafts: (drafts) => {
+        this.patch(sessionId, () => ({ drafts }), true)
+        void this.describeReplies(sessionId, drafts)
+      },
     })
 
     try {
@@ -330,6 +335,17 @@ class ReviewSessions extends EventEmitter {
       this.controllers.delete(sessionId)
       this.patch(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()
+    }
+  }
+
+  private async describeReplies(sessionId: string, drafts: Drafts): Promise<void> {
+    if (!hasReplies(drafts)) return
+    const { pr } = this.byId(sessionId)
+    try {
+      const described = await describeReplies(pr, drafts)
+      if (this.find(sessionId)?.drafts === drafts) this.patch(sessionId, () => ({ drafts: described }), true)
+    } catch (error) {
+      console.warn('Looking up the comments that draft replies answer failed', { pr: pr.url, error: errorMessage(error) })
     }
   }
 

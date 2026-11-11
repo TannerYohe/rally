@@ -54,6 +54,8 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   submitReview: vi.fn(),
   recordRallyReview: vi.fn(),
+  describeReplies: vi.fn(),
+  onDrafts: (_drafts: Drafts) => {},
 }))
 
 vi.mock('../store', () => ({
@@ -64,6 +66,10 @@ vi.mock('../prList', () => ({
   prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
 }))
 vi.mock('../github/threads', () => ({ fetchOwnThreads: vi.fn(), resolveOwnThreads: mocks.resolveOwnThreads }))
+vi.mock('../github/reviewComments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../github/reviewComments')>()),
+  describeReplies: mocks.describeReplies,
+}))
 vi.mock('../github/submitReview', () => ({ submitReview: mocks.submitReview }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
@@ -73,7 +79,10 @@ vi.mock('./rallyTools', () => ({
   RALLY_SERVER: 'rally',
   RALLY_TOOL_PREFIX: 'mcp__rally__',
   PUBLISH_DRAFTS_TOOL: 'mcp__rally__publish_drafts',
-  createRallyServer: () => ({}),
+  createRallyServer: (handlers: { onDrafts(drafts: Drafts): void }) => {
+    mocks.onDrafts = handlers.onDrafts
+    return {}
+  },
 }))
 
 mocks.stored = [
@@ -93,6 +102,8 @@ mocks.stored = [
   storedSession(14),
   storedSession(15),
   storedSession(16),
+  storedSession(17),
+  storedSession(18),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -103,6 +114,7 @@ beforeEach(() => {
   mocks.resolveOwnThreads.mockReset()
   mocks.query.mockReset()
   mocks.submitReview.mockReset()
+  mocks.describeReplies.mockReset()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -286,5 +298,36 @@ describe('restoring sessions', () => {
   it('drops a pending selection when the review was never submitted', () => {
     expect(session(7).threadsToResolveOnSubmit).toBeUndefined()
     expect(session(7).threadResolution).toBeUndefined()
+  })
+})
+
+describe('publishing drafts', () => {
+  const TARGET = { author: 'octocat', path: 'a.rb', line: 3, excerpt: 'Should this be memoized?', url: 'https://github.com/acme/api/pull/17#discussion_r1' }
+
+  function publishOnTurn(published: Drafts) {
+    mocks.query.mockImplementation(async function* () {
+      mocks.onDrafts(published)
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+  }
+
+  it('describes the comment each reply answers', async () => {
+    const published = { ...drafts([]), comments: [THREAD_REPLY] }
+    mocks.describeReplies.mockImplementation(async (_pr, d: Drafts) => ({ ...d, comments: d.comments.map((c) => ({ ...c, replyTarget: TARGET })) }))
+    publishOnTurn(published)
+    await reviewSessions.feedback('test-session-17', 'go')
+    await vi.waitFor(() => expect(session(17).drafts?.comments[0].replyTarget).toEqual(TARGET))
+    expect(mocks.describeReplies).toHaveBeenCalledWith(expect.objectContaining({ number: 17 }), published)
+  })
+
+  it('keeps the published drafts when the lookup fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const published = { ...drafts([]), comments: [THREAD_REPLY] }
+    mocks.describeReplies.mockRejectedValue(new Error('rate limited'))
+    publishOnTurn(published)
+    await reviewSessions.feedback('test-session-18', 'go')
+    await vi.waitFor(() => expect(session(18).status).toBe('awaiting_feedback'))
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalled())
+    expect(session(18).drafts).toEqual(published)
   })
 })

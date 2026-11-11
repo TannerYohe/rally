@@ -13,6 +13,7 @@ import {
   type RawRepliedComment,
   type ThreadComment,
 } from './reviewComments'
+import { threadsPage } from './reviewThreads.fixture'
 
 const mocks = vi.hoisted(() => ({ graphql: vi.fn() }))
 
@@ -50,22 +51,6 @@ const draft = (overrides: Partial<DraftComment> = {}): DraftComment => ({
 
 const drafts = (comments: DraftComment[]): Drafts => ({ mode: 'followup', verdict: '', reportMarkdown: '', summaryBody: '', comments, priorConcerns: [] })
 
-const nodeId = (databaseId: number) => `PRRC_${databaseId}`
-
-const threadsPage = (threads: { id: string; databaseIds: (number | null)[] }[], endCursor?: string) => ({
-  repository: {
-    pullRequest: {
-      reviewThreads: {
-        pageInfo: { hasNextPage: Boolean(endCursor), endCursor: endCursor ?? null },
-        nodes: threads.map((t) => ({
-          id: t.id,
-          comments: { nodes: t.databaseIds.map((databaseId, i) => ({ id: databaseId === null ? `PRRC_null_${i}` : nodeId(databaseId), databaseId })) },
-        })),
-      },
-    },
-  },
-})
-
 beforeEach(() => {
   mocks.graphql.mockReset()
 })
@@ -101,8 +86,8 @@ describe('repliedComment', () => {
 describe('fetchThreadComments', () => {
   it('maps every comment id across pages to its thread, skipping comments with no database id', async () => {
     mocks.graphql
-      .mockResolvedValueOnce(threadsPage([{ id: 'PRRT_1', databaseIds: [100, null] }], 'c1'))
-      .mockResolvedValueOnce(threadsPage([{ id: 'PRRT_2', databaseIds: [501, 502] }]))
+      .mockResolvedValueOnce(threadsPage({ threads: [{ id: 'PRRT_1', commentIds: [100, null] }], endCursor: 'c1' }))
+      .mockResolvedValueOnce(threadsPage({ threads: [{ id: 'PRRT_2', commentIds: [501, 502] }] }))
 
     const comments = await fetchThreadComments(gh, pr)
 
@@ -146,7 +131,7 @@ describe('attachReplyTargets', () => {
 describe('describeReplies', () => {
   it('looks up only the comments the replies answer and attaches them', async () => {
     mocks.graphql.mockImplementation(async (query: string, variables: { ids?: string[] }) => {
-      if (query.includes('reviewThreads')) return threadsPage([{ id: 'PRRT_1', databaseIds: [500, 501] }])
+      if (query.includes('reviewThreads')) return threadsPage({ threads: [{ id: 'PRRT_1', commentIds: [500, 501] }] })
       return { nodes: (variables.ids ?? []).map(() => raw()) }
     })
     const input = drafts([draft(), draft({ id: '2' }), draft({ id: '3', replyToCommentId: 999 })])
@@ -164,7 +149,7 @@ describe('describeReplies', () => {
 
   it('marks a reply as not found when its comment was deleted between lookups', async () => {
     mocks.graphql.mockImplementation(async (query: string) => {
-      if (query.includes('reviewThreads')) return threadsPage([{ id: 'PRRT_1', databaseIds: [501] }])
+      if (query.includes('reviewThreads')) return threadsPage({ threads: [{ id: 'PRRT_1', commentIds: [501] }] })
       return { nodes: [null] }
     })
 

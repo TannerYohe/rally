@@ -105,6 +105,8 @@ mocks.stored = [
   storedSession(17),
   storedSession(18),
   storedSession(19),
+  storedSession(20),
+  storedSession(21),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -308,16 +310,24 @@ describe('publishing drafts', () => {
     comment: { author: 'octocat', path: 'a.rb', line: 3, excerpt: 'Should this be memoized?', url: 'https://github.com/acme/api/pull/17#discussion_r1' },
   }
 
-  function publishOnTurn(published: Drafts) {
+  const withTargets = (d: Drafts): Drafts => ({ ...d, comments: d.comments.map((c) => ({ ...c, replyTarget: TARGET })) })
+
+  function publishOnTurn(...published: Drafts[]) {
     mocks.query.mockImplementation(async function* () {
-      mocks.onDrafts(published)
+      for (const d of published) mocks.onDrafts(d)
       yield { type: 'result', subtype: 'success', is_error: false }
     })
   }
 
+  function deferredLookup(): (described: Drafts) => void {
+    let finish: (described: Drafts) => void = () => {}
+    mocks.describeReplies.mockReturnValueOnce(new Promise<Drafts>((resolve) => (finish = resolve)))
+    return (described) => finish(described)
+  }
+
   it('describes the comment each reply answers', async () => {
     const published = { ...drafts([]), comments: [THREAD_REPLY] }
-    mocks.describeReplies.mockImplementation(async (_pr, d: Drafts) => ({ ...d, comments: d.comments.map((c) => ({ ...c, replyTarget: TARGET })) }))
+    mocks.describeReplies.mockImplementation(async (_pr, d: Drafts) => withTargets(d))
     publishOnTurn(published)
     await reviewSessions.feedback('test-session-17', 'go')
     await vi.waitFor(() => expect(session(17).drafts?.comments[0].replyTarget).toEqual(TARGET))
@@ -334,6 +344,32 @@ describe('publishing drafts', () => {
     await vi.waitFor(() => expect(console.warn).toHaveBeenCalled())
     expect(console.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ sessionId: 'test-session-18', error: expect.any(Error) }))
     expect(session(18).drafts).toEqual(published)
+  })
+
+  it('drops a lookup that finishes after Claude published newer drafts', async () => {
+    const first = { ...drafts([]), comments: [{ ...THREAD_REPLY, body: 'First.' }] }
+    const second = { ...drafts([]), comments: [{ ...THREAD_REPLY, body: 'Second.' }] }
+    const finishFirst = deferredLookup()
+    mocks.describeReplies.mockImplementationOnce(async (_pr, d: Drafts) => withTargets(d))
+    publishOnTurn(first, second)
+    await reviewSessions.feedback('test-session-20', 'go')
+    await vi.waitFor(() => expect(session(20).drafts).toEqual(withTargets(second)))
+    finishFirst(withTargets(first))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(session(20).drafts).toEqual(withTargets(second))
+  })
+
+  it('drops a late lookup when the newer drafts have no replies to look up', async () => {
+    const first = { ...drafts([]), comments: [THREAD_REPLY] }
+    const second = { ...drafts([]), comments: [] }
+    const finishFirst = deferredLookup()
+    publishOnTurn(first, second)
+    await reviewSessions.feedback('test-session-21', 'go')
+    await vi.waitFor(() => expect(session(21).status).toBe('awaiting_feedback'))
+    finishFirst(withTargets(first))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(session(21).drafts).toEqual(second)
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
   })
 
   it('ignores drafts published after the session was discarded', async () => {

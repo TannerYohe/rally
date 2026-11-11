@@ -104,6 +104,7 @@ mocks.stored = [
   storedSession(16),
   storedSession(17),
   storedSession(18),
+  storedSession(19),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -331,6 +332,17 @@ describe('publishing drafts', () => {
     await reviewSessions.feedback('test-session-18', 'go')
     await vi.waitFor(() => expect(session(18).status).toBe('awaiting_feedback'))
     await vi.waitFor(() => expect(console.warn).toHaveBeenCalled())
+    expect(console.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ sessionId: 'test-session-18', error: expect.any(Error) }))
     expect(session(18).drafts).toEqual(published)
+  })
+
+  it('ignores drafts published after the session was discarded', async () => {
+    publishOnTurn({ ...drafts([]), comments: [] })
+    await reviewSessions.feedback('test-session-19', 'go')
+    await vi.waitFor(() => expect(session(19).status).toBe('awaiting_feedback'))
+    reviewSessions.discard('test-session-19')
+    mocks.onDrafts({ ...drafts([]), comments: [THREAD_REPLY] })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mocks.describeReplies).not.toHaveBeenCalled()
   })
 })

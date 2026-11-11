@@ -292,7 +292,7 @@ class ReviewSessions extends EventEmitter {
     const rallyServer = createRallyServer({
       onDrafts: (drafts) => {
         this.patch(sessionId, () => ({ drafts }), true)
-        void this.describeReplies(sessionId, drafts)
+        void this.lookUpReplyTargets(sessionId, drafts)
       },
     })
 
@@ -338,14 +338,14 @@ class ReviewSessions extends EventEmitter {
     }
   }
 
-  private async describeReplies(sessionId: string, drafts: Drafts): Promise<void> {
-    if (!needsReplyTargets(drafts)) return
-    const { pr } = this.byId(sessionId)
+  private async lookUpReplyTargets(sessionId: string, drafts: Drafts): Promise<void> {
+    const session = this.find(sessionId)
+    if (!session || !needsReplyTargets(drafts)) return
     try {
-      const described = await describeReplies(pr, drafts)
+      const described = await describeReplies(session.pr, drafts)
       if (this.find(sessionId)?.drafts === drafts) this.patch(sessionId, () => ({ drafts: described }), true)
     } catch (error) {
-      console.warn('Looking up the comments that draft replies answer failed', { pr: pr.url, error: errorMessage(error) })
+      console.warn('Looking up the comments that draft replies answer failed', { sessionId, pr: session.pr.url, error })
     }
   }
 

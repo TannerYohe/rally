@@ -1,5 +1,5 @@
 import { canPostReply } from '@shared/feedback'
-import type { DraftComment, Drafts, PrRef, RepliedComment } from '@shared/types'
+import type { DraftComment, Drafts, PrRef, RepliedComment, ReplyTarget } from '@shared/types'
 import { github, GITHUB_TIMEOUT_MS, timeoutRequest, type GithubClient } from './client'
 import { fetchNodes } from './queries'
 
@@ -98,11 +98,10 @@ export function needsReplyTargets(drafts: Drafts): boolean {
   return drafts.comments.some((comment) => canPostReply(comment) && comment.replyTarget === undefined)
 }
 
-export function attachReplyTargets(drafts: Drafts, repliedComments: Map<number, RepliedComment>): Drafts {
+export function attachReplyTargets(drafts: Drafts, targets: Map<number, ReplyTarget>): Drafts {
   const comments = drafts.comments.map((comment) => {
-    if (!canPostReply(comment)) return comment
-    const replied = repliedComments.get(comment.replyToCommentId)
-    return { ...comment, replyTarget: replied ? { found: true as const, comment: replied } : { found: false as const } }
+    const replyTarget = canPostReply(comment) ? targets.get(comment.replyToCommentId) : undefined
+    return replyTarget ? { ...comment, replyTarget } : comment
   })
   return { ...drafts, comments }
 }
@@ -117,13 +116,17 @@ async function fetchRepliedComments(gh: GithubClient, threadComments: ThreadComm
   return replied
 }
 
+/** Looks up the comment each reply answers, leaving a reply's target unset when its comment's details couldn't be fetched. */
 export async function describeReplies(pr: PrRef, drafts: Drafts): Promise<Drafts> {
   const gh = await github()
   const threadComments = await fetchThreadComments(gh, pr)
+  const targets = new Map<number, ReplyTarget>()
   const answered = new Map<number, ThreadComment>()
-  for (const comment of drafts.comments) {
-    const threadComment = threadCommentFor(threadComments, comment)
+  for (const reply of drafts.comments.filter(canPostReply)) {
+    const threadComment = threadCommentFor(threadComments, reply)
     if (threadComment) answered.set(threadComment.databaseId, threadComment)
+    else targets.set(reply.replyToCommentId, { found: false })
   }
-  return attachReplyTargets(drafts, await fetchRepliedComments(gh, [...answered.values()]))
+  for (const [databaseId, comment] of await fetchRepliedComments(gh, [...answered.values()])) targets.set(databaseId, { found: true, comment })
+  return attachReplyTargets(drafts, targets)
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DraftComment, Drafts, PrRef } from '@shared/types'
+import type { DraftComment, Drafts, PrRef, ReplyTarget } from '@shared/types'
 import type { GithubClient } from './client'
 import {
   attachReplyTargets,
@@ -120,11 +120,15 @@ describe('needsReplyTargets', () => {
 })
 
 describe('attachReplyTargets', () => {
-  it('describes replies and marks ones whose comment is not in a review thread', () => {
-    const replied = repliedComment(raw())
-    const inline = draft({ id: '3', kind: 'inline', path: 'a.rb', line: 1, replyToCommentId: null })
-    const result = attachReplyTargets(drafts([draft(), draft({ id: '2', replyToCommentId: 999 }), inline]), new Map([[501, replied]]))
-    expect(result.comments.map((c) => c.replyTarget)).toEqual([{ found: true, comment: replied }, { found: false }, undefined])
+  it('attaches each reply its target and leaves replies with no target and inline comments alone', () => {
+    const found = { found: true as const, comment: repliedComment(raw()) }
+    const inline = draft({ id: '4', kind: 'inline', path: 'a.rb', line: 1, replyToCommentId: null })
+    const targets = new Map<number, ReplyTarget>([
+      [501, found],
+      [999, { found: false }],
+    ])
+    const result = attachReplyTargets(drafts([draft(), draft({ id: '2', replyToCommentId: 999 }), draft({ id: '3', replyToCommentId: 502 }), inline]), targets)
+    expect(result.comments.map((c) => c.replyTarget)).toEqual([found, { found: false }, undefined, undefined])
   })
 })
 
@@ -147,7 +151,7 @@ describe('describeReplies', () => {
     ])
   })
 
-  it('marks a reply as not found when its comment was deleted between lookups', async () => {
+  it("leaves a reply's target unset for a later retry when its comment's details can't be fetched", async () => {
     mocks.graphql.mockImplementation(async (query: string) => {
       if (query.includes('reviewThreads')) return threadsPage({ threads: [{ id: 'PRRT_1', commentIds: [501] }] })
       return { nodes: [null] }
@@ -155,6 +159,7 @@ describe('describeReplies', () => {
 
     const result = await describeReplies(pr, drafts([draft()]))
 
-    expect(result.comments[0].replyTarget).toEqual({ found: false })
+    expect(result.comments[0].replyTarget).toBeUndefined()
+    expect(needsReplyTargets(result)).toBe(true)
   })
 })

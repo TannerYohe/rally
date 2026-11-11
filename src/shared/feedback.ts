@@ -74,16 +74,29 @@ function fileLocation(path: string, line: number | null, startLine: number | nul
 }
 
 function replyLocation(comment: DraftComment): string {
-  const target = comment.replyTarget
-  if (!target) return `Reply to comment ${comment.replyToCommentId ?? '?'}`
-  const location = fileLocation(target.path, target.line)
-  return target.author ? `Reply to @${target.author} on ${location}` : `Reply on ${location}`
+  if (!comment.replyTarget?.found) return `Reply to comment ${comment.replyToCommentId ?? '?'}`
+  const { author, path, line } = comment.replyTarget.comment
+  const location = fileLocation(path, line)
+  return author ? `Reply to @${author} on ${location}` : `Reply on ${location}`
 }
 
 export function commentLocation(comment: DraftComment): string {
   if (comment.kind === 'reply') return replyLocation(comment)
   if (!comment.path) return 'General comment'
   return fileLocation(comment.path, comment.line, comment.startLine)
+}
+
+export type ReplyContext = { kind: 'quote'; excerpt: string; url: string } | { kind: 'warning'; message: string }
+
+export function replyContext(comment: DraftComment): ReplyContext | null {
+  if (comment.kind !== 'reply') return null
+  if (comment.replyToCommentId === null) return { kind: 'warning', message: 'This reply has no comment id, so it will post in the review body.' }
+  if (comment.replyTarget === undefined) return null
+  if (!comment.replyTarget.found) {
+    return { kind: 'warning', message: `Comment ${comment.replyToCommentId} isn't in a review thread on this PR, so this reply will post in the review body.` }
+  }
+  const { excerpt, url } = comment.replyTarget.comment
+  return { kind: 'quote', excerpt: excerpt || 'Empty comment', url }
 }
 
 export interface FinalReview {

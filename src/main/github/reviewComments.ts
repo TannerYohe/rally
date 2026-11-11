@@ -1,5 +1,5 @@
 import { canPostReply } from '@shared/feedback'
-import type { Drafts, PrRef, ReplyTarget } from '@shared/types'
+import type { Drafts, PrRef, RepliedComment } from '@shared/types'
 import { github, timeoutRequest, type GithubClient } from './client'
 
 const REVIEW_THREADS_QUERY = `
@@ -38,7 +38,7 @@ interface ReviewThreadsResponse {
 
 export interface ReviewComment {
   threadId: string
-  target: ReplyTarget
+  comment: RepliedComment
 }
 
 const EXCERPT_LENGTH = 160
@@ -48,7 +48,7 @@ export function excerpt(text: string): string {
   return flat.length > EXCERPT_LENGTH ? `${flat.slice(0, EXCERPT_LENGTH - 1).trimEnd()}…` : flat
 }
 
-export function replyTarget(comment: RawReviewComment): ReplyTarget {
+export function repliedComment(comment: RawReviewComment): RepliedComment {
   return {
     author: comment.author?.login ?? null,
     path: comment.path,
@@ -72,7 +72,7 @@ export async function fetchReviewComments(gh: GithubClient, pr: PrRef): Promise<
     const { nodes, pageInfo } = response.repository.pullRequest.reviewThreads
     for (const thread of nodes) {
       for (const comment of thread.comments.nodes) {
-        if (comment.databaseId !== null) comments.set(comment.databaseId, { threadId: thread.id, target: replyTarget(comment) })
+        if (comment.databaseId !== null) comments.set(comment.databaseId, { threadId: thread.id, comment: repliedComment(comment) })
       }
     }
     cursor = pageInfo.hasNextPage ? pageInfo.endCursor : null
@@ -85,9 +85,11 @@ export function hasReplies(drafts: Drafts): boolean {
 }
 
 export function attachReplyTargets(drafts: Drafts, reviewComments: Map<number, ReviewComment>): Drafts {
-  const comments = drafts.comments.map((comment) =>
-    canPostReply(comment) ? { ...comment, replyTarget: reviewComments.get(comment.replyToCommentId)?.target ?? null } : comment,
-  )
+  const comments = drafts.comments.map((comment) => {
+    if (!canPostReply(comment)) return comment
+    const replied = reviewComments.get(comment.replyToCommentId)?.comment
+    return { ...comment, replyTarget: replied ? { found: true as const, comment: replied } : { found: false as const } }
+  })
   return { ...drafts, comments }
 }
 

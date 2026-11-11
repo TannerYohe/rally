@@ -1,5 +1,5 @@
 import type { DraftComment, Drafts, Severity } from '@shared/types'
-import { bodyEdited, commentLocation, type DraftEdits } from '@shared/feedback'
+import { bodyEdited, commentLocation, replyContext, type DraftEdits } from '@shared/feedback'
 import { BodyTextarea } from './BodyTextarea'
 
 const SEVERITY_STYLES: Record<Severity, string> = {
@@ -17,26 +17,24 @@ const SEVERITY_ACCENTS: Record<Severity, string> = {
 }
 
 function ReplyContext({ comment }: { comment: DraftComment }) {
-  if (comment.kind !== 'reply' || comment.replyTarget === undefined) return null
-  if (comment.replyTarget === null) {
-    return (
-      <div className="mb-2 text-xs text-amber-300">
-        Comment {comment.replyToCommentId} isn't in a review thread on this PR, so this reply will post in the review body.
-      </div>
-    )
+  const context = replyContext(comment)
+  if (context === null) return null
+  switch (context.kind) {
+    case 'warning':
+      return <div className="mb-2 text-xs text-amber-300">{context.message}</div>
+    case 'quote':
+      return (
+        <a
+          className="mb-2 block border-l-2 border-ink-600 pl-2 text-xs text-ink-400 hover:border-primary-400 hover:text-ink-200"
+          href={context.url}
+          target="_blank"
+          rel="noreferrer"
+          title="Open the comment on GitHub"
+        >
+          <span className="line-clamp-2">{context.excerpt}</span>
+        </a>
+      )
   }
-  const { excerpt, url } = comment.replyTarget
-  return (
-    <a
-      className="mb-2 block border-l-2 border-ink-600 pl-2 text-xs text-ink-400 hover:border-primary-400 hover:text-ink-200"
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      title="Open the comment on GitHub"
-    >
-      <span className="line-clamp-2">{excerpt || 'Empty comment'}</span>
-    </a>
-  )
 }
 
 interface Props {

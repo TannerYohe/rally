@@ -302,7 +302,10 @@ describe('restoring sessions', () => {
 })
 
 describe('publishing drafts', () => {
-  const TARGET = { author: 'octocat', path: 'a.rb', line: 3, excerpt: 'Should this be memoized?', url: 'https://github.com/acme/api/pull/17#discussion_r1' }
+  const TARGET = {
+    found: true,
+    comment: { author: 'octocat', path: 'a.rb', line: 3, excerpt: 'Should this be memoized?', url: 'https://github.com/acme/api/pull/17#discussion_r1' },
+  }
 
   function publishOnTurn(published: Drafts) {
     mocks.query.mockImplementation(async function* () {

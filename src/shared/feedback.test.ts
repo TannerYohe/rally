@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Drafts } from './types'
+import type { Drafts, ReplyTarget } from './types'
 import {
   commentLocation,
   feedbackMessage,
@@ -7,6 +7,7 @@ import {
   foldIntoBody,
   isEmptyCommentReview,
   keptCommentCount,
+  replyContext,
   SUBMIT_WITH_INSTRUCTIONS_ERROR,
   submitBlockedReason,
   type DraftChanges,
@@ -172,6 +173,49 @@ describe('commentLocation', () => {
     expect(commentLocation({ ...base, path: null })).toBe('General comment')
     expect(commentLocation({ ...base, kind: 'reply', replyToCommentId: 7 })).toBe('Reply to comment 7')
     expect(commentLocation({ ...base, kind: 'reply' })).toBe('Reply to comment ?')
+  })
+
+  it('names the author and location of the comment a reply answers once Rally has looked it up', () => {
+    const replied = { author: 'octocat', path: 'b.rb', line: 9, excerpt: 'Why?', url: 'https://github.com/acme/api/pull/12#discussion_r7' }
+    const reply = { ...base, kind: 'reply' as const, replyToCommentId: 7 }
+    expect(commentLocation({ ...reply, replyTarget: { found: true, comment: replied } })).toBe('Reply to @octocat on b.rb:9')
+    expect(commentLocation({ ...reply, replyTarget: { found: true, comment: { ...replied, author: null, line: null } } })).toBe('Reply on b.rb')
+    expect(commentLocation({ ...reply, replyTarget: { found: false } })).toBe('Reply to comment 7')
+  })
+})
+
+describe('replyContext', () => {
+  const reply = { ...drafts.comments[0], kind: 'reply' as const, replyToCommentId: 7 }
+  const replied = { author: 'octocat', path: 'b.rb', line: 9, excerpt: 'Why?', url: 'https://github.com/acme/api/pull/12#discussion_r7' }
+
+  it('shows nothing for an inline comment or a reply Rally has not looked up', () => {
+    expect(replyContext(drafts.comments[0])).toBeNull()
+    expect(replyContext(reply)).toBeNull()
+  })
+
+  it('quotes the comment a reply answers, linked to it', () => {
+    expect(replyContext({ ...reply, replyTarget: { found: true, comment: replied } })).toEqual({ kind: 'quote', excerpt: 'Why?', url: replied.url })
+    expect(replyContext({ ...reply, replyTarget: { found: true, comment: { ...replied, excerpt: '' } } })).toMatchObject({ excerpt: 'Empty comment' })
+  })
+
+  it('warns that a reply whose comment is not in a review thread will post in the review body', () => {
+    expect(replyContext({ ...reply, replyTarget: { found: false } })).toEqual({
+      kind: 'warning',
+      message: "Comment 7 isn't in a review thread on this PR, so this reply will post in the review body.",
+    })
+  })
+
+  it('treats a stored target without a boolean found as not looked up', () => {
+    expect(replyContext({ ...reply, replyTarget: null as unknown as ReplyTarget })).toBeNull()
+    expect(replyContext({ ...reply, replyTarget: replied as unknown as ReplyTarget })).toBeNull()
+    expect(commentLocation({ ...reply, replyTarget: null as unknown as ReplyTarget })).toBe('Reply to comment 7')
+  })
+
+  it('warns that a reply with no comment id will post in the review body, without a lookup', () => {
+    expect(replyContext({ ...reply, replyToCommentId: null })).toEqual({
+      kind: 'warning',
+      message: 'This reply has no comment id, so it will post in the review body.',
+    })
   })
 })
 

@@ -1,4 +1,4 @@
-import type { DraftComment, Drafts, ReviewEvent } from './types'
+import type { DraftComment, Drafts, ReplyTarget, ReviewEvent } from './types'
 
 export interface DraftEdit {
   body?: string
@@ -68,11 +68,43 @@ export function submitBlockedReason(instructions: string): string | null {
   return instructions.trim() ? SUBMIT_WITH_INSTRUCTIONS_ERROR : null
 }
 
+function fileLocation(path: string, line: number | null, startLine: number | null = null): string {
+  if (line === null) return path
+  return startLine === null ? `${path}:${line}` : `${path}:${startLine}-${line}`
+}
+
+/** Returns a reply's looked-up target, treating a stored value without a boolean `found` as not looked up. */
+export function lookedUpReplyTarget(comment: DraftComment): ReplyTarget | undefined {
+  const target = comment.replyTarget
+  return typeof target?.found === 'boolean' ? target : undefined
+}
+
+function replyLocation(comment: DraftComment): string {
+  const target = lookedUpReplyTarget(comment)
+  if (!target?.found) return `Reply to comment ${comment.replyToCommentId ?? '?'}`
+  const { author, path, line } = target.comment
+  const location = fileLocation(path, line)
+  return author ? `Reply to @${author} on ${location}` : `Reply on ${location}`
+}
+
 export function commentLocation(comment: DraftComment): string {
-  if (comment.kind === 'reply') return `Reply to comment ${comment.replyToCommentId ?? '?'}`
+  if (comment.kind === 'reply') return replyLocation(comment)
   if (!comment.path) return 'General comment'
-  if (comment.line === null) return comment.path
-  return comment.startLine === null ? `${comment.path}:${comment.line}` : `${comment.path}:${comment.startLine}-${comment.line}`
+  return fileLocation(comment.path, comment.line, comment.startLine)
+}
+
+export type ReplyContext = { kind: 'quote'; excerpt: string; url: string } | { kind: 'warning'; message: string }
+
+export function replyContext(comment: DraftComment): ReplyContext | null {
+  if (comment.kind !== 'reply') return null
+  if (comment.replyToCommentId === null) return { kind: 'warning', message: 'This reply has no comment id, so it will post in the review body.' }
+  const target = lookedUpReplyTarget(comment)
+  if (target === undefined) return null
+  if (!target.found) {
+    return { kind: 'warning', message: `Comment ${comment.replyToCommentId} isn't in a review thread on this PR, so this reply will post in the review body.` }
+  }
+  const { excerpt, url } = target.comment
+  return { kind: 'quote', excerpt: excerpt || 'Empty comment', url }
 }
 
 export interface FinalReview {
@@ -84,7 +116,9 @@ export interface FinalReview {
 
 const canPostInline = (comment: DraftComment) => comment.kind === 'inline' && Boolean(comment.path) && comment.line !== null
 
-const canPostReply = (comment: DraftComment) => comment.kind === 'reply' && comment.replyToCommentId !== null
+export type PostableReply = DraftComment & { kind: 'reply'; replyToCommentId: number }
+
+export const canPostReply = (comment: DraftComment): comment is PostableReply => comment.kind === 'reply' && comment.replyToCommentId !== null
 
 export function finalReview(drafts: Drafts, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdit'>): FinalReview {
   const kept = keptComments(drafts, changes.edits)

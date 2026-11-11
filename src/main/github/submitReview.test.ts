@@ -2,6 +2,7 @@ import { GraphqlResponseError } from '@octokit/graphql'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FinalReview } from '@shared/feedback'
 import type { DraftComment, PrRef } from '@shared/types'
+import { threadsPage, type ThreadsPage } from './reviewThreads.fixture'
 import type { ListedReview } from './submitReview'
 
 const mocks = vi.hoisted(() => ({
@@ -66,22 +67,6 @@ const listed = (overrides: Partial<ListedReview>): ListedReview => ({
   submitted_at: '2026-11-09T10:00:00Z',
   html_url: 'https://github.com/acme/api/pull/12#pullrequestreview-1',
   ...overrides,
-})
-
-interface ThreadsPage {
-  threads: { id: string; commentIds: number[] }[]
-  endCursor?: string
-}
-
-const threadsPage = ({ threads, endCursor }: ThreadsPage) => ({
-  repository: {
-    pullRequest: {
-      reviewThreads: {
-        pageInfo: { hasNextPage: Boolean(endCursor), endCursor: endCursor ?? null },
-        nodes: threads.map((t) => ({ id: t.id, comments: { nodes: t.commentIds.map((databaseId) => ({ databaseId })) } })),
-      },
-    },
-  },
 })
 
 function graphqlError(type: string, message: string) {

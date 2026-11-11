@@ -1,5 +1,5 @@
-import type { Drafts, Severity } from '@shared/types'
-import { bodyEdited, commentLocation, type DraftEdits } from '@shared/feedback'
+import type { DraftComment, Drafts, Severity } from '@shared/types'
+import { bodyEdited, commentLocation, replyContext, type DraftEdits } from '@shared/feedback'
 import { BodyTextarea } from './BodyTextarea'
 
 const SEVERITY_STYLES: Record<Severity, string> = {
@@ -14,6 +14,27 @@ const SEVERITY_ACCENTS: Record<Severity, string> = {
   high: 'border-l-orange-400',
   medium: 'border-l-yellow-300',
   nit: 'border-l-ink-500',
+}
+
+function ReplyContext({ comment }: { comment: DraftComment }) {
+  const context = replyContext(comment)
+  if (context === null) return null
+  switch (context.kind) {
+    case 'warning':
+      return <div className="mb-2 text-xs text-amber-300">{context.message}</div>
+    case 'quote':
+      return (
+        <a
+          className="mb-2 block border-l-2 border-ink-600 pl-2 text-xs text-ink-400 hover:border-primary-400 hover:text-ink-200"
+          href={context.url}
+          target="_blank"
+          rel="noreferrer"
+          title="Open the comment on GitHub"
+        >
+          <span className="line-clamp-2">{context.excerpt}</span>
+        </a>
+      )
+  }
 }
 
 interface Props {
@@ -56,6 +77,7 @@ export function DraftList({ drafts, edits, disabled, onEdit }: Props) {
                 </button>
               </div>
             </div>
+            <ReplyContext comment={comment} />
             <BodyTextarea value={body} disabled={disabled || dropped} onChange={(value) => onEdit(comment.id, { ...edit, body: value })} />
           </li>
         )

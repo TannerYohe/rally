@@ -54,6 +54,8 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   submitReview: vi.fn(),
   recordRallyReview: vi.fn(),
+  describeReplies: vi.fn(),
+  onDrafts: (_drafts: Drafts) => {},
 }))
 
 vi.mock('../store', () => ({
@@ -64,6 +66,10 @@ vi.mock('../prList', () => ({
   prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
 }))
 vi.mock('../github/threads', () => ({ fetchOwnThreads: vi.fn(), resolveOwnThreads: mocks.resolveOwnThreads }))
+vi.mock('../github/reviewComments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../github/reviewComments')>()),
+  describeReplies: mocks.describeReplies,
+}))
 vi.mock('../github/submitReview', () => ({ submitReview: mocks.submitReview }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
@@ -73,7 +79,10 @@ vi.mock('./rallyTools', () => ({
   RALLY_SERVER: 'rally',
   RALLY_TOOL_PREFIX: 'mcp__rally__',
   PUBLISH_DRAFTS_TOOL: 'mcp__rally__publish_drafts',
-  createRallyServer: () => ({}),
+  createRallyServer: (handlers: { onDrafts(drafts: Drafts): void }) => {
+    mocks.onDrafts = handlers.onDrafts
+    return {}
+  },
 }))
 
 mocks.stored = [
@@ -93,6 +102,14 @@ mocks.stored = [
   storedSession(14),
   storedSession(15),
   storedSession(16),
+  storedSession(17),
+  storedSession(18),
+  storedSession(19),
+  storedSession(20),
+  storedSession(21),
+  storedSession(22, { drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
+  storedSession(23, { status: 'submitted', submitted: SUBMITTED, drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
+  storedSession(24, { drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -103,6 +120,7 @@ beforeEach(() => {
   mocks.resolveOwnThreads.mockReset()
   mocks.query.mockReset()
   mocks.submitReview.mockReset()
+  mocks.describeReplies.mockReset()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -286,5 +304,110 @@ describe('restoring sessions', () => {
   it('drops a pending selection when the review was never submitted', () => {
     expect(session(7).threadsToResolveOnSubmit).toBeUndefined()
     expect(session(7).threadResolution).toBeUndefined()
+  })
+})
+
+describe('publishing drafts', () => {
+  const TARGET = {
+    found: true,
+    comment: { author: 'octocat', path: 'a.rb', line: 3, excerpt: 'Should this be memoized?', url: 'https://github.com/acme/api/pull/17#discussion_r1' },
+  }
+
+  const withTargets = (d: Drafts): Drafts => ({ ...d, comments: d.comments.map((c) => ({ ...c, replyTarget: TARGET })) })
+
+  function publishOnTurn(...published: Drafts[]) {
+    mocks.query.mockImplementation(async function* () {
+      for (const d of published) mocks.onDrafts(d)
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+  }
+
+  function deferredLookup(): (described: Drafts) => void {
+    let finish: (described: Drafts) => void = () => {}
+    mocks.describeReplies.mockReturnValueOnce(new Promise<Drafts>((resolve) => (finish = resolve)))
+    return (described) => finish(described)
+  }
+
+  it('describes the comment each reply answers', async () => {
+    const published = { ...drafts([]), comments: [THREAD_REPLY] }
+    mocks.describeReplies.mockImplementation(async (_pr, d: Drafts) => withTargets(d))
+    publishOnTurn(published)
+    await reviewSessions.feedback('test-session-17', 'go')
+    await vi.waitFor(() => expect(session(17).drafts?.comments[0].replyTarget).toEqual(TARGET))
+    expect(mocks.describeReplies).toHaveBeenCalledWith(expect.objectContaining({ number: 17 }), published)
+  })
+
+  it('keeps the published drafts when the lookup fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const published = { ...drafts([]), comments: [THREAD_REPLY] }
+    mocks.describeReplies.mockRejectedValue(new Error('rate limited'))
+    publishOnTurn(published)
+    await reviewSessions.feedback('test-session-18', 'go')
+    await vi.waitFor(() => expect(session(18).status).toBe('awaiting_feedback'))
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalled())
+    expect(console.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ sessionId: 'test-session-18', error: expect.any(Error) }))
+    expect(session(18).drafts).toEqual(published)
+  })
+
+  it('drops a lookup that finishes after Claude published newer drafts', async () => {
+    const first = { ...drafts([]), comments: [{ ...THREAD_REPLY, body: 'First.' }] }
+    const second = { ...drafts([]), comments: [{ ...THREAD_REPLY, body: 'Second.' }] }
+    const finishFirst = deferredLookup()
+    mocks.describeReplies.mockImplementationOnce(async (_pr, d: Drafts) => withTargets(d))
+    publishOnTurn(first, second)
+    await reviewSessions.feedback('test-session-20', 'go')
+    await vi.waitFor(() => expect(session(20).drafts).toEqual(withTargets(second)))
+    finishFirst(withTargets(first))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(session(20).drafts).toEqual(withTargets(second))
+  })
+
+  it('drops a late lookup when the newer drafts have no replies to look up', async () => {
+    const first = { ...drafts([]), comments: [THREAD_REPLY] }
+    const second = { ...drafts([]), comments: [] }
+    const finishFirst = deferredLookup()
+    publishOnTurn(first, second)
+    await reviewSessions.feedback('test-session-21', 'go')
+    await vi.waitFor(() => expect(session(21).status).toBe('awaiting_feedback'))
+    finishFirst(withTargets(first))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(session(21).drafts).toEqual(second)
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
+  })
+
+  it('looks up reply targets missing from a restored review when it is opened, once at a time', async () => {
+    const finish = deferredLookup()
+    reviewSessions.open('acme/api#22')
+    reviewSessions.open('acme/api#22')
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
+    finish(withTargets(session(22).drafts!))
+    await vi.waitFor(() => expect(session(22).drafts?.comments[0].replyTarget).toEqual(TARGET))
+    reviewSessions.open('acme/api#22')
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a failed lookup the next time the review is opened', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mocks.describeReplies.mockRejectedValueOnce(new Error('offline')).mockImplementationOnce(async (_pr, d: Drafts) => withTargets(d))
+    reviewSessions.open('acme/api#24')
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalled())
+    reviewSessions.open('acme/api#24')
+    await vi.waitFor(() => expect(session(24).drafts?.comments[0].replyTarget).toEqual(TARGET))
+    expect(mocks.describeReplies).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not look up reply targets for a submitted review', () => {
+    reviewSessions.open('acme/api#23')
+    expect(mocks.describeReplies).not.toHaveBeenCalled()
+  })
+
+  it('ignores drafts published after the session was discarded', async () => {
+    publishOnTurn({ ...drafts([]), comments: [] })
+    await reviewSessions.feedback('test-session-19', 'go')
+    await vi.waitFor(() => expect(session(19).status).toBe('awaiting_feedback'))
+    reviewSessions.discard('test-session-19')
+    mocks.onDrafts({ ...drafts([]), comments: [THREAD_REPLY] })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mocks.describeReplies).not.toHaveBeenCalled()
   })
 })

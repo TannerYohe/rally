@@ -149,6 +149,16 @@ export const REVIEW_EVENT_LABELS: Record<ReviewEvent, string> = {
 
 export type Severity = 'blocker' | 'high' | 'medium' | 'nit'
 
+export interface RepliedComment {
+  author: string | null
+  path: string
+  line: number | null
+  excerpt: string
+  url: string
+}
+
+export type ReplyTarget = { found: true; comment: RepliedComment } | { found: false }
+
 export interface DraftComment {
   id: string
   kind: 'inline' | 'reply'
@@ -159,6 +169,8 @@ export interface DraftComment {
   severity: Severity
   body: string
   replyToCommentId: number | null
+  /** Absent until Rally looks up the review comment this reply answers. */
+  replyTarget?: ReplyTarget
 }
 
 export const CONCERN_STATUSES = ['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot'] as const

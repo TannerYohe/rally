@@ -3,6 +3,7 @@ import { foldIntoBody, type FinalReview } from '@shared/feedback'
 import { errorMessage } from '@shared/errors'
 import type { DraftComment, PrRef, ReviewEvent, SubmittedReview } from '@shared/types'
 import { github, timeoutRequest, type GithubClient } from './client'
+import { fetchReviewComments } from './reviewComments'
 import { sameLogin } from './threads'
 
 export interface ListedReview {
@@ -11,30 +12,6 @@ export interface ListedReview {
   state: string
   submitted_at?: string | null
   html_url: string
-}
-
-const REVIEW_THREADS_QUERY = `
-  query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        reviewThreads(first: 100, after: $cursor) {
-          pageInfo { hasNextPage endCursor }
-          nodes { id comments(first: 100) { nodes { databaseId } } }
-        }
-      }
-    }
-  }
-`
-
-interface ReviewThreadsResponse {
-  repository: {
-    pullRequest: {
-      reviewThreads: {
-        pageInfo: { hasNextPage: boolean; endCursor: string | null }
-        nodes: { id: string; comments: { nodes: { databaseId: number | null }[] } }[]
-      }
-    }
-  }
 }
 
 const ADD_THREAD_MUTATION = `
@@ -145,36 +122,16 @@ async function addOrFold(pr: PrRef, comments: DraftComment[], add: (comment: Dra
   return rejected
 }
 
-async function threadIdsByCommentId(gh: GithubClient, pr: PrRef): Promise<Map<number, string>> {
-  const threads = new Map<number, string>()
-  let cursor: string | null = null
-  do {
-    const response: ReviewThreadsResponse = await gh.graphql<ReviewThreadsResponse>(REVIEW_THREADS_QUERY, {
-      owner: pr.owner,
-      repo: pr.repo,
-      number: pr.number,
-      cursor,
-      request: timeoutRequest(),
-    })
-    const { nodes, pageInfo } = response.repository.pullRequest.reviewThreads
-    for (const thread of nodes) {
-      for (const comment of thread.comments.nodes) if (comment.databaseId !== null) threads.set(comment.databaseId, thread.id)
-    }
-    cursor = pageInfo.hasNextPage ? pageInfo.endCursor : null
-  } while (cursor)
-  return threads
-}
-
 async function addReplies(gh: GithubClient, pr: PrRef, reviewNodeId: string, replies: DraftComment[]): Promise<DraftComment[]> {
   if (replies.length === 0) return []
-  const threads = await threadIdsByCommentId(gh, pr)
-  const orphans = replies.filter((reply) => reply.replyToCommentId === null || !threads.has(reply.replyToCommentId))
+  const reviewComments = await fetchReviewComments(gh, pr)
+  const orphans = replies.filter((reply) => reply.replyToCommentId === null || !reviewComments.has(reply.replyToCommentId))
   if (orphans.length > 0) {
     console.warn('Folding thread replies whose comment is not in a review thread', { pr: pr.url, draftIds: orphans.map((r) => r.id) })
   }
   const threaded = replies.filter((reply) => !orphans.includes(reply))
   const rejected = await addOrFold(pr, threaded, async (reply) => {
-    const thread = threads.get(reply.replyToCommentId as number)
+    const thread = reviewComments.get(reply.replyToCommentId as number)?.threadId
     const response = await gh.graphql<AddReplyResponse>(THREAD_REPLY_MUTATION, { review: reviewNodeId, thread, body: reply.body, request: timeoutRequest() })
     return Boolean(response.addPullRequestReviewThreadReply?.comment)
   })

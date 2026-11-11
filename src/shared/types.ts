@@ -149,6 +149,14 @@ export const REVIEW_EVENT_LABELS: Record<ReviewEvent, string> = {
 
 export type Severity = 'blocker' | 'high' | 'medium' | 'nit'
 
+export interface ReplyTarget {
+  author: string | null
+  path: string
+  line: number | null
+  excerpt: string
+  url: string
+}
+
 export interface DraftComment {
   id: string
   kind: 'inline' | 'reply'
@@ -159,6 +167,7 @@ export interface DraftComment {
   severity: Severity
   body: string
   replyToCommentId: number | null
+  replyTarget?: ReplyTarget | null
 }
 
 export const CONCERN_STATUSES = ['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot'] as const

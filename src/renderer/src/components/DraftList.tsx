@@ -25,7 +25,7 @@ function ReplyContext({ comment }: { comment: DraftComment }) {
       </div>
     )
   }
-  const { author, excerpt, url } = comment.replyTarget
+  const { excerpt, url } = comment.replyTarget
   return (
     <a
       className="mb-2 block border-l-2 border-ink-600 pl-2 text-xs text-ink-400 hover:border-primary-400 hover:text-ink-200"
@@ -34,10 +34,7 @@ function ReplyContext({ comment }: { comment: DraftComment }) {
       rel="noreferrer"
       title="Open the comment on GitHub"
     >
-      <span className="line-clamp-2">
-        {author && <span className="font-medium text-ink-300">@{author}: </span>}
-        {excerpt || 'Empty comment'}
-      </span>
+      <span className="line-clamp-2">{excerpt || 'Empty comment'}</span>
     </a>
   )
 }

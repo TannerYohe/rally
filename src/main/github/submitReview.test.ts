@@ -73,22 +73,14 @@ interface ThreadsPage {
   endCursor?: string
 }
 
-const reviewComment = (databaseId: number) => ({
-  databaseId,
-  url: `https://github.com/acme/api/pull/12#discussion_r${databaseId}`,
-  path: 'a.rb',
-  line: 3,
-  originalLine: 3,
-  bodyText: 'Earlier note.',
-  author: { login: 'octocat' },
-})
+const threadComment = (databaseId: number) => ({ id: `PRRC_${databaseId}`, databaseId })
 
 const threadsPage = ({ threads, endCursor }: ThreadsPage) => ({
   repository: {
     pullRequest: {
       reviewThreads: {
         pageInfo: { hasNextPage: Boolean(endCursor), endCursor: endCursor ?? null },
-        nodes: threads.map((t) => ({ id: t.id, comments: { nodes: t.commentIds.map(reviewComment) } })),
+        nodes: threads.map((t) => ({ id: t.id, comments: { nodes: t.commentIds.map(threadComment) } })),
       },
     },
   },

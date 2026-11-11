@@ -27,7 +27,7 @@ import {
   type TurnMode,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { describeReplies, hasReplies } from '../github/reviewComments'
+import { describeReplies, needsReplyTargets } from '../github/reviewComments'
 import { submitReview } from '../github/submitReview'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList } from '../prList'
@@ -339,7 +339,7 @@ class ReviewSessions extends EventEmitter {
   }
 
   private async describeReplies(sessionId: string, drafts: Drafts): Promise<void> {
-    if (!hasReplies(drafts)) return
+    if (!needsReplyTargets(drafts)) return
     const { pr } = this.byId(sessionId)
     try {
       const described = await describeReplies(pr, drafts)

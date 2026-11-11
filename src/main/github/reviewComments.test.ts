@@ -116,6 +116,7 @@ describe('needsReplyTargets', () => {
     expect(needsReplyTargets(drafts([draft({ replyToCommentId: null })]))).toBe(false)
     expect(needsReplyTargets(drafts([draft()]))).toBe(true)
     expect(needsReplyTargets(drafts([draft({ replyTarget: { found: false } })]))).toBe(false)
+    expect(needsReplyTargets(drafts([draft({ replyTarget: null as unknown as ReplyTarget })]))).toBe(true)
   })
 })
 

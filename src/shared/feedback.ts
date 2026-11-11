@@ -1,4 +1,4 @@
-import type { DraftComment, Drafts, ReviewEvent } from './types'
+import type { DraftComment, Drafts, ReplyTarget, ReviewEvent } from './types'
 
 export interface DraftEdit {
   body?: string
@@ -73,9 +73,16 @@ function fileLocation(path: string, line: number | null, startLine: number | nul
   return startLine === null ? `${path}:${line}` : `${path}:${startLine}-${line}`
 }
 
+/** Returns a reply's looked-up target, treating a stored value without a boolean `found` as not looked up. */
+export function lookedUpReplyTarget(comment: DraftComment): ReplyTarget | undefined {
+  const target = comment.replyTarget
+  return typeof target?.found === 'boolean' ? target : undefined
+}
+
 function replyLocation(comment: DraftComment): string {
-  if (!comment.replyTarget?.found) return `Reply to comment ${comment.replyToCommentId ?? '?'}`
-  const { author, path, line } = comment.replyTarget.comment
+  const target = lookedUpReplyTarget(comment)
+  if (!target?.found) return `Reply to comment ${comment.replyToCommentId ?? '?'}`
+  const { author, path, line } = target.comment
   const location = fileLocation(path, line)
   return author ? `Reply to @${author} on ${location}` : `Reply on ${location}`
 }
@@ -91,11 +98,12 @@ export type ReplyContext = { kind: 'quote'; excerpt: string; url: string } | { k
 export function replyContext(comment: DraftComment): ReplyContext | null {
   if (comment.kind !== 'reply') return null
   if (comment.replyToCommentId === null) return { kind: 'warning', message: 'This reply has no comment id, so it will post in the review body.' }
-  if (comment.replyTarget === undefined) return null
-  if (!comment.replyTarget.found) {
+  const target = lookedUpReplyTarget(comment)
+  if (target === undefined) return null
+  if (!target.found) {
     return { kind: 'warning', message: `Comment ${comment.replyToCommentId} isn't in a review thread on this PR, so this reply will post in the review body.` }
   }
-  const { excerpt, url } = comment.replyTarget.comment
+  const { excerpt, url } = target.comment
   return { kind: 'quote', excerpt: excerpt || 'Empty comment', url }
 }
 

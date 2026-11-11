@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Drafts } from './types'
+import type { Drafts, ReplyTarget } from './types'
 import {
   commentLocation,
   feedbackMessage,
@@ -203,6 +203,12 @@ describe('replyContext', () => {
       kind: 'warning',
       message: "Comment 7 isn't in a review thread on this PR, so this reply will post in the review body.",
     })
+  })
+
+  it('treats a stored target without a boolean found as not looked up', () => {
+    expect(replyContext({ ...reply, replyTarget: null as unknown as ReplyTarget })).toBeNull()
+    expect(replyContext({ ...reply, replyTarget: replied as unknown as ReplyTarget })).toBeNull()
+    expect(commentLocation({ ...reply, replyTarget: null as unknown as ReplyTarget })).toBe('Reply to comment 7')
   })
 
   it('warns that a reply with no comment id will post in the review body, without a lookup', () => {

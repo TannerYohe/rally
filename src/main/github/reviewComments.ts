@@ -1,4 +1,4 @@
-import { canPostReply } from '@shared/feedback'
+import { canPostReply, lookedUpReplyTarget } from '@shared/feedback'
 import type { DraftComment, Drafts, PrRef, RepliedComment, ReplyTarget } from '@shared/types'
 import { github, GITHUB_TIMEOUT_MS, timeoutRequest, type GithubClient } from './client'
 import { fetchNodes } from './queries'
@@ -95,7 +95,7 @@ export function threadCommentFor(threadComments: Map<number, ThreadComment>, com
 }
 
 export function needsReplyTargets(drafts: Drafts): boolean {
-  return drafts.comments.some((comment) => canPostReply(comment) && comment.replyTarget === undefined)
+  return drafts.comments.some((comment) => canPostReply(comment) && lookedUpReplyTarget(comment) === undefined)
 }
 
 export function attachReplyTargets(drafts: Drafts, targets: Map<number, ReplyTarget>): Drafts {

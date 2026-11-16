@@ -26,8 +26,14 @@ describe('lastSuccessfulTurnStartedAt', () => {
       result('result', '2026-11-04T18:06:00.000Z', true),
       user('feedback', '2026-11-04T19:00:00.000Z', 'refine'),
       text('reply-2', '2026-11-04T19:02:00.000Z'),
+      result('result-2', '2026-11-04T19:03:00.000Z', true),
     ]
     expect(lastSuccessfulTurnStartedAt({ createdAt, status, timeline })).toBe('2026-11-04T19:00:00.000Z')
+  })
+
+  it('counts a turn with a successful result when the session errored afterward, such as on a failed submit', () => {
+    const timeline = [user('review', '2026-11-04T18:00:01.000Z', 'review'), result('result', '2026-11-04T18:06:00.000Z', true)]
+    expect(lastSuccessfulTurnStartedAt({ createdAt, status: 'error', timeline })).toBe('2026-11-04T18:00:01.000Z')
   })
 
   it('counts a turn that is still running', () => {

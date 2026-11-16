@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => {
       headsSeenFile: file<Record<string, string>>({}),
       hiddenPrsFile: file<Record<string, unknown>>({}),
       rallyReviewsFile: file<Record<string, number[]>>({}),
+      authoredPrCacheFile: file({ viewer: null, refreshedAt: null, prs: [] }),
+      authoredSummariesFile: file<Record<string, string>>({}),
+      authoredHeadsSeenFile: file<Record<string, string>>({}),
+      authoredHiddenPrsFile: file<Record<string, unknown>>({}),
     },
     searchPrs: vi.fn(),
     fetchPr: vi.fn(),
@@ -23,10 +27,10 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('./store', () => mocks.store)
 vi.mock('./github/queries', () => ({ searchPrs: mocks.searchPrs, fetchPr: mocks.fetchPr }))
-vi.mock('./github/search', () => ({ buildSearchQueries: () => ['query'] }))
+vi.mock('./github/search', () => ({ buildSearchQueries: () => ['query'], AUTHORED_SEARCH_QUERIES: ['authored'] }))
 vi.mock('./claude/summarize', () => ({ summarizePr: mocks.summarizePr }))
 
-const { prList } = await import('./prList')
+const { authoredPrList, prList } = await import('./prList')
 const { newHide, UNLISTED_HIDE_RETENTION_DAYS } = await import('./hiddenPrs')
 
 function githubPr(overrides: Partial<GithubPr> = {}): GithubPr {
@@ -53,6 +57,7 @@ function githubPr(overrides: Partial<GithubPr> = {}): GithubPr {
     files: [],
     reviewRequestedFromMe: false,
     myReviews: [],
+    feedback: null,
     ...overrides,
   }
 }
@@ -64,7 +69,7 @@ describe('prList', () => {
     mocks.store.hiddenPrsFile.set({})
     mocks.summarizePr.mockResolvedValue('A summary')
     mocks.store.rallyReviewsFile.set({})
-    prList.setReviewStatusLookup(() => null)
+    prList.setSessionLookup(() => null)
   })
 
   it('prunes summaries for old heads and closed PRs on a full refresh', async () => {
@@ -169,10 +174,10 @@ describe('prList', () => {
     await prList.refresh()
     prList.hide('pr1', 'indefinite')
 
-    prList.setReviewStatusLookup(() => 'awaiting_feedback')
+    prList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: true }))
     expect(prList.get().prs[0].hidden).toBeNull()
 
-    prList.setReviewStatusLookup(() => null)
+    prList.setSessionLookup(() => null)
     expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'indefinite' })
   })
 
@@ -220,5 +225,18 @@ describe('prList', () => {
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
     await prList.refresh()
     expect(mocks.store.rallyReviewsFile.get()).toEqual({ 'acme/api#1': [42] })
+  })
+
+  it('computes author phases for the authored list from its own query', async () => {
+    const feedback = { reviewDecision: null, openThreads: 1, unansweredThreads: 1, changesRequestedBy: [], approvedBy: [], headCommittedAt: null }
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ author: 'me', feedback })] })
+    authoredPrList.setSessionLookup(() => null)
+    await authoredPrList.refresh()
+    expect(mocks.searchPrs).toHaveBeenLastCalledWith(['authored'], 'authored')
+    expect(authoredPrList.get().prs[0].phase).toBe('needs_response')
+
+    authoredPrList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: true }))
+    expect(authoredPrList.get().prs[0].phase).toBe('in_progress')
+    expect(mocks.store.authoredPrCacheFile.get().prs).toHaveLength(1)
   })
 })

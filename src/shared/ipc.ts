@@ -5,6 +5,7 @@ import type {
   Health,
   HideMode,
   InstallAttempt,
+  PrListKind,
   PrListState,
   PrRef,
   ReviewEvent,
@@ -14,15 +15,20 @@ import type {
   UpdateState,
 } from './types'
 
+export interface PrListChange {
+  list: PrListKind
+  state: PrListState
+}
+
 export interface RallyApi {
   getConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   getHealth(): Promise<Health>
-  getPrs(): Promise<PrListState>
-  refreshPrs(): Promise<void>
-  onPrsChanged(listener: (state: PrListState) => void): () => void
-  hidePr(id: string, mode: HideMode): Promise<void>
-  unhidePr(id: string): Promise<void>
+  getPrs(list: PrListKind): Promise<PrListState>
+  refreshPrs(list: PrListKind): Promise<void>
+  onPrsChanged(listener: (change: PrListChange) => void): () => void
+  hidePr(list: PrListKind, id: string, mode: HideMode): Promise<void>
+  unhidePr(list: PrListKind, id: string): Promise<void>
   getSession(prKey: string): Promise<ReviewSession | null>
   startReview(pr: PrRef): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>

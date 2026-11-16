@@ -88,6 +88,18 @@ describe('pullChangesMessage', () => {
     expect(pullChangesMessage(drafts, { edits: {}, summaryBodyEdit: undefined, instructions: '  ' })).toBe(PULL_CHANGES_INSTRUCTION)
   })
 
+  it('asks for every kind of change and a checkout of the new head', () => {
+    expect(PULL_CHANGES_INSTRUCTION).toMatch(/commits, comments, replies, reviews/)
+    expect(PULL_CHANGES_INSTRUCTION).toMatch(/check out the new head/)
+    expect(PULL_CHANGES_INSTRUCTION).toMatch(/list of what changed/)
+  })
+
+  it('ignores edits but keeps typed feedback when there are no drafts', () => {
+    expect(pullChangesMessage(null, { edits: { '1': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'also check CI' })).toBe(
+      `${PULL_CHANGES_INSTRUCTION}\n\nalso check CI`,
+    )
+  })
+
   it('keeps pending edits before the pull instruction and typed feedback after it', () => {
     expect(pullChangesMessage(drafts, { edits: { '3': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'make 2 a nitpick' })).toBe(
       `Edits I made in Rally:\n- Drop #3.\n\n${PULL_CHANGES_INSTRUCTION}\n\nmake 2 a nitpick`,

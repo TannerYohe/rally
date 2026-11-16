@@ -48,10 +48,11 @@ export function feedbackMessage(drafts: Drafts | null, changes: DraftChanges): s
 }
 
 export const PULL_CHANGES_INSTRUCTION =
-  'The PR changed since your last turn. Fetch its latest head into your clone and check for new comments and replies. ' +
-  'Review what changed since the commit you last reviewed, update the report, drafts, and prior concerns to match, and publish the complete set again.'
+  'Pull in everything that changed on the PR since your last turn: new commits, comments, replies, reviews, and edits to the title or description. ' +
+  'If the head moved, check out the new head in your clone and refresh any diff you saved before reading code. ' +
+  'Start your reply with a short list of what changed, or say that nothing did, then update the review to match.'
 
-/** Returns a feedback message that asks Claude to review the PR's latest changes, keeping any pending edits and typed feedback. */
+/** Returns a feedback message that asks Claude to pull in the PR's changes since its last turn, keeping any pending edits and typed feedback. */
 export function pullChangesMessage(drafts: Drafts | null, changes: DraftChanges): string {
   const instructions = [PULL_CHANGES_INSTRUCTION, changes.instructions.trim()].filter(Boolean).join('\n\n')
   return feedbackMessage(drafts, { ...changes, instructions })

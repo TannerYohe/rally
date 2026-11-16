@@ -219,7 +219,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             <button
               className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
               disabled={busy || resolvingThreads}
-              title="Send Claude a turn to fetch the latest commits and comments and update the review, along with any pending edits and feedback"
+              title="Send Claude a turn to pull in the commits, comments, and reviews since its last turn and update the review, along with any pending edits and feedback"
               onClick={pullChanges}
             >
               Pull in changes

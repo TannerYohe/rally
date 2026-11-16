@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { app } from 'electron'
-import { DEFAULT_CONFIG, type Config, type InstallAttempt, type Pr, type ReviewSession, type StoredHide } from '@shared/types'
+import { DEFAULT_CONFIG, type AuthorSession, type Config, type InstallAttempt, type Pr, type ReviewSession, type StoredHide } from '@shared/types'
 import { JsonDir, JsonFile } from './jsonFile'
 
 export interface PrCache {
@@ -30,3 +30,4 @@ export const authoredHiddenPrsFile = new JsonFile<Record<string, StoredHide>>(jo
 export const rallyReviewsFile = new JsonFile<Record<string, number[]>>(join(dir, 'rally-reviews.json'), {})
 export const updateFile = new JsonFile<UpdateRecord>(join(dir, 'update.json'), { pending: null, failed: null })
 export const sessionsDir = new JsonDir<ReviewSession>(join(dir, 'sessions'))
+export const authorSessionsDir = new JsonDir<AuthorSession>(join(dir, 'author-sessions'))

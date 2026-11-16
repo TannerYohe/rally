@@ -1,6 +1,9 @@
 import type { DraftChanges } from './feedback'
 import type {
+  ActionRequest,
   AppInfo,
+  AuthorSession,
+  FeedbackItem,
   Config,
   Health,
   HideMode,
@@ -8,6 +11,7 @@ import type {
   PrListKind,
   PrListState,
   PrRef,
+  ReplyPost,
   ReviewEvent,
   ReviewSession,
   ReviewThread,
@@ -38,6 +42,19 @@ export interface RallyApi {
   cancelReview(sessionId: string): Promise<void>
   discardSession(sessionId: string): Promise<void>
   onSessionChanged(listener: (session: ReviewSession) => void): () => void
+  getAuthorSession(prKey: string): Promise<AuthorSession | null>
+  getFeedbackItems(pr: PrRef): Promise<FeedbackItem[]>
+  runAuthorActions(pr: PrRef, requests: ActionRequest[], note: string): Promise<AuthorSession>
+  startSelfReview(pr: PrRef): Promise<AuthorSession>
+  sendAuthorFeedback(sessionId: string, message: string): Promise<void>
+  cancelAuthorTurn(sessionId: string): Promise<void>
+  getAuthorDiff(sessionId: string): Promise<string>
+  pushAuthorCommits(sessionId: string): Promise<void>
+  postAuthorReplies(sessionId: string, replies: ReplyPost[]): Promise<void>
+  discardAuthorReply(sessionId: string, itemId: string): Promise<void>
+  dismissFinding(sessionId: string, itemId: string): Promise<void>
+  discardAuthorSession(sessionId: string): Promise<void>
+  onAuthorSessionChanged(listener: (session: AuthorSession) => void): () => void
   getAppInfo(): Promise<AppInfo>
   getUpdateState(): Promise<UpdateState>
   checkForUpdates(): Promise<void>
@@ -65,6 +82,19 @@ export const IPC = {
   cancelReview: 'session:cancel',
   discardSession: 'session:discard',
   sessionChanged: 'session:changed',
+  getAuthorSession: 'author:get',
+  getFeedbackItems: 'author:feedback-items',
+  runAuthorActions: 'author:run',
+  startSelfReview: 'author:self-review',
+  sendAuthorFeedback: 'author:feedback',
+  cancelAuthorTurn: 'author:cancel',
+  getAuthorDiff: 'author:diff',
+  pushAuthorCommits: 'author:push',
+  postAuthorReplies: 'author:post-replies',
+  discardAuthorReply: 'author:discard-reply',
+  dismissFinding: 'author:dismiss-finding',
+  discardAuthorSession: 'author:discard',
+  authorSessionChanged: 'author:changed',
   getAppInfo: 'app:info',
   getUpdateState: 'update:get',
   checkForUpdates: 'update:check',

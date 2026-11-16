@@ -38,7 +38,7 @@ export function isSubmitted(session: Pick<ReviewSession, 'status' | 'submitted'>
   return session.submitted !== null || session.status === 'submitted'
 }
 
-export function prUpdatedSinceLastTurn(
+export function prUpdatedSinceLastSuccessfulTurn(
   session: TurnTiming & Pick<ReviewSession, 'status' | 'submitted'>,
   prUpdatedAt: string | null,
 ): boolean {

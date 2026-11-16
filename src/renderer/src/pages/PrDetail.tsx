@@ -27,7 +27,7 @@ import {
 } from '@shared/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
-import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastSuccessfulTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { emptyReviewTabs, type ReviewTab } from '../lib/reviewTabs'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
@@ -149,7 +149,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const keptComments = keptCommentCount(drafts, edits)
   const lastSuccessfulTurnAt = lastSuccessfulTurnStartedAt(session)
   const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
-  const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
+  const prUpdatedAfterLastSuccessfulTurn = prUpdatedSinceLastSuccessfulTurn(session, prUpdatedAt)
   const threadResolution = useThreadResolution(session)
   const resolvingThreads = threadResolution.resolving
   const resolution = session.threadResolution ?? null
@@ -211,15 +211,15 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>
           started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
         </span>
-        {prUpdatedAfterLastTurn && prUpdatedAt && (
+        {prUpdatedAfterLastSuccessfulTurn && prUpdatedAt && (
           <span className="flex items-center gap-2 text-sm text-amber-300">
             <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last successful turn started at ${fullTime(lastSuccessfulTurnAt)}`}>
-              PR updated since last turn
+              PR updated since last successful turn
             </span>
             <button
               className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
               disabled={busy || resolvingThreads}
-              title="Send Claude a turn to pull in the commits, comments, and reviews since its last turn and update the review, along with any pending edits and feedback"
+              title="Send Claude a turn to pull in the commits, comments, and reviews since its last successful turn and update the review, along with any pending edits and feedback"
               onClick={pullChanges}
             >
               Pull in changes

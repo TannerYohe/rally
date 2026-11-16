@@ -3,6 +3,7 @@ import logo from '../../../resources/icon.svg'
 import { SETTINGS_ROOT } from './lib/settingsSections'
 import { useSkin } from './lib/skins'
 import { LIST_ROOTS } from './lib/routes'
+import { AuthorPrDetail } from './pages/AuthorPrDetail'
 import { Dashboard } from './pages/Dashboard'
 import { MyPrs } from './pages/MyPrs'
 import { PrDetail } from './pages/PrDetail'
@@ -81,6 +82,7 @@ const router = createHashRouter([
       { path: '/', element: <Dashboard /> },
       { path: '/pr/:owner/:repo/:number', element: <PrDetail /> },
       { path: LIST_ROOTS.authored, element: <MyPrs /> },
+      { path: `${LIST_ROOTS.authored}/:owner/:repo/:number`, element: <AuthorPrDetail /> },
       { path: `${SETTINGS_ROOT}/:section?`, element: <Settings /> },
     ],
   },

@@ -1,14 +1,15 @@
-import type { AuthorSession, FeedbackItem, ItemResponse } from './types'
+import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply } from './types'
 
 export const PUSH_BEFORE_POSTING_ERROR = 'Push your commits before posting replies, so the replies point at code reviewers can see.'
 
-/** Returns the responses whose reply draft hasn't been posted since Claude last wrote it. */
+/** Returns whether a response has a reply that hasn't been posted since Claude last wrote it. */
+export function isReplyPending(response: ItemResponse, posted: PostedReply | null | undefined): boolean {
+  if (!response.reply.trim()) return false
+  return !posted || posted.error !== null || posted.at < response.at
+}
+
 export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'posted'>): ItemResponse[] {
-  return Object.values(session.responses).filter((response) => {
-    if (!response.reply.trim()) return false
-    const posted = session.posted[response.itemId]
-    return !posted || posted.error !== null || posted.at < response.at
-  })
+  return Object.values(session.responses).filter((response) => isReplyPending(response, session.posted[response.itemId]))
 }
 
 /** Returns whether the session has a running turn, an error, unpushed commits, or unposted replies. */

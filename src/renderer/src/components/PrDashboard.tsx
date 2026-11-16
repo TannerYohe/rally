@@ -58,7 +58,7 @@ function FeedbackNote({ feedback }: { feedback: PrFeedback }) {
       </span>,
     )
   }
-  if (parts.length === 0) parts.push(<span key="none">{feedback.openThreads} open threads</span>)
+  if (parts.length === 0) parts.push(<span key="none">{feedback.openThreads > 0 ? `${feedback.openThreads} open threads` : 'no open threads'}</span>)
   return <>{parts}</>
 }
 

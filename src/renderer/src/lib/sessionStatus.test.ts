@@ -1,29 +1,66 @@
 import { describe, expect, it } from 'vitest'
 import type { ReviewSession, TimelineEntry, TurnMode } from '@shared/types'
-import { isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn } from './sessionStatus'
+import { isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastTurn } from './sessionStatus'
 
 const createdAt = '2026-11-04T18:00:00.000Z'
 const user = (id: string, at: string, turn?: TurnMode): TimelineEntry => ({ kind: 'user', id, text: id, at, turn })
 const text = (id: string, at: string): TimelineEntry => ({ kind: 'text', id, text: id, at })
+const result = (id: string, at: string, ok: boolean): TimelineEntry => ({ kind: 'result', id, ok, text: '', costUsd: 0, durationMs: 0, at })
 
-describe('lastTurnStartedAt', () => {
+describe('lastSuccessfulTurnStartedAt', () => {
+  const status = 'awaiting_feedback' as const
+
   it('falls back to the session start before any turn', () => {
-    expect(lastTurnStartedAt({ createdAt, timeline: [] })).toBe(createdAt)
+    expect(lastSuccessfulTurnStartedAt({ createdAt, status, timeline: [] })).toBe(createdAt)
   })
 
   it('falls back to the session start when the timeline has no user entries', () => {
     const timeline = [text('reply', '2026-11-04T18:05:00.000Z')]
-    expect(lastTurnStartedAt({ createdAt, timeline })).toBe(createdAt)
+    expect(lastSuccessfulTurnStartedAt({ createdAt, status, timeline })).toBe(createdAt)
   })
 
   it('returns the time of the most recent user turn', () => {
     const timeline = [
       user('review', '2026-11-04T18:00:01.000Z', 'review'),
       text('reply', '2026-11-04T18:05:00.000Z'),
+      result('result', '2026-11-04T18:06:00.000Z', true),
       user('feedback', '2026-11-04T19:00:00.000Z', 'refine'),
       text('reply-2', '2026-11-04T19:02:00.000Z'),
     ]
-    expect(lastTurnStartedAt({ createdAt, timeline })).toBe('2026-11-04T19:00:00.000Z')
+    expect(lastSuccessfulTurnStartedAt({ createdAt, status, timeline })).toBe('2026-11-04T19:00:00.000Z')
+  })
+
+  it('counts a turn that is still running', () => {
+    const timeline = [user('review', '2026-11-04T18:00:01.000Z', 'review')]
+    expect(lastSuccessfulTurnStartedAt({ createdAt, status: 'running', timeline })).toBe('2026-11-04T18:00:01.000Z')
+  })
+
+  describe('skips a turn that did not succeed', () => {
+    const succeeded = [
+      user('review', '2026-11-04T18:00:01.000Z', 'review'),
+      result('result', '2026-11-04T18:06:00.000Z', true),
+    ]
+
+    it('when it ended with an error result', () => {
+      const timeline = [...succeeded, user('pull', '2026-11-04T19:00:00.000Z', 'refine'), result('failed', '2026-11-04T19:01:00.000Z', false)]
+      expect(lastSuccessfulTurnStartedAt({ createdAt, status: 'error', timeline })).toBe('2026-11-04T18:00:01.000Z')
+    })
+
+    it('when it threw or was cancelled before a result', () => {
+      const timeline = [...succeeded, user('pull', '2026-11-04T19:00:00.000Z', 'refine'), text('reading', '2026-11-04T19:00:30.000Z')]
+      expect(lastSuccessfulTurnStartedAt({ createdAt, status: 'error', timeline })).toBe('2026-11-04T18:00:01.000Z')
+      expect(lastSuccessfulTurnStartedAt({ createdAt, status: 'cancelled', timeline })).toBe('2026-11-04T18:00:01.000Z')
+    })
+
+    it('when an earlier turn failed and a later one is also failing', () => {
+      const timeline = [
+        ...succeeded,
+        user('pull', '2026-11-04T19:00:00.000Z', 'refine'),
+        user('retry', '2026-11-04T19:05:00.000Z', 'refine'),
+        result('failed', '2026-11-04T19:06:00.000Z', false),
+      ]
+      expect(lastSuccessfulTurnStartedAt({ createdAt, status: 'error', timeline })).toBe('2026-11-04T18:00:01.000Z')
+    })
   })
 })
 
@@ -46,6 +83,15 @@ describe('prUpdatedSinceLastTurn', () => {
 
   it('is false without a PR update time', () => {
     expect(prUpdatedSinceLastTurn(session(), null)).toBe(false)
+  })
+
+  it('is true after a turn that started after the update fails', () => {
+    const timeline = [
+      user('review', '2026-11-04T19:00:00.500Z', 'review'),
+      result('result', '2026-11-04T19:05:00.000Z', true),
+      user('pull', '2026-11-04T19:20:00.000Z', 'refine'),
+    ]
+    expect(prUpdatedSinceLastTurn(session({ timeline, status: 'cancelled' }), '2026-11-04T19:10:00Z')).toBe(true)
   })
 
   it('is false once the review is submitted, even if the session later errored', () => {

@@ -27,7 +27,7 @@ import {
 } from '@shared/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
-import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { emptyReviewTabs, type ReviewTab } from '../lib/reviewTabs'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
@@ -147,7 +147,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const changes: DraftChanges = { edits, summaryBodyEdit: summaryEdit, instructions: feedback }
   const message = feedbackMessage(drafts, changes)
   const keptComments = keptCommentCount(drafts, edits)
-  const lastTurnAt = lastTurnStartedAt(session)
+  const lastSuccessfulTurnAt = lastSuccessfulTurnStartedAt(session)
   const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
   const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
   const threadResolution = useThreadResolution(session)
@@ -213,7 +213,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         </span>
         {prUpdatedAfterLastTurn && prUpdatedAt && (
           <span className="flex items-center gap-2 text-sm text-amber-300">
-            <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last turn started at ${fullTime(lastTurnAt)}`}>
+            <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last successful turn started at ${fullTime(lastSuccessfulTurnAt)}`}>
               PR updated since last turn
             </span>
             <button

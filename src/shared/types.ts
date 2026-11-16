@@ -359,9 +359,11 @@ export interface ItemResponse {
 
 export interface PostedReply {
   at: string
+  body: string
   url: string | null
   resolved: boolean
   error: string | null
+  resolveError: string | null
 }
 
 export interface ReplyPost {
@@ -402,6 +404,7 @@ export interface AuthorSession extends SessionCore {
   commits: LocalCommit[]
   uncommitted: string[]
   lastPush: PushRecord | null
+  remoteMoved: boolean
 }
 
 export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {

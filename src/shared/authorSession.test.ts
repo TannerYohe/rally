@@ -20,7 +20,7 @@ describe('pendingReplies', () => {
   it('skips empty replies and ones posted after Claude wrote them', () => {
     const s = session({
       responses: { a: response('a', 'Done'), b: response('b', ' '), c: response('c', 'Later') },
-      posted: { a: { at: '2026-11-03T00:00:00Z', url: null, resolved: false, error: null } },
+      posted: { a: { at: '2026-11-03T00:00:00Z', body: '', url: null, resolved: false, error: null, resolveError: null } },
     })
     expect(pendingReplies(s).map((r) => r.itemId)).toEqual(['c'])
   })
@@ -29,8 +29,8 @@ describe('pendingReplies', () => {
     const s = session({
       responses: { a: response('a', 'New', '2026-11-04T00:00:00Z'), b: response('b', 'Retry') },
       posted: {
-        a: { at: '2026-11-03T00:00:00Z', url: null, resolved: false, error: null },
-        b: { at: '2026-11-03T00:00:00Z', url: null, resolved: false, error: 'rate limited' },
+        a: { at: '2026-11-03T00:00:00Z', body: '', url: null, resolved: false, error: null, resolveError: null },
+        b: { at: '2026-11-03T00:00:00Z', body: '', url: null, resolved: false, error: 'rate limited', resolveError: null },
       },
     })
     expect(pendingReplies(s).map((r) => r.itemId)).toEqual(['a', 'b'])

@@ -20,6 +20,7 @@ import {
   feedbackMessage,
   isEmptyCommentReview,
   keptCommentCount,
+  pullChangesMessage,
   submitBlockedReason,
   type DraftChanges,
   type DraftEdits,
@@ -179,10 +180,12 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   }
 
   const canSend = !busy && Boolean(message)
-  const send = async () => {
+  const sendMessage = async (text: string) => {
     reviewTab.follow()
-    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) reviewTab.sendFailed()
+    if (!(await run(() => window.rally.sendFeedback(session.id, text)))) reviewTab.sendFailed()
   }
+  const send = () => sendMessage(message)
+  const pullChanges = () => sendMessage(pullChangesMessage(drafts, changes))
   const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
@@ -209,11 +212,18 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
           started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
         </span>
         {prUpdatedAfterLastTurn && prUpdatedAt && (
-          <span
-            className="text-sm text-amber-300"
-            title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last turn started at ${fullTime(lastTurnAt)}`}
-          >
-            PR updated since last turn
+          <span className="flex items-center gap-2 text-sm text-amber-300">
+            <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last turn started at ${fullTime(lastTurnAt)}`}>
+              PR updated since last turn
+            </span>
+            <button
+              className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
+              disabled={busy || resolvingThreads}
+              title="Send Claude a turn to fetch the latest commits and comments and update the review, along with any pending edits and feedback"
+              onClick={pullChanges}
+            >
+              Pull in changes
+            </button>
           </span>
         )}
         <div className="ml-auto flex gap-2">

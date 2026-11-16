@@ -185,7 +185,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     if (!(await run(() => window.rally.sendFeedback(session.id, text)))) reviewTab.sendFailed()
   }
   const send = () => sendMessage(message)
-  const pullChanges = () => sendMessage(pullChangesMessage(drafts, changes))
+  const pullChanges = () => sendMessage(pullChangesMessage(drafts, changes, lastSuccessfulTurnAt))
   const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()

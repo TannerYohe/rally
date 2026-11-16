@@ -47,6 +47,22 @@ export function feedbackMessage(drafts: Drafts | null, changes: DraftChanges): s
   return [describeEdits(drafts, changes.edits, changes.summaryBodyEdit), changes.instructions.trim()].filter(Boolean).join('\n\n')
 }
 
+/** Returns the instruction that asks Claude to pull in everything that changed on the PR since the given ISO time. */
+export function pullChangesInstruction(since: string): string {
+  return (
+    `Pull in everything that changed on the PR since ${since}, when your last successful turn started: ` +
+    'new commits, comments, replies, reviews, and edits to the title or description. ' +
+    'If the head moved, check out the new head in your clone and refresh any diff you saved before reading code. ' +
+    'Start your reply with a short list of what changed, or say that nothing did, then update the review to match.'
+  )
+}
+
+/** Returns a feedback message that asks Claude to pull in the PR's changes since the given ISO time, keeping any pending edits and typed feedback. */
+export function pullChangesMessage(drafts: Drafts | null, changes: DraftChanges, since: string): string {
+  const instructions = [pullChangesInstruction(since), changes.instructions.trim()].filter(Boolean).join('\n\n')
+  return feedbackMessage(drafts, { ...changes, instructions })
+}
+
 function keptComments(drafts: Drafts, edits: DraftEdits): DraftComment[] {
   return drafts.comments.flatMap((comment) => {
     const edit = edits[comment.id]

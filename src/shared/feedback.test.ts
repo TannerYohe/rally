@@ -7,6 +7,8 @@ import {
   foldIntoBody,
   isEmptyCommentReview,
   keptCommentCount,
+  pullChangesInstruction,
+  pullChangesMessage,
   replyContext,
   SUBMIT_WITH_INSTRUCTIONS_ERROR,
   submitBlockedReason,
@@ -78,6 +80,34 @@ describe('feedbackMessage', () => {
 
   it('asks to remove a review body cleared to whitespace', () => {
     expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, { edits: {}, summaryBodyEdit: '  ', instructions: '' })).toBe('Edits I made in Rally:\n- Remove the review body.')
+  })
+})
+
+describe('pullChangesMessage', () => {
+  const since = '2026-11-04T19:00:00.000Z'
+  const instruction = pullChangesInstruction(since)
+
+  it('sends only the pull instruction when nothing is pending', () => {
+    expect(pullChangesMessage(drafts, { edits: {}, summaryBodyEdit: undefined, instructions: '  ' }, since)).toBe(instruction)
+  })
+
+  it('anchors the instruction to the given time and asks for every kind of change and a checkout of the new head', () => {
+    expect(instruction).toMatch(/since 2026-11-04T19:00:00\.000Z, when your last successful turn started/)
+    expect(instruction).toMatch(/commits, comments, replies, reviews/)
+    expect(instruction).toMatch(/check out the new head/)
+    expect(instruction).toMatch(/list of what changed/)
+  })
+
+  it('keeps pending edits before the pull instruction and typed feedback after it', () => {
+    expect(pullChangesMessage(drafts, { edits: { '3': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'make 2 a nitpick' }, since)).toBe(
+      `Edits I made in Rally:\n- Drop #3.\n\n${instruction}\n\nmake 2 a nitpick`,
+    )
+  })
+
+  it('ignores edits but keeps typed feedback when there are no drafts', () => {
+    expect(pullChangesMessage(null, { edits: { '1': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'also check CI' }, since)).toBe(
+      `${instruction}\n\nalso check CI`,
+    )
   })
 })
 

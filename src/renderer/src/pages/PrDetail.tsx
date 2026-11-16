@@ -20,13 +20,14 @@ import {
   feedbackMessage,
   isEmptyCommentReview,
   keptCommentCount,
+  pullChangesMessage,
   submitBlockedReason,
   type DraftChanges,
   type DraftEdits,
 } from '@shared/feedback'
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
-import { BUSY_STATUSES, isSubmitted, lastTurnStartedAt, prUpdatedSinceLastTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastSuccessfulTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { emptyReviewTabs, type ReviewTab } from '../lib/reviewTabs'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
@@ -146,9 +147,9 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const changes: DraftChanges = { edits, summaryBodyEdit: summaryEdit, instructions: feedback }
   const message = feedbackMessage(drafts, changes)
   const keptComments = keptCommentCount(drafts, edits)
-  const lastTurnAt = lastTurnStartedAt(session)
+  const lastSuccessfulTurnAt = lastSuccessfulTurnStartedAt(session)
   const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
-  const prUpdatedAfterLastTurn = prUpdatedSinceLastTurn(session, prUpdatedAt)
+  const prUpdatedAfterLastSuccessfulTurn = prUpdatedSinceLastSuccessfulTurn(session, prUpdatedAt)
   const threadResolution = useThreadResolution(session)
   const resolvingThreads = threadResolution.resolving
   const resolution = session.threadResolution ?? null
@@ -179,10 +180,12 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   }
 
   const canSend = !busy && Boolean(message)
-  const send = async () => {
+  const sendMessage = async (text: string) => {
     reviewTab.follow()
-    if (!(await run(() => window.rally.sendFeedback(session.id, message)))) reviewTab.sendFailed()
+    if (!(await run(() => window.rally.sendFeedback(session.id, text)))) reviewTab.sendFailed()
   }
+  const send = () => sendMessage(message)
+  const pullChanges = () => sendMessage(pullChangesMessage(drafts, changes, lastSuccessfulTurnAt))
   const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
@@ -208,12 +211,19 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>
           started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
         </span>
-        {prUpdatedAfterLastTurn && prUpdatedAt && (
-          <span
-            className="text-sm text-amber-300"
-            title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last turn started at ${fullTime(lastTurnAt)}`}
-          >
-            PR updated since last turn
+        {prUpdatedAfterLastSuccessfulTurn && prUpdatedAt && (
+          <span className="flex items-center gap-2 text-sm text-amber-300">
+            <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last successful turn started at ${fullTime(lastSuccessfulTurnAt)}`}>
+              PR updated since last successful turn
+            </span>
+            <button
+              className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
+              disabled={busy || resolvingThreads}
+              title="Send Claude a turn to pull in the commits, comments, and reviews since its last successful turn and update the review, along with any pending edits and feedback"
+              onClick={pullChanges}
+            >
+              Pull in changes
+            </button>
           </span>
         )}
         <div className="ml-auto flex gap-2">

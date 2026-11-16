@@ -47,6 +47,16 @@ export function feedbackMessage(drafts: Drafts | null, changes: DraftChanges): s
   return [describeEdits(drafts, changes.edits, changes.summaryBodyEdit), changes.instructions.trim()].filter(Boolean).join('\n\n')
 }
 
+export const PULL_CHANGES_INSTRUCTION =
+  'The PR changed since your last turn. Fetch its latest head into your clone and check for new comments and replies. ' +
+  'Review what changed since the commit you last reviewed, update the report, drafts, and prior concerns to match, and publish the complete set again.'
+
+/** Returns a feedback message that asks Claude to review the PR's latest changes, keeping any pending edits and typed feedback. */
+export function pullChangesMessage(drafts: Drafts | null, changes: DraftChanges): string {
+  const instructions = [PULL_CHANGES_INSTRUCTION, changes.instructions.trim()].filter(Boolean).join('\n\n')
+  return feedbackMessage(drafts, { ...changes, instructions })
+}
+
 function keptComments(drafts: Drafts, edits: DraftEdits): DraftComment[] {
   return drafts.comments.flatMap((comment) => {
     const edit = edits[comment.id]

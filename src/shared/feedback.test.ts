@@ -7,6 +7,8 @@ import {
   foldIntoBody,
   isEmptyCommentReview,
   keptCommentCount,
+  PULL_CHANGES_INSTRUCTION,
+  pullChangesMessage,
   replyContext,
   SUBMIT_WITH_INSTRUCTIONS_ERROR,
   submitBlockedReason,
@@ -78,6 +80,18 @@ describe('feedbackMessage', () => {
 
   it('asks to remove a review body cleared to whitespace', () => {
     expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, { edits: {}, summaryBodyEdit: '  ', instructions: '' })).toBe('Edits I made in Rally:\n- Remove the review body.')
+  })
+})
+
+describe('pullChangesMessage', () => {
+  it('sends only the pull instruction when nothing is pending', () => {
+    expect(pullChangesMessage(drafts, { edits: {}, summaryBodyEdit: undefined, instructions: '  ' })).toBe(PULL_CHANGES_INSTRUCTION)
+  })
+
+  it('keeps pending edits before the pull instruction and typed feedback after it', () => {
+    expect(pullChangesMessage(drafts, { edits: { '3': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'make 2 a nitpick' })).toBe(
+      `Edits I made in Rally:\n- Drop #3.\n\n${PULL_CHANGES_INSTRUCTION}\n\nmake 2 a nitpick`,
+    )
   })
 })
 

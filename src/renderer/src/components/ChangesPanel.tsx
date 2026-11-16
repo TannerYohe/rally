@@ -1,0 +1,86 @@
+import { useEffect, useState } from 'react'
+import type { AuthorSession } from '@shared/types'
+import { errorMessage } from '@shared/errors'
+import { age, fullTime } from '../lib/format'
+import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { DiffView } from './DiffView'
+
+interface Props {
+  session: AuthorSession
+  disabled: boolean
+  onPush(): void
+  onRebase(): void
+}
+
+function useCloneDiff(session: AuthorSession): { diff: string; error: string | null } {
+  const [state, setState] = useState<{ diff: string; error: string | null }>({ diff: '', error: null })
+  const commitKey = session.commits.map((c) => c.oid).join(',')
+  useEffect(() => {
+    if (!commitKey) {
+      setState({ diff: '', error: null })
+      return
+    }
+    let current = true
+    window.rally.getAuthorDiff(session.id).then(
+      (diff) => current && setState({ diff, error: null }),
+      (error) => current && setState({ diff: '', error: errorMessage(error) }),
+    )
+    return () => {
+      current = false
+    }
+  }, [session.id, commitKey])
+  return state
+}
+
+export function ChangesPanel({ session, disabled, onPush, onRebase }: Props) {
+  const { diff, error } = useCloneDiff(session)
+  const { commits, uncommitted, lastPush, remoteMoved, clone } = session
+
+  return (
+    <div className="space-y-4">
+      {remoteMoved && (
+        <div className="flex items-center gap-3 rounded-lg bg-amber-950/70 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/30">
+          The branch moved on GitHub, so Rally didn't push.
+          <button className="ml-auto rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-amber-500/30 hover:bg-amber-500/25 disabled:opacity-40" disabled={disabled} onClick={onRebase}>
+            Ask Claude to rebase
+          </button>
+        </div>
+      )}
+      {uncommitted.length > 0 && (
+        <div className="rounded-lg bg-amber-950/50 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/20" title={uncommitted.join('\n')}>
+          Claude left {uncommitted.length} uncommitted change(s) in the clone. They won't be pushed.
+        </div>
+      )}
+
+      {commits.length > 0 ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold">
+              {commits.length} unpushed commit(s) on <span className="font-mono">{clone?.branch}</span>
+            </h3>
+            <button className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`} disabled={disabled} onClick={onPush}>
+              Push to GitHub
+            </button>
+          </div>
+          <ul className="space-y-1 text-sm">
+            {commits.map((commit) => (
+              <li key={commit.oid} className="flex gap-2">
+                <span className="font-mono text-ink-500">{commit.oid.slice(0, 7)}</span>
+                <span className="text-ink-200">{commit.subject}</span>
+              </li>
+            ))}
+          </ul>
+          {error ? <p className="text-sm text-rose-300">Couldn't read the diff: {error}</p> : <DiffView diff={diff} />}
+        </div>
+      ) : (
+        <p className="py-6 text-center text-sm text-ink-500">No unpushed commits. Pick Fix on a comment to have Claude change the code.</p>
+      )}
+
+      {lastPush && (
+        <p className="text-xs text-ink-500" title={fullTime(lastPush.at)}>
+          Last pushed {lastPush.commits.length} commit(s) {age(lastPush.at)} ago, head <span className="font-mono">{lastPush.oid.slice(0, 7)}</span>.
+        </p>
+      )}
+    </div>
+  )
+}

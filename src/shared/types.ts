@@ -265,6 +265,32 @@ export interface SubmittedReview {
   foldedDraftIds?: string[]
 }
 
+export type FeedbackItemKind = 'thread' | 'review' | 'finding'
+
+export interface FeedbackComment {
+  author: string | null
+  avatarUrl: string | null
+  body: string
+  createdAt: string
+  url: string
+}
+
+/** One thing a reviewer, or a self-review, raised on the viewer's own PR. */
+export interface FeedbackItem {
+  id: string
+  kind: FeedbackItemKind
+  author: string | null
+  avatarUrl: string | null
+  path: string | null
+  line: number | null
+  url: string | null
+  severity: Severity | null
+  outdated: boolean
+  answered: boolean
+  comments: FeedbackComment[]
+  replyToCommentId: number | null
+}
+
 export interface PrRef {
   owner: string
   repo: string
@@ -272,7 +298,8 @@ export interface PrRef {
   url: string
 }
 
-export interface ReviewSession {
+/** Fields every Claude session Rally runs for a PR has. */
+export interface SessionCore {
   id: string
   pr: PrRef
   prKey: string
@@ -280,14 +307,17 @@ export interface ReviewSession {
   status: SessionStatus
   error: string | null
   timeline: TimelineEntry[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ReviewSession extends SessionCore {
   drafts: Drafts | null
   submitted: SubmittedReview | null
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]
   submitAttemptReviewId?: number
-  createdAt: string
-  updatedAt: string
 }
 
 export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {

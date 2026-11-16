@@ -1,21 +1,29 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { PHASE_LABELS, PHASE_ORDER, type Phase, type Pr, type SessionStatus } from '@shared/types'
-import { Avatar } from '../components/Avatar'
-import { BusyDot } from '../components/BusyDot'
-import { DiffStat } from '../components/DiffStat'
-import { FailedInstallBanner } from '../components/FailedInstallBanner'
-import { FilterPanel } from '../components/FilterPanel'
-import { HideControls } from '../components/HideControls'
-import { PhaseBadge } from '../components/PhaseBadge'
-import { RepoChip } from '../components/RepoChip'
-import { SortControl } from '../components/SortControl'
+import { useNavigate } from 'react-router-dom'
+import { PHASE_LABELS, type Phase, type Pr, type PrFeedback, type PrListKind, type SessionStatus } from '@shared/types'
+import { Avatar } from './Avatar'
+import { BusyDot } from './BusyDot'
+import { DiffStat } from './DiffStat'
+import { FailedInstallBanner } from './FailedInstallBanner'
+import { FilterPanel } from './FilterPanel'
+import { HideControls } from './HideControls'
+import { PhaseBadge } from './PhaseBadge'
+import { RepoChip } from './RepoChip'
+import { SortControl } from './SortControl'
 import { age } from '../lib/format'
 import { usePersistentState, usePrs } from '../lib/hooks'
 import { activeFilterCount, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, type PrFilters, type PrSort } from '../lib/prFilters'
 import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
-import { settingsPath } from '../lib/settingsSections'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
+
+export interface DashboardConfig {
+  list: PrListKind
+  title: string
+  phaseOrder: readonly Phase[]
+  storageKey: string
+  detailPath(pr: Pr): string
+  emptyState: ReactNode
+}
 
 function ReviewStatusNote({ status }: { status: SessionStatus }) {
   const busy = BUSY_STATUSES.includes(status)
@@ -27,7 +35,34 @@ function ReviewStatusNote({ status }: { status: SessionStatus }) {
   )
 }
 
-function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
+function FeedbackNote({ feedback }: { feedback: PrFeedback }) {
+  const parts: ReactNode[] = []
+  if (feedback.unansweredThreads > 0) {
+    parts.push(
+      <span key="unanswered" className="text-amber-300">
+        {feedback.unansweredThreads} unanswered
+      </span>,
+    )
+  }
+  if (feedback.changesRequestedBy.length > 0) {
+    parts.push(
+      <span key="changes" className="text-amber-300">
+        changes requested by {feedback.changesRequestedBy.join(', ')}
+      </span>,
+    )
+  }
+  if (feedback.approvedBy.length > 0) {
+    parts.push(
+      <span key="approved" className="text-emerald-300">
+        approved by {feedback.approvedBy.join(', ')}
+      </span>,
+    )
+  }
+  if (parts.length === 0) parts.push(<span key="none">{feedback.openThreads} open threads</span>)
+  return <>{parts}</>
+}
+
+function PrCard({ list, pr, onOpen }: { list: PrListKind; pr: Pr; onOpen(): void }) {
   const theme = PHASE_THEME[pr.phase]
   return (
     <li className={`group relative ${pr.hidden ? 'opacity-60 hover:opacity-100' : ''}`}>
@@ -54,9 +89,13 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
             <RepoChip repo={pr.repo} number={pr.number} />
-            <span>
-              by <span className="text-ink-200">{pr.author}</span>
-            </span>
+            {pr.feedback ? (
+              <FeedbackNote feedback={pr.feedback} />
+            ) : (
+              <span>
+                by <span className="text-ink-200">{pr.author}</span>
+              </span>
+            )}
             <span title={pr.createdAt}>opened {age(pr.createdAt)} ago</span>
             <span title={pr.updatedAt}>updated {age(pr.updatedAt)} ago</span>
             <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
@@ -75,6 +114,7 @@ function PrCard({ pr, onOpen }: { pr: Pr; onOpen(): void }) {
         </div>
       </button>
       <HideControls
+        list={list}
         pr={pr}
         className={`absolute bottom-3 right-3 p-1 ${pr.hidden ? '' : 'rounded-lg bg-ink-900 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100'}`}
       />
@@ -87,40 +127,32 @@ function EmptyState({ children }: { children: ReactNode }) {
 }
 
 interface PrListProps {
+  list: PrListKind
   prs: Pr[]
   visible: Pr[]
   allMatchingHidden: boolean
   refreshing: boolean
+  emptyState: ReactNode
   onOpen(pr: Pr): void
 }
 
-function PrList({ prs, visible, allMatchingHidden, refreshing, onOpen }: PrListProps) {
-  if (prs.length === 0 && !refreshing) {
-    return (
-      <EmptyState>
-        No open PRs match. Add authors and repos in{' '}
-        <Link className="text-primary-400 underline" to={settingsPath('pull-requests')}>
-          Settings
-        </Link>
-        .
-      </EmptyState>
-    )
-  }
+function PrList({ list, prs, visible, allMatchingHidden, refreshing, emptyState, onOpen }: PrListProps) {
+  if (prs.length === 0 && !refreshing) return <EmptyState>{emptyState}</EmptyState>
   if (visible.length === 0) return <EmptyState>{allMatchingHidden ? 'All matching PRs are hidden.' : 'No PRs match these filters.'}</EmptyState>
-  return <PrCards prs={visible} onOpen={onOpen} />
+  return <PrCards list={list} prs={visible} onOpen={onOpen} />
 }
 
-function PrCards({ prs, onOpen }: { prs: Pr[]; onOpen(pr: Pr): void }) {
+function PrCards({ list, prs, onOpen }: { list: PrListKind; prs: Pr[]; onOpen(pr: Pr): void }) {
   return (
     <ul className="space-y-2.5">
       {prs.map((pr) => (
-        <PrCard key={pr.id} pr={pr} onOpen={() => onOpen(pr)} />
+        <PrCard key={pr.id} list={list} pr={pr} onOpen={() => onOpen(pr)} />
       ))}
     </ul>
   )
 }
 
-function HiddenPrs({ prs, onOpen }: { prs: Pr[]; onOpen(pr: Pr): void }) {
+function HiddenPrs({ list, prs, onOpen }: { list: PrListKind; prs: Pr[]; onOpen(pr: Pr): void }) {
   const [open, setOpen] = useState(false)
   if (prs.length === 0) return null
   return (
@@ -128,7 +160,7 @@ function HiddenPrs({ prs, onOpen }: { prs: Pr[]; onOpen(pr: Pr): void }) {
       <button className="text-xs text-ink-500 hover:text-ink-300" onClick={() => setOpen(!open)}>
         {open ? '▾' : '▸'} {prs.length} hidden
       </button>
-      {open && <PrCards prs={prs} onOpen={onOpen} />}
+      {open && <PrCards list={list} prs={prs} onOpen={onOpen} />}
     </section>
   )
 }
@@ -141,16 +173,20 @@ function FunnelIcon() {
   )
 }
 
-export function Dashboard() {
-  const { prs, refreshing, refreshedAt, error } = usePrs()
-  const [filters, setFilters] = usePersistentState<PrFilters>('rally.dashboard.filters', DEFAULT_FILTERS)
-  const [sort, setSort] = usePersistentState<PrSort>('rally.dashboard.sort', DEFAULT_SORT)
+export function PrDashboard({ config }: { config: DashboardConfig }) {
+  const { list, phaseOrder } = config
+  const { prs, refreshing, refreshedAt, error } = usePrs(list)
+  const [filters, setFilters] = usePersistentState<PrFilters>(`${config.storageKey}.filters`, DEFAULT_FILTERS)
+  const [sort, setSort] = usePersistentState<PrSort>(`${config.storageKey}.sort`, DEFAULT_SORT)
   const [showFilters, setShowFilters] = useState(false)
   const navigate = useNavigate()
 
-  const { visible, hiddenPrs, phaseCounts, allMatchingHidden } = useMemo(() => dashboardView(prs, filters, sort), [prs, filters, sort])
+  const { visible, hiddenPrs, phaseCounts, allMatchingHidden } = useMemo(
+    () => dashboardView(prs, filters, sort, phaseOrder),
+    [prs, filters, sort, phaseOrder],
+  )
   const activeCount = activeFilterCount(filters)
-  const openPr = (pr: Pr) => navigate(`/pr/${pr.owner}/${pr.repo}/${pr.number}`)
+  const openPr = (pr: Pr) => navigate(config.detailPath(pr))
 
   const togglePhase = (phase: Phase) => {
     const hiddenPhases = filters.hiddenPhases.includes(phase)
@@ -163,7 +199,7 @@ export function Dashboard() {
     <div className="mx-auto max-w-6xl space-y-4 px-6 py-6">
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-semibold">
-          Open PRs{' '}
+          {config.title}{' '}
           <span className="text-ink-500">
             {visible.length === prs.length ? prs.length : `${visible.length} of ${prs.length}`}
           </span>
@@ -173,7 +209,7 @@ export function Dashboard() {
           <button
             className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5`}
             disabled={refreshing}
-            onClick={() => window.rally.refreshPrs()}
+            onClick={() => window.rally.refreshPrs(list)}
           >
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
@@ -181,7 +217,7 @@ export function Dashboard() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {PHASE_ORDER.map((phase) => {
+        {phaseOrder.map((phase) => {
           const theme = PHASE_THEME[phase]
           const active = !filters.hiddenPhases.includes(phase)
           return (
@@ -214,14 +250,22 @@ export function Dashboard() {
         </div>
       </div>
 
-      {showFilters && <FilterPanel prs={prs} filters={filters} onChange={setFilters} />}
+      {showFilters && <FilterPanel prs={prs} filters={filters} showAuthors={list === 'reviewing'} onChange={setFilters} />}
 
       <FailedInstallBanner />
 
       {error && <div className="rounded-lg bg-rose-950/80 px-4 py-2 text-sm text-rose-200 ring-1 ring-rose-500/30">GitHub refresh failed: {error}</div>}
 
-      <PrList prs={prs} visible={visible} allMatchingHidden={allMatchingHidden} refreshing={refreshing} onOpen={openPr} />
-      <HiddenPrs prs={hiddenPrs} onOpen={openPr} />
+      <PrList
+        list={list}
+        prs={prs}
+        visible={visible}
+        allMatchingHidden={allMatchingHidden}
+        refreshing={refreshing}
+        emptyState={config.emptyState}
+        onOpen={openPr}
+      />
+      <HiddenPrs list={list} prs={hiddenPrs} onOpen={openPr} />
     </div>
   )
 }

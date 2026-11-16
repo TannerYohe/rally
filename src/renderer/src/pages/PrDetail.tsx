@@ -37,7 +37,7 @@ export function PrDetail() {
   const repo = params.repo!
   const number = Number(params.number)
   const key = prKey(owner, repo, number)
-  const { prs } = usePrs()
+  const { prs } = usePrs('reviewing')
   const pr = prs.find((p) => p.owner === owner && p.repo === repo && p.number === number)
   const [session, setSession] = useSession(key)
   const url = pr?.url ?? `https://github.com/${owner}/${repo}/pull/${number}`
@@ -75,7 +75,7 @@ export function PrDetail() {
               <a className="text-primary-400 hover:text-primary-300" href={url} target="_blank" rel="noreferrer">
                 Open on GitHub ↗
               </a>
-              {pr && <HideControls pr={pr} className="ml-auto" />}
+              {pr && <HideControls list="reviewing" pr={pr} className="ml-auto" />}
             </div>
           </div>
         </div>

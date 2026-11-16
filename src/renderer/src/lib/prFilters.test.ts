@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Pr } from '@shared/types'
+import { AUTHOR_PHASE_ORDER, REVIEW_PHASE_ORDER, type Pr } from '@shared/types'
 import { applySecondaryFilters, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, filterOptions, sortPrs } from './prFilters'
 
 function pr(overrides: Partial<Pr>): Pr {
@@ -27,6 +27,7 @@ function pr(overrides: Partial<Pr>): Pr {
     files: [],
     reviewRequestedFromMe: false,
     myReviews: [],
+    feedback: null,
     phase: 'unreviewed',
     reviewStatus: null,
     summary: null,
@@ -61,20 +62,25 @@ describe('applySecondaryFilters', () => {
 })
 
 describe('sortPrs', () => {
+  it('sorts by the phase order it is given', () => {
+    const authored = [pr({ id: 'x', phase: 'approved' }), pr({ id: 'y', phase: 'needs_response' }), pr({ id: 'z', phase: 'awaiting_reviews' })]
+    expect(ids(sortPrs(authored, { field: 'phase', direction: 'asc' }, AUTHOR_PHASE_ORDER))).toEqual(['y', 'z', 'x'])
+  })
+
   it('sorts by phase order', () => {
-    expect(ids(sortPrs(prs, { field: 'phase', direction: 'asc' }))).toEqual(['b', 'c', 'a'])
+    expect(ids(sortPrs(prs, { field: 'phase', direction: 'asc' }, REVIEW_PHASE_ORDER))).toEqual(['b', 'c', 'a'])
   })
 
   it('sorts by size descending', () => {
-    expect(ids(sortPrs(prs, { field: 'size', direction: 'desc' }))).toEqual(['b', 'a', 'c'])
+    expect(ids(sortPrs(prs, { field: 'size', direction: 'desc' }, REVIEW_PHASE_ORDER))).toEqual(['b', 'a', 'c'])
   })
 
   it('sorts authors case-insensitively', () => {
-    expect(ids(sortPrs(prs, { field: 'author', direction: 'asc' }))).toEqual(['a', 'b', 'c'])
+    expect(ids(sortPrs(prs, { field: 'author', direction: 'asc' }, REVIEW_PHASE_ORDER))).toEqual(['a', 'b', 'c'])
   })
 
   it('sorts newest first', () => {
-    expect(ids(sortPrs(prs, { field: 'created', direction: 'desc' }))).toEqual(['a', 'c', 'b'])
+    expect(ids(sortPrs(prs, { field: 'created', direction: 'desc' }, REVIEW_PHASE_ORDER))).toEqual(['a', 'c', 'b'])
   })
 })
 
@@ -97,7 +103,7 @@ describe('dashboardView', () => {
   ]
 
   it('moves hidden PRs out of the list and the phase counts', () => {
-    const view = dashboardView(withHidden, DEFAULT_FILTERS, DEFAULT_SORT)
+    const view = dashboardView(withHidden, DEFAULT_FILTERS, DEFAULT_SORT, REVIEW_PHASE_ORDER)
     expect(ids(view.visible)).toEqual(['b', 'c', 'a'])
     expect(ids(view.hiddenPrs)).toEqual(['d', 'e'])
     expect(view.phaseCounts).toEqual({ in_progress: 1, awaiting_rereview: 0, unreviewed: 1, pending_changes: 0, approved: 1 })
@@ -105,13 +111,13 @@ describe('dashboardView', () => {
   })
 
   it('applies author filters but not phase toggles to hidden PRs', () => {
-    const view = dashboardView(withHidden, { ...DEFAULT_FILTERS, authors: ['bob'], hiddenPhases: ['approved'] }, DEFAULT_SORT)
+    const view = dashboardView(withHidden, { ...DEFAULT_FILTERS, authors: ['bob'], hiddenPhases: ['approved'] }, DEFAULT_SORT, REVIEW_PHASE_ORDER)
     expect(ids(view.visible)).toEqual(['b'])
     expect(ids(view.hiddenPrs)).toEqual(['e'])
   })
 
   it('reports when every matching PR is hidden', () => {
-    expect(dashboardView(withHidden.slice(3), DEFAULT_FILTERS, DEFAULT_SORT).allMatchingHidden).toBe(true)
-    expect(dashboardView([], DEFAULT_FILTERS, DEFAULT_SORT).allMatchingHidden).toBe(false)
+    expect(dashboardView(withHidden.slice(3), DEFAULT_FILTERS, DEFAULT_SORT, REVIEW_PHASE_ORDER).allMatchingHidden).toBe(true)
+    expect(dashboardView([], DEFAULT_FILTERS, DEFAULT_SORT, REVIEW_PHASE_ORDER).allMatchingHidden).toBe(false)
   })
 })

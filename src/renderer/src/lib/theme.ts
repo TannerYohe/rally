@@ -42,6 +42,20 @@ export const PHASE_THEME: Record<Phase, PhaseTheme> = {
     ring: 'ring-secondary-400/50',
     chipActive: 'bg-secondary-400/15 text-secondary-200 ring-secondary-400/40',
   },
+  needs_response: {
+    accent: 'bg-amber-400',
+    badge: 'bg-amber-400/10 text-amber-300 ring-amber-400/30',
+    dot: 'bg-amber-400',
+    ring: 'ring-amber-400/50',
+    chipActive: 'bg-amber-400/15 text-amber-200 ring-amber-400/40',
+  },
+  awaiting_reviews: {
+    accent: 'bg-primary-400',
+    badge: 'bg-primary-400/10 text-primary-300 ring-primary-400/30',
+    dot: 'bg-primary-400',
+    ring: 'ring-primary-400/50',
+    chipActive: 'bg-primary-400/15 text-primary-200 ring-primary-400/40',
+  },
   approved: {
     accent: 'bg-emerald-400',
     badge: 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/30',

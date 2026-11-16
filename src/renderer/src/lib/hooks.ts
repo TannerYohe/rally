@@ -1,17 +1,19 @@
 import { useEffect, useReducer, useRef, useState, type RefObject } from 'react'
-import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type InstallAttempt, type TimelineEntry, type UpdateState } from '@shared/types'
+import { priorConcernThreadIds, type PrListKind, type PrListState, type ReviewSession, type ReviewThread, type InstallAttempt, type TimelineEntry, type UpdateState } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTab } from './reviewTabs'
 import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
 
-export function usePrs(): PrListState {
+export function usePrs(list: PrListKind): PrListState {
   const [state, setState] = useState<PrListState>(EMPTY_PRS)
   useEffect(() => {
-    window.rally.getPrs().then(setState)
-    return window.rally.onPrsChanged(setState)
-  }, [])
+    window.rally.getPrs(list).then(setState)
+    return window.rally.onPrsChanged((change) => {
+      if (change.list === list) setState(change.state)
+    })
+  }, [list])
   return state
 }
 

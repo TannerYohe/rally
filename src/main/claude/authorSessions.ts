@@ -85,7 +85,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       const available = new Set(items.map((item) => item.id))
       if (requests.some((request) => !available.has(request.itemId))) throw new Error(STALE_ITEMS_ERROR)
       const requested = new Set(requests.map((request) => request.itemId))
-      this.patch(session.id, (s) => ({ status: 'running', error: null, items: mergeItems(s.items, items.filter((i) => requested.has(i.id))) }), true)
+      this.patch(session.id, (s) => ({ status: 'running', error: null, remoteMoved: false, items: mergeItems(s.items, items.filter((i) => requested.has(i.id))) }), true)
       const clone = await this.prepareClone(session.id)
       void this.runTurn(session.id, authorActionsPrompt(pr, clone, items, requests, note), 'respond')
     } catch (error) {
@@ -106,6 +106,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   async feedback(sessionId: string, message: string): Promise<void> {
     this.assertIdle(sessionId)
+    this.patch(sessionId, () => ({ remoteMoved: false }))
     void this.runTurn(sessionId, message, 'refine')
   }
 

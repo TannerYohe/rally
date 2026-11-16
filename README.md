@@ -59,7 +59,7 @@ PRs are squash-merged, so the PR title becomes the commit semantic-release reads
 
 ### Dashboard
 
-Rally lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand.
+The **Reviewing** tab lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand.
 
 Each row shows author, title, repo, age, phase, and a one-line summary. Claude Haiku writes the summary, and it is cached per head SHA. If summarizing fails, the row shows **Summary unavailable** with the error on hover, and Rally retries on the next refresh.
 
@@ -112,6 +112,33 @@ Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the
 
 Settings → Reviews picks the review skill, and the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
 
+### My PRs
+
+The **My PRs** tab in the header lists your own open PRs, independent of the author and repo lists in Settings. It has its own filters, sort, hides, and summaries. Each card shows unanswered threads, who requested changes, and who approved, instead of the author.
+
+| Phase | Rule |
+|---|---|
+| In progress | Your Rally session for the PR has a running turn, an error, unpushed commits, or unposted replies. |
+| Needs response | An unresolved thread's last comment isn't yours, or a reviewer's latest decision is Changes requested, was submitted after your head commit, and you haven't re-requested their review. |
+| Awaiting reviews | Anything else that isn't approved. |
+| Approved | GitHub's review decision is Approved, or, in a repo that requires no reviews, a reviewer approved. |
+
+Re-request review after you respond to a change request; replying alone leaves it in Needs response. The logic lives in `src/main/github/authorPhase.ts`.
+
+The PR page lists each unresolved review thread and the body of each change request that still stands, unanswered first. Pick one action per comment, with an optional note for Claude:
+
+- **Investigate**: Claude checks whether the comment holds against the code and gives a verdict (valid, partly valid, not valid, unclear) with evidence. When it doesn't hold, Claude drafts the reply you'd post. No code changes.
+- **Fix**: Claude makes the change, runs quick checks, commits, and drafts a reply naming the commit.
+- **Push back**: Claude drafts a reply explaining why not. No code changes.
+
+**Run** sends every picked action in one Claude turn. The first run clones the PR's head branch into the session's temp directory, using `gh` as git's credential helper; later runs fetch it and fast-forward it when it has no commits of its own. Rally only clones PRs you opened. Claude's verdict, summary, commits, and reply draft show on each comment. Edit or drop a reply there, or tick **Resolve thread after posting**, which is off by default. The text box below sends Claude a free-form message instead when nothing is picked.
+
+The **Changes** tab shows the clone's unpushed commits and their diff. **Push to GitHub** pushes them to the head branch without force. If the branch moved on GitHub, Rally refuses and offers **Ask Claude to rebase**, which asks Claude to rebase onto it and republish the affected replies with the new commit ids. Claude never pushes; the tool policy still blocks `git push`.
+
+**Post replies** posts every pending reply through the GitHub API, with no Claude turn, and asks first. It is disabled while commits are unpushed, so replies never point at code reviewers can't see. A thread reply goes on the thread; a reply to a change request's body posts as a PR comment linking the review. A reply that fails stays pending so you can post it again. A thread that was resolved on GitHub after Claude drafted its reply stays listed until you post or drop the reply.
+
+**Self-review** runs your review skill from Settings on the PR. Nothing is posted: the report shows in the **Self-review** tab, and each draft comment becomes a finding in the comment list with Investigate, Fix, and Dismiss. **Start over** discards the session, its clone, unpushed commits, and unposted replies. The logic lives in `src/main/claude/authorSessions.ts`, and the git steps in `src/main/git/prClone.ts`.
+
 ### Updates
 
 Settings → About shows the app version, the Electron, Chromium, and Node.js versions, and the data folder. **Check for updates** reads the latest release from the GitHub API without signing in, and gives up after 15 seconds. When the release is newer than the running version, the page shows its date and notes and **Download and install**, which downloads the release asset for this machine and shows progress. A download that receives nothing for 30 seconds fails, and you can try again. Rally only downloads an asset whose name is a plain file name and whose URL, once parsed, is exactly `https://github.com/TannerYohe/rally/releases/download/<tag>/<name>` for the release's tag, with no query or fragment; otherwise the page says why and offers **Check again**.
@@ -129,7 +156,7 @@ Quitting stops any running Claude turn; the review shows as interrupted and resu
 
 The tool policy is a guardrail against accidental writes and destructive commands, not a sandbox; see the warning at the top. The review session can run interpreters, build tools, tests, and shells so it can explore the code. Every tool call goes through `src/main/claude/toolPolicy.ts` as a `PreToolUse` hook:
 
-- GitHub writes are always blocked: every `gh api` request other than a GET, every GraphQL mutation, and `gh` subcommands that write. Rally posts reviews and resolves threads itself, outside the session. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`, `winpty`), `sh -c`, `eval`, and `find -exec`. On Windows, commands run through `cmd` or `powershell` are not checked. `git push` is always blocked.
+- GitHub writes are always blocked: every `gh api` request other than a GET, every GraphQL mutation, and `gh` subcommands that write. Rally posts reviews and replies, resolves threads, and pushes fixes on your own PRs itself, outside the session. `gh` is checked behind wrappers (`timeout`, `xargs`, `env`, `winpty`), `sh -c`, `eval`, and `find -exec`. On Windows, commands run through `cmd` or `powershell` are not checked. `git push` is always blocked.
 - Write, Edit, and Bash file writes (`rm`, `mv`, `cp`, `tee`, `sed -i`, `find -delete`, output redirects) only land under the temp directory. Paths resolve against the working directory, including `cd`, with `..` and symlinks followed, and `$WORK` counts as temp only in the command that assigns it from `mktemp` or a temp path. Paths that `xargs` supplies are unknown, so file-writing commands behind `xargs` are blocked. Git commands that change a checkout, and `gh pr checkout`, only run in temp repos. `git config --global` is read-only.
 - `curl` and `wget` requests with a body or a non-GET method (`curl -d`, `curl -X POST`, `wget --post-data`) are blocked. This is not an exfiltration control: GET URLs, `WebFetch`, and interpreters can still send data out.
 - `ssh`/`scp`, live infrastructure CLIs (`kubectl`, `aws`, `gcloud`, `az`, `terraform`, `helm`), and `sudo` are blocked.
@@ -143,7 +170,7 @@ Settings → Appearance switches the skin: **Classic**, **Centre Court** (tennis
 
 ## Data
 
-Rally stores config, the PR cache, and summaries as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS), and each review session as its own file under `sessions/` there. Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.
+Rally stores config, the PR caches, and summaries as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS), each review session as its own file under `sessions/` there, and each My PRs session under `author-sessions/`. The My PRs list keeps its own `authored-*.json` cache, summaries, seen heads, and hides. Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.
 
 ## License
 

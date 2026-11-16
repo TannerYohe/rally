@@ -2,7 +2,7 @@ import { GraphqlResponseError } from '@octokit/graphql'
 import { foldIntoBody, type FinalReview } from '@shared/feedback'
 import { errorMessage } from '@shared/errors'
 import type { DraftComment, PrRef, ReviewEvent, SubmittedReview } from '@shared/types'
-import { github, timeoutRequest, type GithubClient } from './client'
+import { github, pullParams, timeoutRequest, type GithubClient } from './client'
 import { fetchThreadComments, threadCommentFor } from './reviewComments'
 import { sameLogin } from './threads'
 
@@ -61,8 +61,6 @@ async function step<T>(pr: PrRef, name: string, action: () => Promise<T>): Promi
     throw new Error(`Submitting the review failed while ${name}: ${errorMessage(error)}`)
   }
 }
-
-const pullParams = (pr: PrRef) => ({ owner: pr.owner, repo: pr.repo, pull_number: pr.number })
 
 async function listReviews(gh: GithubClient, pr: PrRef): Promise<ListedReview[]> {
   return gh.rest.paginate(gh.rest.pulls.listReviews, { ...pullParams(pr), per_page: 100, request: timeoutRequest() })

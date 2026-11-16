@@ -9,7 +9,7 @@ import { FeedbackCard, type ActionPick } from '../components/FeedbackCard'
 import { Markdown } from '../components/Markdown'
 import { PrHeader } from '../components/PrHeader'
 import { ProgressTimeline } from '../components/ProgressTimeline'
-import { TabBar, TabPanel } from '../components/TabBar'
+import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
 import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, replyPosts, type AuthorTab } from '../lib/authorView'
 import { age, clockTime, fullTime } from '../lib/format'
 import { useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
@@ -264,12 +264,4 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
       </div>
     </section>
   )
-}
-
-function TabCount({ count }: { count: number }) {
-  return <span className="rounded-full bg-white/10 px-1.5 text-xs font-normal text-ink-200">{count}</span>
-}
-
-function EmptyTab({ children }: { children: ReactNode }) {
-  return <p className="py-6 text-center text-sm text-ink-500">{children}</p>
 }

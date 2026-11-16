@@ -9,7 +9,7 @@ import { Markdown } from '../components/Markdown'
 import { BusyDot } from '../components/BusyDot'
 import { PrHeader } from '../components/PrHeader'
 import { ProgressTimeline } from '../components/ProgressTimeline'
-import { TabBar, TabPanel } from '../components/TabBar'
+import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
 import { SubmitBar } from '../components/SubmitBar'
 import {
   EMPTY_COMMENT_REVIEW_ERROR,
@@ -319,12 +319,4 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       )}
     </section>
   )
-}
-
-function TabCount({ count }: { count: number }) {
-  return <span className="rounded-full bg-white/10 px-1.5 text-xs font-normal text-ink-200">{count}</span>
-}
-
-function EmptyTab({ children }: { children: ReactNode }) {
-  return <p className="py-6 text-center text-sm text-ink-500">{children}</p>
 }

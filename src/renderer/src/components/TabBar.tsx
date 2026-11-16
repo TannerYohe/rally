@@ -56,3 +56,11 @@ export function TabPanel<T extends string>({ name, id, tab, children }: { name: 
     </div>
   )
 }
+
+export function TabCount({ count }: { count: number }) {
+  return <span className="rounded-full bg-white/10 px-1.5 text-xs font-normal text-ink-200">{count}</span>
+}
+
+export function EmptyTab({ children }: { children: ReactNode }) {
+  return <p className="py-6 text-center text-sm text-ink-500">{children}</p>
+}

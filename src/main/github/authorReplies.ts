@@ -1,9 +1,7 @@
 import type { FeedbackItem, PrRef } from '@shared/types'
 import type { CloneSource } from '../git/prClone'
-import { github, timeoutRequest } from './client'
+import { github, pullParams, timeoutRequest } from './client'
 import { resolveThread, sameLogin } from './threads'
-
-const pullParams = (pr: PrRef) => ({ owner: pr.owner, repo: pr.repo, pull_number: pr.number })
 
 export function reviewReplyBody(item: Pick<FeedbackItem, 'author' | 'url'>, body: string): string {
   const reviewer = item.author ? `@${item.author}'s` : 'the'

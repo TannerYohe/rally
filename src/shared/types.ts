@@ -235,7 +235,7 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
-export type TurnMode = 'review' | 'refine'
+export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review'
 
 export type TimelineEntry =
   | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }
@@ -318,6 +318,90 @@ export interface ReviewSession extends SessionCore {
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]
   submitAttemptReviewId?: number
+}
+
+export const RESPONSE_ACTIONS = ['investigate', 'fix', 'push_back'] as const
+
+export type ResponseAction = (typeof RESPONSE_ACTIONS)[number]
+
+export const RESPONSE_ACTION_LABELS: Record<ResponseAction, string> = {
+  investigate: 'Investigate',
+  fix: 'Fix',
+  push_back: 'Push back',
+}
+
+export const RESPONSE_VERDICTS = ['valid', 'partly_valid', 'not_valid', 'unclear'] as const
+
+export type ResponseVerdict = (typeof RESPONSE_VERDICTS)[number]
+
+export const RESPONSE_VERDICT_LABELS: Record<ResponseVerdict, string> = {
+  valid: 'Valid',
+  partly_valid: 'Partly valid',
+  not_valid: 'Not valid',
+  unclear: 'Unclear',
+}
+
+export interface ActionRequest {
+  itemId: string
+  action: ResponseAction
+  note: string
+}
+
+export interface ItemResponse {
+  itemId: string
+  action: ResponseAction
+  verdict: ResponseVerdict | null
+  summary: string
+  reply: string
+  commits: string[]
+  at: string
+}
+
+export interface PostedReply {
+  at: string
+  url: string | null
+  resolved: boolean
+  error: string | null
+}
+
+export interface ReplyPost {
+  itemId: string
+  body: string
+  resolve: boolean
+}
+
+export interface LocalCommit {
+  oid: string
+  subject: string
+}
+
+export interface CloneInfo {
+  path: string
+  branch: string
+  baseRef: string
+}
+
+export interface PushRecord {
+  at: string
+  oid: string
+  commits: LocalCommit[]
+}
+
+export interface SelfReview {
+  verdict: string
+  reportMarkdown: string
+  findings: FeedbackItem[]
+}
+
+export interface AuthorSession extends SessionCore {
+  clone: CloneInfo | null
+  items: FeedbackItem[]
+  responses: Record<string, ItemResponse>
+  posted: Record<string, PostedReply>
+  selfReview: SelfReview | null
+  commits: LocalCommit[]
+  uncommitted: string[]
+  lastPush: PushRecord | null
 }
 
 export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {

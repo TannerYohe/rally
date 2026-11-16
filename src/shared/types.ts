@@ -1,13 +1,35 @@
-export type Phase = 'in_progress' | 'unreviewed' | 'awaiting_rereview' | 'pending_changes' | 'approved'
+export type ReviewPhase = 'in_progress' | 'unreviewed' | 'awaiting_rereview' | 'pending_changes' | 'approved'
 
-export const PHASE_ORDER: Phase[] = ['in_progress', 'awaiting_rereview', 'unreviewed', 'pending_changes', 'approved']
+export type AuthorPhase = 'in_progress' | 'needs_response' | 'awaiting_reviews' | 'approved'
+
+export type Phase = ReviewPhase | AuthorPhase
+
+export const REVIEW_PHASE_ORDER: ReviewPhase[] = ['in_progress', 'awaiting_rereview', 'unreviewed', 'pending_changes', 'approved']
+
+export const AUTHOR_PHASE_ORDER: AuthorPhase[] = ['in_progress', 'needs_response', 'awaiting_reviews', 'approved']
 
 export const PHASE_LABELS: Record<Phase, string> = {
   in_progress: 'In progress',
   unreviewed: 'Unreviewed',
   awaiting_rereview: 'Awaiting re-review',
   pending_changes: 'Pending changes',
+  needs_response: 'Needs response',
+  awaiting_reviews: 'Awaiting reviews',
   approved: 'Approved',
+}
+
+export type PrListKind = 'reviewing' | 'authored'
+
+export type ReviewDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED'
+
+/** Review activity on a PR the viewer authored. */
+export interface PrFeedback {
+  reviewDecision: ReviewDecision | null
+  openThreads: number
+  unansweredThreads: number
+  changesRequestedBy: string[]
+  approvedBy: string[]
+  headCommittedAt: string | null
 }
 
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
@@ -62,6 +84,7 @@ export interface Pr {
   files: string[]
   reviewRequestedFromMe: boolean
   myReviews: MyReview[]
+  feedback: PrFeedback | null
   phase: Phase
   reviewStatus: SessionStatus | null
   summary: string | null

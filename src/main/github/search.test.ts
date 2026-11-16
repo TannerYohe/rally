@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG } from '@shared/types'
-import { buildSearchQueries, repoQualifier } from './search'
+import { AUTHORED_SEARCH_QUERIES, buildSearchQueries, repoQualifier } from './search'
 
 const config = (overrides: Partial<typeof DEFAULT_CONFIG>) => ({ ...DEFAULT_CONFIG, includeReviewRequests: false, ...overrides })
 
@@ -45,5 +45,11 @@ describe('repoQualifier', () => {
     expect(repoQualifier('acme/*')).toBe('org:acme')
     expect(repoQualifier('acme/')).toBe('org:acme')
     expect(repoQualifier(' acme ')).toBe('org:acme')
+  })
+})
+
+describe('AUTHORED_SEARCH_QUERIES', () => {
+  it('lists my own open PRs', () => {
+    expect(AUTHORED_SEARCH_QUERIES).toEqual(['is:pr is:open archived:false author:@me'])
   })
 })

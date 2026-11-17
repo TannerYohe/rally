@@ -160,7 +160,12 @@ function toMyReview(review: RawReview, replyOnly: boolean): MyReview {
 
 async function fetchOlderReviews(gh: GithubClient, raw: RawPr, before: string): Promise<OlderReviewPage | null> {
   try {
-    const response = await gh.graphql<{ node: { reviews: OlderReviewPage } | null }>(OLDER_REVIEWS_QUERY, { id: raw.id, viewer: gh.login, before })
+    const response = await gh.graphql<{ node: { reviews: OlderReviewPage } | null }>(OLDER_REVIEWS_QUERY, {
+      id: raw.id,
+      viewer: gh.login,
+      before,
+      request: timeoutRequest(),
+    })
     if (response.node) return response.node.reviews
     console.warn('GitHub returned no PR for an older reviews page', { pr: raw.url })
   } catch (error) {

@@ -85,7 +85,9 @@ describe('fetchPr', () => {
     const pr = await fetchPr('acme', 'api', 12)
 
     expect(graphql.mock.calls[2][1]).toMatchObject({ id: 'PR_12', viewer: 'me', before: 'c20' })
+    expect(graphql.mock.calls[2][0]).toMatch(/reviews\(author: \$viewer, last: 20, before: \$before\)/)
     expect(graphql.mock.calls[2][0]).toMatch(/comments\(first: 20\)/)
+    expect(graphql.mock.calls[2][1].request.signal).toBeInstanceOf(AbortSignal)
     expect(graphql).toHaveBeenCalledTimes(3)
     expect(pr.myReviews).toHaveLength(26)
     expect(pr.myReviews[0]).toEqual({ databaseId: 7, state: 'COMMENTED', submittedAt: '2026-11-04T00:00:00Z', commitOid: 'old', replyOnly: false })

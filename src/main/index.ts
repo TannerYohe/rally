@@ -14,6 +14,7 @@ function createWindow(): BrowserWindow {
     icon,
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
+      autoplayPolicy: 'no-user-gesture-required',
     },
   })
 

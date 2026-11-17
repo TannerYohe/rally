@@ -8,6 +8,7 @@ import { reviewSessions } from './claude/reviewSessions'
 import { github, resetGithubClient } from './github/client'
 import { classifyGithubFailure } from './github/failure'
 import { prList } from './prList'
+import { SoundCues } from './soundCues'
 import { configFile } from './store'
 import { appInfo, updater } from './update/updater'
 
@@ -55,12 +56,20 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getFailedInstall, () => updater.failedInstall())
   ipcMain.handle(IPC.dismissFailedInstall, () => updater.dismissFailedInstall())
 
-  prList.on('changed', (state) => broadcast(IPC.prsChanged, state))
+  const soundCues = new SoundCues(prList.get().prs, () => configFile.get(), (playback) => broadcast(IPC.soundCue, playback))
+  prList.on('changed', (state) => {
+    broadcast(IPC.prsChanged, state)
+    soundCues.prsChanged(state.prs)
+  })
   prList.setReviewStatusLookup((key) => reviewSessions.statusOf(key))
   reviewSessions.on('changed', (session) => {
     broadcast(IPC.sessionChanged, session)
+    soundCues.sessionChanged(session.prKey, session.status)
     prList.reapplyPhases()
   })
-  reviewSessions.on('removed', () => prList.reapplyPhases())
+  reviewSessions.on('removed', (key) => {
+    soundCues.sessionRemoved(key)
+    prList.reapplyPhases()
+  })
   updater.on('changed', (state) => broadcast(IPC.updateChanged, state))
 }

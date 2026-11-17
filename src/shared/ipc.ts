@@ -10,6 +10,7 @@ import type {
   ReviewEvent,
   ReviewSession,
   ReviewThread,
+  SoundPlayback,
   ThreadResolution,
   UpdateState,
 } from './types'
@@ -39,6 +40,7 @@ export interface RallyApi {
   getFailedInstall(): Promise<InstallAttempt | null>
   dismissFailedInstall(): Promise<void>
   onUpdateChanged(listener: (state: UpdateState) => void): () => void
+  onSoundCue(listener: (playback: SoundPlayback) => void): () => void
 }
 
 export const IPC = {
@@ -66,4 +68,5 @@ export const IPC = {
   getFailedInstall: 'update:failed-install',
   dismissFailedInstall: 'update:dismiss-failed-install',
   updateChanged: 'update:changed',
+  soundCue: 'sound:cue',
 } as const

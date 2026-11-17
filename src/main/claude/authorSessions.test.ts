@@ -3,71 +3,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
-import type { AuthorSession, Drafts, FeedbackItem, ItemResponse, PrRef } from '@shared/types'
+import { authorSession as stored, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
+import type { AuthorSession, Drafts, FeedbackItem } from '@shared/types'
 import type { AuthorToolHandlers } from './authorTools'
 
 const CLONE = { path: join(tmpdir(), 'rally-author-test-clone'), branch: 'feature', baseRef: 'origin/main' }
 
 mkdirSync(CLONE.path, { recursive: true })
-
-const pr = (number: number): PrRef => ({ owner: 'acme', repo: 'api', number, url: `https://github.com/acme/api/pull/${number}` })
-
-const thread = (id: string): FeedbackItem => ({
-  id,
-  kind: 'thread',
-  author: 'bob',
-  authorIsBot: false,
-  avatarUrl: null,
-  path: 'a.ts',
-  line: 3,
-  url: 'https://github.com/acme/api/pull/1#discussion_r1',
-  severity: null,
-  outdated: false,
-  answered: false,
-  comments: [{ author: 'bob', avatarUrl: null, body: 'Rename this', createdAt: '2026-11-01T00:00:00Z', url: '' }],
-  replyToCommentId: 1,
-  reactionSubjectId: 'C1',
-})
-
-const response = (itemId: string, reply: string): ItemResponse => ({
-  itemId,
-  action: 'push_back',
-  verdict: null,
-  summary: '',
-  reply,
-  files: [],
-  commitMessage: '',
-  pendingCommit: false,
-  commits: [],
-  commitError: null,
-  at: '2026-11-02T00:00:00Z',
-})
-
-function stored(number: number, overrides: Partial<AuthorSession> = {}): AuthorSession {
-  return {
-    id: `author-${number}`,
-    pr: pr(number),
-    prKey: `acme/api#${number}`,
-    sdkSessionId: null,
-    status: 'awaiting_feedback',
-    error: null,
-    timeline: [],
-    createdAt: '2026-11-01T00:00:00Z',
-    updatedAt: '2026-11-01T00:00:00Z',
-    clone: null,
-    items: [],
-    responses: {},
-    posted: {},
-    selfReview: null,
-    commits: [],
-    uncommitted: [],
-    lastPush: null,
-    mergeConflicts: [],
-    reviewersToReRequest: [],
-    lastReRequest: null,
-    ...overrides,
-  }
-}
 
 const mocks = vi.hoisted(() => ({
   stored: [] as AuthorSession[],

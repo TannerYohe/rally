@@ -1,22 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { hasPendingWork, itemLocation, pendingReplies } from './authorSession'
-import type { AuthorSession, FeedbackItem, ItemResponse } from './types'
+import { feedbackItem, itemResponse } from './authorSession.fixture'
+import type { AuthorSession, FeedbackItem } from './types'
 
-const response = (itemId: string, reply: string, at = '2026-11-02T00:00:00Z'): ItemResponse => ({
-  itemId,
-  action: 'push_back',
-  verdict: null,
-  summary: '',
-  reply,
-  files: [],
-  commitMessage: '',
-  pendingCommit: false,
-  commits: [],
-  commitError: null,
-  at,
-})
-
-const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => ({ id, kind }) as FeedbackItem
+const response = (itemId: string, reply: string, at?: string) => itemResponse(itemId, reply, at ? { at } : {})
+const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem(id, { kind })
 
 function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted' | 'items'> {
   return { status: 'awaiting_feedback', commits: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), ...overrides }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FeedbackItem } from '@shared/types'
+import { feedbackItem } from '@shared/authorSession.fixture'
 import { authorActionsPrompt, reviewPrompt } from './prompts'
 
 const pr = { owner: 'acme', repo: 'api', number: 12, url: 'https://github.com/acme/api/pull/12' }
@@ -20,25 +20,15 @@ describe('reviewPrompt', () => {
 
 describe('authorActionsPrompt', () => {
   const clone = { path: '/tmp/rally/s1/repo', branch: 'feature', baseRef: 'origin/main' }
-  const item: FeedbackItem = {
-    id: 'PRRT_1',
-    kind: 'thread',
-    author: 'bob',
-    authorIsBot: false,
-    avatarUrl: null,
-    path: 'a.ts',
-    line: 3,
+  const item = feedbackItem('PRRT_1', {
     url: null,
-    severity: null,
     outdated: true,
-    answered: false,
     comments: [
       { author: 'bob', avatarUrl: null, body: 'Rename this.\nIt is unclear.', createdAt: '', url: '' },
       { author: 'me', avatarUrl: null, body: 'Which name?', createdAt: '', url: '' },
     ],
-    replyToCommentId: 1,
     reactionSubjectId: 'C2',
-  }
+  })
 
   it('lists each requested item with its action, thread, and note', () => {
     const prompt = authorActionsPrompt(pr, clone, [item], [{ itemId: 'PRRT_1', action: 'push_back', note: 'it matches the API' }], '')

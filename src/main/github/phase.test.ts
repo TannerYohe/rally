@@ -85,7 +85,7 @@ describe('computePhase', () => {
     expect(phase(reviews, false, false, '2026-10-02T00:00:00Z')).toBe('awaiting_rereview')
   })
 
-  it('is awaiting re-review when many thread replies on the current head follow my review of an older commit', () => {
+  it('is awaiting re-review when a counted review on an older commit precedes many replies', () => {
     const replies = Array.from({ length: 40 }, (_, i) => threadReply(HEAD, `2026-10-03T00:00:${String(i).padStart(2, '0')}Z`))
     const reviews = [review('COMMENTED', 'old-sha', '2026-10-01T00:00:00Z'), ...replies]
     expect(phase(reviews, false, false, '2026-10-02T00:00:00Z')).toBe('awaiting_rereview')

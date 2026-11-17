@@ -24,6 +24,7 @@ describe('authorActionsPrompt', () => {
     id: 'PRRT_1',
     kind: 'thread',
     author: 'bob',
+    authorIsBot: false,
     avatarUrl: null,
     path: 'a.ts',
     line: 3,

@@ -1,5 +1,6 @@
 import type { FeedbackComment, FeedbackItem, FeedbackItemKind, PrRef } from '@shared/types'
 import {
+  isBot,
   pendingConversation,
   threadAcknowledged,
   type RawActor,
@@ -72,6 +73,7 @@ function threadItem(thread: RawFeedbackThread, viewer: string): FeedbackItem | n
     id: thread.id,
     kind: 'thread',
     author: first.author?.login ?? null,
+    authorIsBot: isBot(first.author),
     avatarUrl: first.author?.avatarUrl ?? null,
     path: thread.path,
     line: thread.line ?? thread.originalLine,
@@ -90,6 +92,7 @@ function conversationItem(kind: FeedbackItemKind, node: RawCommentLike & { id: s
     id: node.id,
     kind,
     author: node.author?.login ?? null,
+    authorIsBot: isBot(node.author),
     avatarUrl: node.author?.avatarUrl ?? null,
     path: null,
     line: null,

@@ -6,6 +6,7 @@ const item = (id: string, kind: FeedbackItem['kind'] = 'thread'): FeedbackItem =
   id,
   kind,
   author: 'bob',
+  authorIsBot: false,
   avatarUrl: null,
   path: 'a.ts',
   line: 1,
@@ -40,6 +41,8 @@ function session(overrides: Partial<AuthorSession> = {}): AuthorSession {
     uncommitted: [],
     lastPush: null,
     remoteMoved: false,
+    reviewersToReRequest: [],
+    lastReRequest: null,
     ...overrides,
   }
 }

@@ -279,6 +279,7 @@ export interface FeedbackItem {
   id: string
   kind: FeedbackItemKind
   author: string | null
+  authorIsBot: boolean
   avatarUrl: string | null
   path: string | null
   line: number | null
@@ -391,6 +392,12 @@ export interface PushRecord {
   commits: LocalCommit[]
 }
 
+export interface ReviewReRequest {
+  at: string
+  reviewers: string[]
+  error: string | null
+}
+
 export interface SelfReview {
   verdict: string
   reportMarkdown: string
@@ -407,6 +414,9 @@ export interface AuthorSession extends SessionCore {
   uncommitted: string[]
   lastPush: PushRecord | null
   remoteMoved: boolean
+  /** Reviewers I replied to whose review Rally re-requests once none of their comments are left unanswered. */
+  reviewersToReRequest: string[]
+  lastReRequest: ReviewReRequest | null
 }
 
 export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {

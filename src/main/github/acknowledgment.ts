@@ -34,7 +34,7 @@ export interface RawReviewBody {
 
 export const isViewer = (author: RawActor | null, viewer: string) => Boolean(author && sameLogin(author.login, viewer))
 
-const isBot = (author: RawActor | null) => author?.__typename === 'Bot'
+export const isBot = (author: RawActor | null) => author?.__typename === 'Bot'
 
 const viewerReacted = (groups: RawReactionGroup[] | null | undefined) => groups?.some((g) => g.viewerHasReacted) ?? false
 

@@ -50,6 +50,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const [replyEdits, setReplyEdits] = useState<Record<string, string>>({})
   const [resolve, setResolve] = useState<Record<string, boolean>>({})
   const [message, setMessage] = useState('')
+  const [reRequestReviews, setReRequestReviews] = useState(true)
   const [actionError, setActionError] = useState<string | null>(null)
   const [chosenTab, setChosenTab] = useState<AuthorTab | null>(null)
 
@@ -97,7 +98,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${posts.length} repl${posts.length === 1 ? 'y' : 'ies'} to GitHub as you?`)) return
     void run(async () => {
-      await window.rally.postAuthorReplies(session.id, posts)
+      await window.rally.postAuthorReplies(session.id, posts, reRequestReviews)
       setReplyEdits({})
       setResolve({})
       feedback.reload()
@@ -276,13 +277,44 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
         </div>
         {posts.length > 0 && (
           <div className="flex items-center justify-end gap-3 rounded-xl bg-ink-900/60 px-4 py-3 ring-1 ring-white/5">
+            <label
+              className="mr-auto flex items-center gap-1.5 text-xs text-ink-400"
+              title="Once a person's comments all have a reply or reaction from you, Rally re-requests their review. A 👍 alone never triggers it."
+            >
+              <input type="checkbox" checked={reRequestReviews} disabled={busy} onChange={(e) => setReRequestReviews(e.target.checked)} />
+              Re-request review from people I reply to
+            </label>
             {postBlocked && <span className="text-xs text-amber-300">{postBlocked}</span>}
             <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy || postBlocked !== null} onClick={postReplies}>
               Post {posts.length} repl{posts.length === 1 ? 'y' : 'ies'}
             </button>
           </div>
         )}
+        {session && <ReRequestStatus session={session} />}
       </div>
     </section>
+  )
+}
+
+function ReRequestStatus({ session }: { session: AuthorSession }) {
+  const { lastReRequest, reviewersToReRequest } = session
+  if (!lastReRequest && reviewersToReRequest.length === 0) return null
+  const logins = (list: string[]) => list.map((login) => `@${login}`).join(', ')
+  return (
+    <div className="flex flex-wrap justify-end gap-x-3 text-xs">
+      {lastReRequest &&
+        (lastReRequest.error ? (
+          <span className="text-rose-300">
+            Couldn't re-request review from {logins(lastReRequest.reviewers)}: {lastReRequest.error}
+          </span>
+        ) : (
+          <span className="text-emerald-300" title={fullTime(lastReRequest.at)}>
+            Re-requested review from {logins(lastReRequest.reviewers)} {age(lastReRequest.at)} ago
+          </span>
+        ))}
+      {reviewersToReRequest.length > 0 && (
+        <span className="text-ink-400">Will re-request {logins(reviewersToReRequest)} once their remaining comments are answered.</span>
+      )}
+    </div>
   )
 }

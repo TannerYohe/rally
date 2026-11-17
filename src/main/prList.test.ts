@@ -258,12 +258,15 @@ describe('prList', () => {
     for (const write of authoredWrites) write.mockRestore()
   })
 
-  it('announces the PRs a full refresh listed', async () => {
+  it('passes the PRs a full refresh listed to each pruner, but not on a single-PR refresh', async () => {
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ number: 7 })] })
-    const listener = vi.fn()
-    authoredPrList.on('refreshed', listener)
+    const pruner = vi.fn()
+    authoredPrList.addPruner(pruner)
     await authoredPrList.refresh()
-    authoredPrList.off('refreshed', listener)
-    expect(listener).toHaveBeenCalledWith(new Set(['acme/api#7']))
+    expect(pruner).toHaveBeenCalledWith(new Set(['acme/api#7']))
+
+    mocks.fetchPr.mockResolvedValue(githubPr({ number: 7 }))
+    await authoredPrList.refreshOne('acme', 'api', 7)
+    expect(pruner).toHaveBeenCalledTimes(1)
   })
 })

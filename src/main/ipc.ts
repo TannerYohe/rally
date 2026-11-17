@@ -86,7 +86,7 @@ export function registerIpc(): void {
   })
   reviewSessions.on('removed', () => prList.reapplyPhases())
   authoredPrList.setSessionLookup((key) => authorSessions.sessionState(key))
-  authoredPrList.on('refreshed', (listed: Set<string>) => authorSessions.pruneUnlisted(listed))
+  authoredPrList.addPruner((listed) => authorSessions.pruneUnlisted(listed))
   authorSessions.on('changed', (session) => {
     broadcast(IPC.authorSessionChanged, session)
     authoredPrList.reapplyPhases()

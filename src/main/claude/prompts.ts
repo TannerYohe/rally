@@ -1,4 +1,4 @@
-import { itemLocation } from '@shared/authorSession'
+import { COMMIT_PLACEHOLDER, itemLocation } from '@shared/authorSession'
 import { DEFAULT_CONFIG, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneInfo, type FeedbackItem, type FeedbackItemKind, type PrRef } from '@shared/types'
 import { PUBLISH_RESPONSES_TOOL } from './authorTools'
 import { PUBLISH_DRAFTS_TOOL } from './rallyTools'
@@ -16,10 +16,10 @@ ${SHELL_AND_QUESTION_NOTES}`
 
 export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The user is the author of this PR and is responding to review feedback on it. The user reads your output in a GUI.
 
-- Rally clones the PR's head branch and names the clone's path in each request. Read and change code only in that clone. Commit there with clear messages, and never push: Rally pushes after the user approves the diff.
+- Rally clones the PR's head branch and names the clone's path in each request. Read and change code only in that clone. Edit files but leave git to Rally: in the clone, only git commands that read are allowed. Rally commits your changes after the turn and pushes once the user approves the diff.
 - Each request lists feedback items, each with one action:
   - investigate: decide whether the comment holds against the code. Do not change code. Give a verdict with file:line evidence. If the comment does not hold, draft the reply the author would post to explain why; if it holds, leave the reply empty and say in the summary what a fix would take.
-  - fix: the author agrees. Make the smallest change that resolves it, run the relevant tests or checks when they are quick, and commit. Draft a short reply naming the commit's short sha and what changed.
+  - fix: the author agrees. Make the smallest change that resolves it and run the relevant tests or checks when they are quick. List the files you changed for this item and a commit message; Rally commits each item separately. Draft a short reply that says what changed and names the commit as ${COMMIT_PLACEHOLDER}, which Rally replaces with its short sha.
   - push_back: the author disagrees. Do not change code. Draft a short, respectful reply that explains why, citing the code.
   - answer: the comment asks a question or makes a remark rather than pointing out a problem. Do not change code. Draft a reply that answers it, reading the code when the answer depends on it.
 - The author's note on an item overrides your own judgement.
@@ -50,7 +50,7 @@ const ITEM_SOURCE_LABELS: Record<FeedbackItemKind, string> = {
 }
 
 function itemSection(item: FeedbackItem, request: ActionRequest): string {
-  const source = item.kind === 'finding' ? 'Self-review finding' : `${ITEM_SOURCE_LABELS[item.kind]} by @${item.author ?? 'ghost'}`
+  const source = item.author ? `${ITEM_SOURCE_LABELS[item.kind]} by @${item.author}` : ITEM_SOURCE_LABELS[item.kind]
   const lines = [
     `## Item ${item.id}: ${RESPONSE_ACTION_LABELS[request.action]}`,
     `${source} on ${itemLocation(item)}${item.outdated ? ' (outdated)' : ''}${item.severity ? `, severity ${item.severity}` : ''}`,
@@ -60,7 +60,7 @@ function itemSection(item: FeedbackItem, request: ActionRequest): string {
   return lines.join('\n\n')
 }
 
-/** Returns the turn prompt asking Claude to investigate, fix, or push back on each requested item. */
+/** Returns the turn prompt asking Claude to investigate, fix, push back on, or answer each requested item. */
 export function authorActionsPrompt(pr: PrRef, clone: CloneInfo, items: FeedbackItem[], requests: ActionRequest[], note: string): string {
   const byId = new Map(items.map((item) => [item.id, item]))
   const sections = requests.flatMap((request) => {
@@ -75,4 +75,14 @@ export function authorActionsPrompt(pr: PrRef, clone: CloneInfo, items: Feedback
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+/** Returns the turn prompt asking Claude to resolve conflicts Rally hit merging the remote branch into the clone. */
+export function mergeConflictPrompt(clone: CloneInfo, files: string[]): string {
+  return [
+    `Rally merged \`origin/${clone.branch}\` into the PR branch in ${clone.path}, and the merge conflicted in:`,
+    files.map((file) => `- ${file}`).join('\n'),
+    'Resolve each file by editing it to remove every conflict marker, keeping the intent of both sides. Run the relevant checks when they are quick. ' +
+      'Leave git to Rally: it commits the merge when your turn ends. Then reply with a line per file saying how you resolved it.',
+  ].join('\n\n')
 }

@@ -52,6 +52,9 @@ export interface RallyApi {
   cancelAuthorTurn(sessionId: string): Promise<void>
   getAuthorDiff(sessionId: string): Promise<string>
   pushAuthorCommits(sessionId: string): Promise<void>
+  resolveMergeConflicts(sessionId: string): Promise<void>
+  abortMerge(sessionId: string): Promise<void>
+  discardUncommitted(sessionId: string): Promise<void>
   postAuthorReplies(sessionId: string, replies: ReplyPost[], reRequestReviews: boolean): Promise<void>
   discardAuthorReply(sessionId: string, itemId: string): Promise<void>
   dismissFinding(sessionId: string, itemId: string): Promise<void>
@@ -94,6 +97,9 @@ export const IPC = {
   cancelAuthorTurn: 'author:cancel',
   getAuthorDiff: 'author:diff',
   pushAuthorCommits: 'author:push',
+  resolveMergeConflicts: 'author:resolve-conflicts',
+  abortMerge: 'author:abort-merge',
+  discardUncommitted: 'author:discard-uncommitted',
   postAuthorReplies: 'author:post-replies',
   discardAuthorReply: 'author:discard-reply',
   dismissFinding: 'author:dismiss-finding',

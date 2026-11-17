@@ -1,5 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
+import { COMMIT_PLACEHOLDER } from '@shared/authorSession'
 import { RESPONSE_ACTIONS, RESPONSE_VERDICTS, type Drafts, type ItemResponse } from '@shared/types'
 import { ok, publishDraftsTool, RALLY_SERVER, RALLY_TOOL_PREFIX } from './rallyTools'
 
@@ -7,8 +8,10 @@ const PUBLISH_RESPONSES = 'publish_responses'
 
 export const PUBLISH_RESPONSES_TOOL = `${RALLY_TOOL_PREFIX}${PUBLISH_RESPONSES}`
 
+export type PublishedResponse = Pick<ItemResponse, 'itemId' | 'action' | 'verdict' | 'summary' | 'reply' | 'files' | 'commitMessage'>
+
 export interface AuthorToolHandlers {
-  onResponses(responses: Omit<ItemResponse, 'at'>[]): void
+  onResponses(responses: PublishedResponse[]): void
   onSelfReview(drafts: Drafts): void
 }
 
@@ -18,10 +21,13 @@ const responseSchema = z.object({
   verdict: z
     .enum(RESPONSE_VERDICTS)
     .nullable()
-    .describe('For investigate: whether the comment holds against the code. Null for fix and push_back.'),
+    .describe('For investigate: whether the comment holds against the code. Null for every action except investigate.'),
   summary: z.string().describe('Markdown: what you found or changed, with file:line evidence'),
-  reply_body: z.string().describe('The reply to post on the thread as the author, or an empty string for none'),
-  commits: z.array(z.string()).describe('Full shas of the commits made for this item, oldest first; empty when none'),
+  reply_body: z
+    .string()
+    .describe(`The reply to post as the author, or an empty string for none. For fix, write ${COMMIT_PLACEHOLDER} where the commit's short sha goes.`),
+  files: z.array(z.string()).describe('For fix: repo-relative paths you changed, added, or deleted for this item. Empty for other actions.'),
+  commit_message: z.string().describe('For fix: the commit message for these files. Empty for other actions.'),
 })
 
 export function createAuthorServer(handlers: AuthorToolHandlers) {
@@ -37,7 +43,8 @@ export function createAuthorServer(handlers: AuthorToolHandlers) {
           verdict: r.verdict,
           summary: r.summary,
           reply: r.reply_body,
-          commits: r.commits,
+          files: r.files,
+          commitMessage: r.commit_message,
         })),
       )
       return ok(`Rally received ${args.responses.length} responses.`)

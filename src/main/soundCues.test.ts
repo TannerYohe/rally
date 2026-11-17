@@ -10,7 +10,7 @@ function pr(phase: Phase, overrides: Partial<PrFields> = {}): PrFields {
 }
 
 function feedback(approvedBy: string[]): PrFeedback {
-  return { reviewDecision: null, openThreads: 0, unacknowledged: 0, changesRequestedBy: [], approvedBy }
+  return { reviewDecision: null, openThreads: 0, unacknowledged: 0, changesRequestedBy: [], approvedBy, truncated: false }
 }
 
 const reviewing = (prs: PrFields[]) => snapshotPrs('reviewing', prs)

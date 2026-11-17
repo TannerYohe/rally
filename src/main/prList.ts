@@ -40,6 +40,9 @@ export interface SessionState {
   active: boolean
 }
 
+/** Drops state kept for PRs that a full refresh no longer lists, given the keys of the PRs it did list. */
+export type Pruner = (listed: Set<string>) => void
+
 type SessionLookup = (key: string) => SessionState | null
 
 type PhaseInput = Omit<Pr, 'phase' | 'reviewStatus' | 'hidden'>
@@ -56,7 +59,6 @@ interface PrListSource {
   files: PrListFiles
   searchQueries(): string[]
   phase(pr: PhaseInput, sessionActive: boolean): Phase
-  pruneOnRefresh?(prs: GithubPr[]): void
 }
 
 function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
@@ -71,6 +73,7 @@ class PrList extends EventEmitter {
   private sessionOf: SessionLookup = () => null
   private refreshGeneration = 0
   private fetchedDuringRefresh = new Map<string, GithubPr>()
+  private pruners: Pruner[] = []
   private readonly files: PrListFiles
 
   constructor(private readonly source: PrListSource) {
@@ -99,6 +102,10 @@ class PrList extends EventEmitter {
     this.timer = setInterval(() => void this.refresh(), minutes * 60_000)
   }
 
+  addPruner(pruner: Pruner): void {
+    this.pruners.push(pruner)
+  }
+
   setSessionLookup(lookup: SessionLookup): void {
     this.sessionOf = lookup
     this.reapplyPhases()
@@ -124,7 +131,8 @@ class PrList extends EventEmitter {
       const { viewer, prs: searched } = await searchPrs(this.source.searchQueries(), this.kind)
       const prs = searched.map((pr) => this.fetchedDuringRefresh.get(pr.id) ?? pr)
       const refreshedAt = new Date().toISOString()
-      this.source.pruneOnRefresh?.(prs)
+      const listed = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
+      for (const prune of this.pruners) prune(listed)
       this.update({ prs: this.decorate(prs, true), viewer, refreshedAt, refreshing: false })
       this.files.cache.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
@@ -273,9 +281,8 @@ class ReviewPrList extends PrList {
   }
 }
 
-function pruneRallyReviews(prs: GithubPr[]): void {
-  const current = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
-  rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => current.has(key))))
+function pruneRallyReviews(listed: Set<string>): void {
+  rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => listed.has(key))))
 }
 
 function reviewPhase(pr: PhaseInput, sessionActive: boolean): Phase {
@@ -293,8 +300,9 @@ export const prList = new ReviewPrList({
   files: { cache: prCacheFile, summaries: summariesFile, headsSeen: headsSeenFile, hidden: hiddenPrsFile },
   searchQueries: () => buildSearchQueries(configFile.get()),
   phase: reviewPhase,
-  pruneOnRefresh: pruneRallyReviews,
 })
+
+prList.addPruner(pruneRallyReviews)
 
 export const authoredPrList = new PrList({
   kind: 'authored',

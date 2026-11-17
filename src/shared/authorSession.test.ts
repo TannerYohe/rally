@@ -1,19 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { hasPendingWork, itemLocation, pendingReplies } from './authorSession'
-import type { AuthorSession, ItemResponse } from './types'
+import { hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
+import { feedbackItem, itemResponse } from './authorSession.fixture'
+import type { AuthorSession, FeedbackItem } from './types'
 
-const response = (itemId: string, reply: string, at = '2026-11-02T00:00:00Z'): ItemResponse => ({
-  itemId,
-  action: 'push_back',
-  verdict: null,
-  summary: '',
-  reply,
-  commits: [],
-  at,
-})
+const response = (itemId: string, reply: string, at?: string) => itemResponse(itemId, reply, at ? { at } : {})
+const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem(id, { kind })
 
-function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted'> {
-  return { status: 'awaiting_feedback', commits: [], responses: {}, posted: {}, ...overrides }
+function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted' | 'items'> {
+  return { status: 'awaiting_feedback', commits: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), ...overrides }
 }
 
 describe('pendingReplies', () => {
@@ -37,6 +31,14 @@ describe('pendingReplies', () => {
   })
 })
 
+describe('pendingReplies on findings', () => {
+  it('leaves out replies Rally can never post, so a fixed finding does not pin the PR in progress', () => {
+    const s = session({ items: [item('self-1', 'finding')], responses: { 'self-1': response('self-1', 'Fixed in abc') } })
+    expect(pendingReplies(s)).toEqual([])
+    expect(hasPendingWork(s)).toBe(false)
+  })
+})
+
 describe('hasPendingWork', () => {
   it('is false once everything is pushed and posted', () => {
     expect(hasPendingWork(session())).toBe(false)
@@ -46,6 +48,14 @@ describe('hasPendingWork', () => {
     expect(hasPendingWork(session({ status: 'running' }))).toBe(true)
     expect(hasPendingWork(session({ commits: [{ oid: 'a', subject: 'fix' }] }))).toBe(true)
     expect(hasPendingWork(session({ responses: { a: response('a', 'Done') } }))).toBe(true)
+  })
+})
+
+describe('hasUnsharedWork', () => {
+  it('ignores the last turn status and counts only unpushed commits and unposted replies', () => {
+    expect(hasUnsharedWork(session({ status: 'error' }))).toBe(false)
+    expect(hasUnsharedWork(session({ commits: [{ oid: 'a', subject: 'fix' }] }))).toBe(true)
+    expect(hasUnsharedWork(session({ responses: { a: response('a', 'Done') } }))).toBe(true)
   })
 })
 

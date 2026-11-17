@@ -247,7 +247,7 @@ describe('prList', () => {
   })
 
   it('computes author phases for the authored list from its own query', async () => {
-    const feedback = { reviewDecision: null, openThreads: 1, unacknowledged: 1, changesRequestedBy: [], approvedBy: [] }
+    const feedback = { reviewDecision: null, openThreads: 1, unacknowledged: 1, changesRequestedBy: [], approvedBy: [], truncated: false }
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ author: 'me', feedback })] })
     authoredPrList.setSessionLookup(() => null)
     await authoredPrList.refresh()
@@ -257,5 +257,35 @@ describe('prList', () => {
     authoredPrList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: true }))
     expect(authoredPrList.get().prs[0].phase).toBe('in_progress')
     expect(mocks.store.authoredPrCacheFile.get().prs).toHaveLength(1)
+  })
+
+  it('refreshes each list without touching the files of the other list', async () => {
+    const reviewingFiles = ['prCacheFile', 'summariesFile', 'headsSeenFile', 'hiddenPrsFile', 'rallyReviewsFile'] as const
+    const authoredFiles = ['authoredPrCacheFile', 'authoredSummariesFile', 'authoredHeadsSeenFile', 'authoredHiddenPrsFile'] as const
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ id: 'mine', author: 'me' })] })
+
+    const reviewingWrites = reviewingFiles.map((name) => vi.spyOn(mocks.store[name], 'set'))
+    await authoredPrList.refresh()
+    await vi.waitFor(() => expect(mocks.store.authoredPrCacheFile.get().prs[0]).toMatchObject({ summary: 'A summary' }))
+    for (const write of reviewingWrites) expect(write).not.toHaveBeenCalled()
+    for (const write of reviewingWrites) write.mockRestore()
+
+    const authoredWrites = authoredFiles.map((name) => vi.spyOn(mocks.store[name], 'set'))
+    await prList.refresh()
+    await vi.waitFor(() => expect(mocks.store.prCacheFile.get().prs[0]).toMatchObject({ summary: 'A summary' }))
+    for (const write of authoredWrites) expect(write).not.toHaveBeenCalled()
+    for (const write of authoredWrites) write.mockRestore()
+  })
+
+  it('passes the PRs a full refresh listed to each pruner, but not on a single-PR refresh', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ number: 7 })] })
+    const pruner = vi.fn()
+    authoredPrList.addPruner(pruner)
+    await authoredPrList.refresh()
+    expect(pruner).toHaveBeenCalledWith(new Set(['acme/api#7']))
+
+    mocks.fetchPr.mockResolvedValue(githubPr({ number: 7 }))
+    await authoredPrList.refreshOne('acme', 'api', 7)
+    expect(pruner).toHaveBeenCalledTimes(1)
   })
 })

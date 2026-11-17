@@ -1,14 +1,13 @@
-import { useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
-import { errorMessage } from '@shared/errors'
 import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
-import { Markdown } from '../components/Markdown'
 import { BusyDot } from '../components/BusyDot'
 import { PrHeader } from '../components/PrHeader'
 import { ProgressTimeline } from '../components/ProgressTimeline'
+import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
 import { SubmitBar } from '../components/SubmitBar'
 import {
@@ -21,11 +20,11 @@ import {
   type DraftChanges,
   type DraftEdits,
 } from '@shared/feedback'
-import { age, clockTime, fullTime } from '../lib/format'
-import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
+import { fullTime } from '../lib/format'
+import { useActionRunner, usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastSuccessfulTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { emptyReviewTabs, REVIEW_TAB_LABELS, REVIEW_TABS, type ReviewTab } from '../lib/reviewTabs'
-import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 export function PrDetail() {
   const params = useParams()
@@ -86,7 +85,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const [edits, setEdits] = useState<DraftEdits>({})
   const [summaryEdit, setSummaryEdit] = useState<string | undefined>(undefined)
   const [feedback, setFeedback] = useState('')
-  const [actionError, setActionError] = useState<string | null>(null)
+  const { error: actionError, run: runAction } = useActionRunner()
   const busy = BUSY_STATUSES.includes(session.status)
   const submitted = isSubmitted(session)
   const { drafts } = session
@@ -112,19 +111,13 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     drafts: !emptyTabs.drafts && <TabCount count={keptComments} />,
   }
 
-  const run = async (action: () => Promise<void>): Promise<boolean> => {
-    setActionError(null)
-    try {
+  const run = (action: () => Promise<void>) =>
+    runAction(async () => {
       await action()
       setEdits({})
       setSummaryEdit(undefined)
       setFeedback('')
-      return true
-    } catch (error) {
-      setActionError(errorMessage(error))
-      return false
-    }
-  }
+    })
 
   const canSend = !busy && Boolean(message)
   const sendMessage = async (text: string) => {
@@ -133,11 +126,6 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   }
   const send = () => sendMessage(message)
   const pullChanges = () => sendMessage(pullChangesMessage(drafts, changes, lastSuccessfulTurnAt))
-  const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    if (canSend) void send()
-  }
   const submit = (event: ReviewEvent) =>
     run(async () => {
       if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
@@ -149,51 +137,49 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">Review</h2>
-        <span className={`text-sm ${session.status === 'error' ? 'text-rose-300' : 'text-ink-400'}`}>
-          {busy && <BusyDot className="mr-2 h-2 w-2 bg-primary-400" />}
-          {SESSION_STATUS_LABELS[session.status]}
-        </span>
-        <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>
-          started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
-        </span>
-        {prUpdatedAfterLastSuccessfulTurn && prUpdatedAt && (
-          <span className="flex items-center gap-2 text-sm text-amber-300">
-            <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last successful turn started at ${fullTime(lastSuccessfulTurnAt)}`}>
-              PR updated since last successful turn
+      <SessionHeader
+        title="Review"
+        session={session}
+        statusLabels={SESSION_STATUS_LABELS}
+        notes={
+          prUpdatedAfterLastSuccessfulTurn &&
+          prUpdatedAt && (
+            <span className="flex items-center gap-2 text-sm text-amber-300">
+              <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last successful turn started at ${fullTime(lastSuccessfulTurnAt)}`}>
+                PR updated since last successful turn
+              </span>
+              <button
+                className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
+                disabled={busy || resolvingThreads}
+                title="Send Claude a turn to pull in the commits, comments, and reviews since its last successful turn and update the review, along with any pending edits and feedback"
+                onClick={pullChanges}
+              >
+                Pull in changes
+              </button>
             </span>
-            <button
-              className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
-              disabled={busy || resolvingThreads}
-              title="Send Claude a turn to pull in the commits, comments, and reviews since its last successful turn and update the review, along with any pending edits and feedback"
-              onClick={pullChanges}
-            >
-              Pull in changes
-            </button>
-          </span>
-        )}
-        <div className="ml-auto flex gap-2">
-          {session.status === 'running' && (
-            <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={() => window.rally.cancelReview(session.id)}>
-              Cancel
-            </button>
-          )}
-          {!busy && !submitted && (
-            <button
-              className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700 disabled:opacity-40"
-              disabled={resolvingThreads}
-              onClick={startOver}
-            >
-              Start over
-            </button>
-          )}
-        </div>
-      </div>
+          )
+        }
+        actions={
+          <>
+            {session.status === 'running' && (
+              <button className={SECONDARY_BUTTON_CLASS} onClick={() => window.rally.cancelReview(session.id)}>
+                Cancel
+              </button>
+            )}
+            {!busy && !submitted && (
+              <button
+                className={SECONDARY_BUTTON_CLASS}
+                disabled={resolvingThreads}
+                onClick={startOver}
+              >
+                Start over
+              </button>
+            )}
+          </>
+        }
+      />
 
-      {(actionError || session.error) && (
-        <div className="rounded-md bg-rose-950 px-3 py-2 text-sm text-rose-200">{actionError ?? session.error}</div>
-      )}
+      <ErrorBox message={actionError ?? session.error} />
 
       {session.submitted && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-emerald-950/70 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/20">
@@ -240,15 +226,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         {emptyTabs.report ? (
           <EmptyTab>Claude hasn't published a report yet.</EmptyTab>
         ) : (
-          drafts && (
-            <div className="space-y-3">
-              <div className="text-sm">
-                <span className="text-ink-500">Verdict · </span>
-                <span className="text-ink-200">{drafts.verdict}</span>
-              </div>
-              <Markdown>{drafts.reportMarkdown}</Markdown>
-            </div>
-          )
+          drafts && <ReportView verdict={drafts.verdict} markdown={drafts.reportMarkdown} />
         )}
       </TabPanel>
 
@@ -287,25 +265,15 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
 
       {!submitted && (
         <div className="space-y-3">
-          <textarea
-            className="w-full rounded-md border border-ink-800 bg-ink-900 p-3 text-sm"
-            rows={3}
-            placeholder='Feedback for Claude, e.g. "drop 2, make 1 shorter, is finding 4 real?"'
+          <Composer
             value={feedback}
+            placeholder='Feedback for Claude, e.g. "drop 2, make 1 shorter, is finding 4 real?"'
             disabled={busy}
-            onChange={(e) => setFeedback(e.target.value)}
-            onKeyDown={sendOnEnter}
+            canSend={canSend}
+            sendLabel="Send to Claude"
+            onChange={setFeedback}
+            onSend={send}
           />
-          <div className="flex items-center justify-end gap-3">
-            <span className="text-xs text-ink-500">Enter to send · Shift+Enter for a new line</span>
-            <button
-              className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
-              disabled={!canSend}
-              onClick={send}
-            >
-              Send to Claude
-            </button>
-          </div>
           {drafts && (
             <SubmitBar
               disabled={busy || resolvingThreads}

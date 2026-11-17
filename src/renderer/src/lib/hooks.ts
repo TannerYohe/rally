@@ -91,6 +91,22 @@ export function useFeedbackItems(pr: PrRef): FeedbackItemsState {
   return { ...state, reload }
 }
 
+/** Returns an action runner that records the action's error, and the last error it recorded. */
+export function useActionRunner(): { error: string | null; run(action: () => Promise<void>): Promise<boolean> } {
+  const [error, setError] = useState<string | null>(null)
+  const run = async (action: () => Promise<void>) => {
+    setError(null)
+    try {
+      await action()
+      return true
+    } catch (failure) {
+      setError(errorMessage(failure))
+      return false
+    }
+  }
+  return { error, run }
+}
+
 export function usePersistentState<T>(key: string, fallback: T): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => {
     const stored = localStorage.getItem(key)

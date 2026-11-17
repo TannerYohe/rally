@@ -29,6 +29,8 @@ export interface PrFeedback {
   unacknowledged: number
   changesRequestedBy: string[]
   approvedBy: string[]
+  /** True when the PR has more threads, comments, or reviews than the list query reads, so some feedback went unchecked. */
+  truncated: boolean
 }
 
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
@@ -275,7 +277,7 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
-export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review'
+export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review' | 'resolve_merge'
 
 export type TimelineEntry =
   | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }
@@ -397,7 +399,13 @@ export interface ItemResponse {
   verdict: ResponseVerdict | null
   summary: string
   reply: string
+  /** Files Claude changed for a fix, which Rally commits after the turn. */
+  files: string[]
+  commitMessage: string
+  /** True until Rally commits the files Claude listed. */
+  pendingCommit: boolean
   commits: string[]
+  commitError: string | null
   at: string
 }
 
@@ -425,6 +433,8 @@ export interface CloneInfo {
   path: string
   branch: string
   baseRef: string
+  /** The branch head on GitHub when Rally last synced, merged, or pushed; commits after it are Rally's own. */
+  syncedHead?: string
 }
 
 export interface PushRecord {
@@ -454,7 +464,8 @@ export interface AuthorSession extends SessionCore {
   commits: LocalCommit[]
   uncommitted: string[]
   lastPush: PushRecord | null
-  remoteMoved: boolean
+  /** Files left conflicted by merging the remote branch, until the merge is committed or aborted. */
+  mergeConflicts: string[]
   /** Reviewers I replied to whose review Rally re-requests once none of their comments are left unanswered. */
   reviewersToReRequest: string[]
   lastReRequest: ReviewReRequest | null

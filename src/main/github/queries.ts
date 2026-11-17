@@ -1,10 +1,20 @@
 import { GraphqlResponseError } from '@octokit/graphql'
 import type { MyReview, Pr, PrListKind, ReviewState } from '@shared/types'
 import { authorFeedback, type RawAuthorFields } from './authorPhase'
+import { decisionsField, prCommentsField, reviewSummariesField, threadsField } from './feedbackFields'
 import { github, timeoutRequest, type GithubClient } from './client'
-import { MY_REVIEW_WINDOW } from './phase'
+import { countsAsReview } from './phase'
 
 export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError' | 'hidden'>
+
+const AUTHORED = '@include(if: $authored)'
+
+const REVIEW_PAGE_SIZE = 20
+const MAX_REVIEW_PAGES = 10
+const REVIEW_FIELDS = 'id databaseId state submittedAt body commit { oid }'
+const REVIEW_PAGE_INFO = 'pageInfo { hasPreviousPage startCursor }'
+const REVIEW_PAGE = `${REVIEW_PAGE_INFO} nodes { ${REVIEW_FIELDS} }`
+const REVIEW_COMMENTS = 'comments(first: 20) { nodes { replyTo { id } } }'
 
 const PR_FIELDS = `
   fragment PrFields on PullRequest {
@@ -14,29 +24,21 @@ const PR_FIELDS = `
     repository { name owner { login } }
     files(first: 100) { nodes { path } }
     reviewRequests(first: 50) { nodes { requestedReviewer { ... on User { login } } } }
-    reviews(author: $viewer, last: ${MY_REVIEW_WINDOW}) { nodes { id databaseId state submittedAt body commit { oid } } }
+    reviews(author: $viewer, last: ${REVIEW_PAGE_SIZE}) { ${REVIEW_PAGE} }
     timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
       nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
     }
     reviewDecision @include(if: $authored)
-    latestOpinionatedReviews(first: 50, writersOnly: true) @include(if: $authored) {
-      nodes { state author { login } }
-    }
-    reviewThreads(first: 100) @include(if: $authored) {
-      nodes { isResolved comments(last: 1) { nodes { author { login } reactionGroups { viewerHasReacted } } } }
-    }
-    comments(last: 100) @include(if: $authored) {
-      nodes { url body createdAt isMinimized author { __typename login } reactionGroups { viewerHasReacted } }
-    }
-    allReviews: reviews(last: 100) @include(if: $authored) {
-      nodes { url body state submittedAt author { __typename login } reactionGroups { viewerHasReacted } }
-    }
+    ${decisionsField(AUTHORED)}
+    ${threadsField('first: 100', AUTHORED)}
+    ${prCommentsField('last: 100', AUTHORED)}
+    ${reviewSummariesField('last: 100', AUTHORED, 'allReviews')}
   }
 `
 
 const SEARCH_QUERY = `
-  query($q: String!, $viewer: String!, $authored: Boolean!, $cursor: String) {
-    search(query: $q, type: ISSUE, first: 50, after: $cursor) {
+  query($q: String!, $viewer: String!, $authored: Boolean!, $pageSize: Int!, $cursor: String) {
+    search(query: $q, type: ISSUE, first: $pageSize, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes { ... on PullRequest { ...PrFields } }
     }
@@ -51,13 +53,30 @@ const SINGLE_QUERY = `
   ${PR_FIELDS}
 `
 
-const REVIEW_COMMENTS_QUERY = `
-  query($ids: [ID!]!) {
-    nodes(ids: $ids) { ... on PullRequestReview { id comments(first: 20) { nodes { replyTo { id } } } } }
+const OLDER_REVIEWS_QUERY = `
+  query($id: ID!, $viewer: String!, $before: String!) {
+    node(id: $id) {
+      ... on PullRequest {
+        reviews(author: $viewer, last: ${REVIEW_PAGE_SIZE}, before: $before) {
+          ${REVIEW_PAGE_INFO}
+          nodes { ${REVIEW_FIELDS} ${REVIEW_COMMENTS} }
+        }
+      }
+    }
   }
 `
 
-const MAX_PAGES = 4
+const REVIEW_COMMENTS_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) { ... on PullRequestReview { id ${REVIEW_COMMENTS} } }
+  }
+`
+
+/** Authored PRs fetch every thread, comment, and review, so they come in small pages to keep each query's rate-limit cost low. */
+export const SEARCH_PAGES: Record<PrListKind, { size: number; max: number }> = {
+  reviewing: { size: 50, max: 4 },
+  authored: { size: 10, max: 10 },
+}
 const MAX_NODE_IDS = 100
 
 interface RawReview {
@@ -73,7 +92,17 @@ interface ReviewComment {
   replyTo: { id: string } | null
 }
 
+interface ReviewPage {
+  pageInfo: { hasPreviousPage: boolean; startCursor: string | null }
+  nodes: RawReview[]
+}
+
 type ReviewCommentsNode = { id: string; comments: { nodes: ReviewComment[] } }
+
+interface OlderReviewPage {
+  pageInfo: ReviewPage['pageInfo']
+  nodes: (RawReview & ReviewCommentsNode)[]
+}
 
 interface RawPr extends Partial<RawAuthorFields> {
   id: string
@@ -94,7 +123,7 @@ interface RawPr extends Partial<RawAuthorFields> {
   repository: { name: string; owner: { login: string } }
   files: { nodes: { path: string }[] } | null
   reviewRequests: { nodes: { requestedReviewer: { login?: string } | null }[] }
-  reviews: { nodes: RawReview[] }
+  reviews: ReviewPage
   timelineItems: { nodes: { createdAt: string; afterCommit: { oid: string } | null }[] }
 }
 
@@ -123,14 +152,65 @@ export async function fetchNodes<T>(gh: GithubClient, query: string, ids: string
   return nodes
 }
 
-async function replyOnlyReviewIds(gh: GithubClient, prs: RawPr[]): Promise<Set<string>> {
-  const candidates = prs.flatMap((pr) => pr.reviews.nodes.filter(mightBeReplyOnly))
+async function replyOnlyReviewIds(gh: GithubClient, reviews: RawReview[]): Promise<Set<string>> {
+  const candidates = reviews.filter(mightBeReplyOnly)
   const nodes = await fetchNodes<ReviewCommentsNode>(gh, REVIEW_COMMENTS_QUERY, candidates.map((r) => r.id))
   const replyOnly = new Set<string>()
   nodes.forEach((node, index) => {
     if (node && isReplyOnly(candidates[index], node.comments.nodes)) replyOnly.add(node.id)
   })
   return replyOnly
+}
+
+function toMyReview(review: RawReview, replyOnly: boolean): MyReview {
+  return {
+    databaseId: review.databaseId,
+    state: review.state,
+    submittedAt: review.submittedAt,
+    commitOid: review.commit?.oid ?? null,
+    replyOnly,
+  }
+}
+
+async function fetchOlderReviews(gh: GithubClient, raw: RawPr, before: string): Promise<OlderReviewPage | null> {
+  try {
+    const response = await gh.graphql<{ node: { reviews: OlderReviewPage } | null }>(OLDER_REVIEWS_QUERY, {
+      id: raw.id,
+      viewer: gh.login,
+      before,
+      request: timeoutRequest(),
+    })
+    if (response.node) return response.node.reviews
+    console.warn('GitHub returned no PR for an older reviews page', { pr: raw.url })
+  } catch (error) {
+    console.warn('Fetching an older page of my reviews failed', { pr: raw.url, error })
+  }
+  return null
+}
+
+async function olderReviewsUntilCounted(gh: GithubClient, raw: RawPr, newest: MyReview[]): Promise<MyReview[]> {
+  let reviews = newest
+  let page = raw.reviews.pageInfo
+  for (let pages = 1; pages < MAX_REVIEW_PAGES; pages++) {
+    if (reviews.some((r) => countsAsReview(r))) break
+    if (!page.hasPreviousPage || !page.startCursor) break
+    const older = await fetchOlderReviews(gh, raw, page.startCursor)
+    if (!older) break
+    reviews = [...older.nodes.map((r) => toMyReview(r, isReplyOnly(r, r.comments.nodes))), ...reviews]
+    page = older.pageInfo
+  }
+  return reviews
+}
+
+/** Returns my reviews on each PR, paging back past thread replies only for PRs I review; author phases don't read them. */
+async function myReviewsOf(gh: GithubClient, raws: RawPr[], kind: PrListKind): Promise<MyReview[][]> {
+  const replyOnly = await replyOnlyReviewIds(gh, raws.flatMap((raw) => raw.reviews.nodes))
+  return Promise.all(
+    raws.map((raw) => {
+      const newest = raw.reviews.nodes.map((r) => toMyReview(r, replyOnly.has(r.id)))
+      return isAuthored(kind) ? newest : olderReviewsUntilCounted(gh, raw, newest)
+    }),
+  )
 }
 
 function forcePushedToHeadAt(raw: RawPr): string | null {
@@ -142,14 +222,7 @@ interface SearchResponse {
   search: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawPr | Record<string, never>)[] }
 }
 
-function toPr(raw: RawPr, viewer: string, replyOnly: Set<string>): GithubPr {
-  const myReviews: MyReview[] = raw.reviews.nodes.map((r) => ({
-    databaseId: r.databaseId,
-    state: r.state,
-    submittedAt: r.submittedAt,
-    commitOid: r.commit?.oid ?? null,
-    replyOnly: replyOnly.has(r.id),
-  }))
+function toPr(raw: RawPr, viewer: string, myReviews: MyReview[]): GithubPr {
   const authored = authorFields(raw)
   const reviewRequestedFromMe = raw.reviewRequests.nodes.some(
     (n) => n.requestedReviewer?.login?.toLowerCase() === viewer.toLowerCase(),
@@ -194,8 +267,16 @@ export async function searchPrs(queries: string[], kind: PrListKind): Promise<{ 
   const byId = new Map<string, RawPr>()
   for (const q of queries) {
     let cursor: string | null = null
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, { q, viewer: gh.login, authored: isAuthored(kind), cursor })
+    const pages = SEARCH_PAGES[kind]
+    for (let page = 0; page < pages.max; page++) {
+      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, {
+        q,
+        viewer: gh.login,
+        authored: isAuthored(kind),
+        pageSize: pages.size,
+        cursor,
+        request: timeoutRequest(),
+      })
       for (const node of response.search.nodes) {
         if ('id' in node) byId.set(node.id, node as RawPr)
       }
@@ -204,8 +285,8 @@ export async function searchPrs(queries: string[], kind: PrListKind): Promise<{ 
     }
   }
   const raws = [...byId.values()]
-  const replyOnly = await replyOnlyReviewIds(gh, raws)
-  return { viewer: gh.login, prs: raws.map((raw) => toPr(raw, gh.login, replyOnly)) }
+  const myReviews = await myReviewsOf(gh, raws, kind)
+  return { viewer: gh.login, prs: raws.map((raw, index) => toPr(raw, gh.login, myReviews[index])) }
 }
 
 export async function fetchPr(owner: string, repo: string, number: number, kind: PrListKind): Promise<GithubPr> {
@@ -216,7 +297,9 @@ export async function fetchPr(owner: string, repo: string, number: number, kind:
     number,
     viewer: gh.login,
     authored: isAuthored(kind),
+    request: timeoutRequest(),
   })
   const raw = response.repository.pullRequest
-  return toPr(raw, gh.login, await replyOnlyReviewIds(gh, [raw]))
+  const [myReviews] = await myReviewsOf(gh, [raw], kind)
+  return toPr(raw, gh.login, myReviews)
 }

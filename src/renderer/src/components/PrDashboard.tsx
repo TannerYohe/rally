@@ -13,7 +13,7 @@ import { SortControl } from './SortControl'
 import { age } from '../lib/format'
 import { usePersistentState, usePrs } from '../lib/hooks'
 import { activeFilterCount, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, type PrFilters, type PrSort } from '../lib/prFilters'
-import { BUSY_STATUSES, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
+import { BUSY_STATUSES } from '../lib/sessionStatus'
 import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 export interface DashboardConfig {
@@ -23,14 +23,17 @@ export interface DashboardConfig {
   storageKey: string
   detailPath(pr: Pr): string
   emptyState: ReactNode
+  statusLabels: StatusLabels
 }
 
-function ReviewStatusNote({ status }: { status: SessionStatus }) {
+type StatusLabels = Record<SessionStatus, string>
+
+function SessionStatusNote({ status, labels }: { status: SessionStatus; labels: StatusLabels }) {
   const busy = BUSY_STATUSES.includes(status)
   return (
     <span className={`inline-flex items-center gap-1.5 text-[11px] ${status === 'error' ? 'text-rose-300' : 'text-highlight-300/80'}`}>
       {busy && <BusyDot className="h-1.5 w-1.5 bg-highlight-400" />}
-      {SESSION_STATUS_LABELS[status]}
+      {labels[status]}
     </span>
   )
 }
@@ -41,6 +44,13 @@ function FeedbackNote({ feedback }: { feedback: PrFeedback }) {
     parts.push(
       <span key="unanswered" className="text-amber-300">
         {feedback.unacknowledged} unanswered
+      </span>,
+    )
+  }
+  if (feedback.truncated) {
+    parts.push(
+      <span key="truncated" className="text-amber-300" title="This PR has more threads, comments, or reviews than the list reads. Open it to check them all.">
+        too much activity to check here
       </span>,
     )
   }
@@ -62,7 +72,12 @@ function FeedbackNote({ feedback }: { feedback: PrFeedback }) {
   return <>{parts}</>
 }
 
-function PrCard({ list, pr, onOpen }: { list: PrListKind; pr: Pr; onOpen(): void }) {
+interface CardListProps {
+  list: PrListKind
+  statusLabels: StatusLabels
+}
+
+function PrCard({ list, statusLabels, pr, onOpen }: CardListProps & { pr: Pr; onOpen(): void }) {
   const theme = PHASE_THEME[pr.phase]
   return (
     <li className={`group relative ${pr.hidden ? 'opacity-60 hover:opacity-100' : ''}`}>
@@ -84,7 +99,7 @@ function PrCard({ list, pr, onOpen }: { list: PrListKind; pr: Pr; onOpen(): void
             </h3>
             <div className="flex flex-col items-end gap-1">
               <PhaseBadge phase={pr.phase} />
-              {pr.phase === 'in_progress' && pr.reviewStatus && <ReviewStatusNote status={pr.reviewStatus} />}
+              {pr.phase === 'in_progress' && pr.reviewStatus && <SessionStatusNote status={pr.reviewStatus} labels={statusLabels} />}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
@@ -126,8 +141,7 @@ function EmptyState({ children }: { children: ReactNode }) {
   return <div className="rounded-xl border border-dashed border-ink-800 p-10 text-center text-sm text-ink-400">{children}</div>
 }
 
-interface PrListProps {
-  list: PrListKind
+interface PrListProps extends CardListProps {
   prs: Pr[]
   visible: Pr[]
   allMatchingHidden: boolean
@@ -136,23 +150,23 @@ interface PrListProps {
   onOpen(pr: Pr): void
 }
 
-function PrList({ list, prs, visible, allMatchingHidden, refreshing, emptyState, onOpen }: PrListProps) {
+function PrList({ list, statusLabels, prs, visible, allMatchingHidden, refreshing, emptyState, onOpen }: PrListProps) {
   if (prs.length === 0 && !refreshing) return <EmptyState>{emptyState}</EmptyState>
   if (visible.length === 0) return <EmptyState>{allMatchingHidden ? 'All matching PRs are hidden.' : 'No PRs match these filters.'}</EmptyState>
-  return <PrCards list={list} prs={visible} onOpen={onOpen} />
+  return <PrCards list={list} statusLabels={statusLabels} prs={visible} onOpen={onOpen} />
 }
 
-function PrCards({ list, prs, onOpen }: { list: PrListKind; prs: Pr[]; onOpen(pr: Pr): void }) {
+function PrCards({ list, statusLabels, prs, onOpen }: CardListProps & { prs: Pr[]; onOpen(pr: Pr): void }) {
   return (
     <ul className="space-y-2.5">
       {prs.map((pr) => (
-        <PrCard key={pr.id} list={list} pr={pr} onOpen={() => onOpen(pr)} />
+        <PrCard key={pr.id} list={list} statusLabels={statusLabels} pr={pr} onOpen={() => onOpen(pr)} />
       ))}
     </ul>
   )
 }
 
-function HiddenPrs({ list, prs, onOpen }: { list: PrListKind; prs: Pr[]; onOpen(pr: Pr): void }) {
+function HiddenPrs({ list, statusLabels, prs, onOpen }: CardListProps & { prs: Pr[]; onOpen(pr: Pr): void }) {
   const [open, setOpen] = useState(false)
   if (prs.length === 0) return null
   return (
@@ -160,7 +174,7 @@ function HiddenPrs({ list, prs, onOpen }: { list: PrListKind; prs: Pr[]; onOpen(
       <button className="text-xs text-ink-500 hover:text-ink-300" onClick={() => setOpen(!open)}>
         {open ? '▾' : '▸'} {prs.length} hidden
       </button>
-      {open && <PrCards list={list} prs={prs} onOpen={onOpen} />}
+      {open && <PrCards list={list} statusLabels={statusLabels} prs={prs} onOpen={onOpen} />}
     </section>
   )
 }
@@ -258,6 +272,7 @@ export function PrDashboard({ config }: { config: DashboardConfig }) {
 
       <PrList
         list={list}
+        statusLabels={config.statusLabels}
         prs={prs}
         visible={visible}
         allMatchingHidden={allMatchingHidden}
@@ -265,7 +280,7 @@ export function PrDashboard({ config }: { config: DashboardConfig }) {
         emptyState={config.emptyState}
         onOpen={openPr}
       />
-      <HiddenPrs list={list} prs={hiddenPrs} onOpen={openPr} />
+      <HiddenPrs list={list} statusLabels={config.statusLabels} prs={hiddenPrs} onOpen={openPr} />
     </div>
   )
 }

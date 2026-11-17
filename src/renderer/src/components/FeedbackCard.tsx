@@ -1,4 +1,4 @@
-import { canReplyTo, isReplyPending, itemLocation } from '@shared/authorSession'
+import { canReplyTo, isReplyPending, itemLocation, shortSha } from '@shared/authorSession'
 import { RESPONSE_ACTION_LABELS, RESPONSE_ACTIONS, RESPONSE_VERDICT_LABELS, type FeedbackComment, type ResponseAction, type ResponseVerdict } from '@shared/types'
 import type { FeedbackRow } from '../lib/authorView'
 import { age, fullTime } from '../lib/format'
@@ -162,11 +162,13 @@ export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, 
             {response.verdict && <span className={`${CHIP_CLASS} ${VERDICT_STYLES[response.verdict]}`}>{RESPONSE_VERDICT_LABELS[response.verdict]}</span>}
             {response.commits.map((oid) => (
               <span key={oid} className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[11px] text-ink-300">
-                {oid.slice(0, 7)}
+                {shortSha(oid)}
               </span>
             ))}
           </div>
           {response.summary && <Markdown>{response.summary}</Markdown>}
+          {response.pendingCommit && <p className="text-xs text-ink-500">Rally commits {response.files.join(', ')} when this turn ends.</p>}
+          {response.commitError && <p className="text-xs text-amber-300">{response.commitError}</p>}
           {canReplyTo(item) && replyPending && (
             <div className="space-y-2">
               <BodyTextarea value={reply} disabled={disabled} onChange={(value) => onReplyEdit(value === response.reply ? undefined : value)} />

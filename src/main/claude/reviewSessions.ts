@@ -55,7 +55,6 @@ function restoreSession(stored: ReviewSession): ReviewSession {
 }
 
 class ReviewSessions extends ClaudeSessions<ReviewSession> {
-  private posting = new Set<string>()
   private replyLookups = new WeakSet<Drafts>()
 
   constructor() {
@@ -77,27 +76,10 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const key = prKey(pr.owner, pr.repo, pr.number)
     const existing = this.sessions.get(key)
     if (existing && this.isTurnRunning(existing.id)) return existing
-    this.add({
-      id: randomUUID(),
-      pr,
-      prKey: key,
-      sdkSessionId: null,
-      status: 'running',
-      error: null,
-      timeline: [],
-      drafts: null,
-      submitted: null,
-      createdAt: now(),
-      updatedAt: now(),
-    })
+    this.add({ ...this.newSessionCore(pr, 'running'), drafts: null, submitted: null })
     const session = this.sessions.get(key)!
     void this.runTurn(session.id, reviewPrompt(pr, configFile.get().reviewSkill), 'review')
     return this.sessions.get(key)!
-  }
-
-  async feedback(sessionId: string, message: string): Promise<void> {
-    this.assertIdle(sessionId)
-    void this.runTurn(sessionId, message, 'refine')
   }
 
   async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
@@ -108,13 +90,10 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const blocked = submitBlockedReason(changes.instructions)
     if (blocked) throw new Error(blocked)
     if (isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-    this.posting.add(sessionId)
-    try {
+    await this.whilePublishing(sessionId, async () => {
       this.patch(sessionId, () => ({ status: 'submitting', error: null, threadsToResolveOnSubmit: resolveThreadIds }), true)
       await this.post(sessionId, pr, event, finalReview(drafts, changes), submitAttemptReviewId ?? null)
-    } finally {
-      this.posting.delete(sessionId)
-    }
+    })
   }
 
   private async post(sessionId: string, pr: PrRef, event: ReviewEvent, review: FinalReview, attemptReviewId: number | null): Promise<void> {
@@ -160,15 +139,10 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   discard(sessionId: string): void {
     const session = this.byId(sessionId)
     if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
-    if (this.posting.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
+    if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
     this.remove(session)
   }
 
-  private assertIdle(sessionId: string): void {
-    this.byId(sessionId)
-    if (this.isTurnRunning(sessionId)) throw new Error('A turn is already running for this review')
-    if (this.posting.has(sessionId)) throw new Error('Rally is already submitting this review')
-  }
 
   protected turnSetup(sessionId: string): TurnSetup {
     const mcpServer = createRallyServer({

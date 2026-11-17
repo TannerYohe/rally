@@ -4,7 +4,7 @@ import { errorMessage } from '@shared/errors'
 import type { DraftComment, PrRef, ReviewEvent, SubmittedReview } from '@shared/types'
 import { github, pullParams, timeoutRequest, type GithubClient } from './client'
 import { fetchThreadComments, threadCommentFor } from './reviewComments'
-import { sameLogin } from './threads'
+import { sameLogin } from './logins'
 
 export interface ListedReview {
   id: number

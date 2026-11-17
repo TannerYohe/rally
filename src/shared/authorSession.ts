@@ -1,4 +1,27 @@
-import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply } from './types'
+import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, SessionCore } from './types'
+
+/** Where a fix reply names its commit; Rally replaces it with the short sha once it commits. */
+export const COMMIT_PLACEHOLDER = '{commit}'
+
+export const shortSha = (oid: string) => oid.slice(0, 7)
+
+/** Returns a new author session with nothing cloned, answered, or queued yet. */
+export function newAuthorSession(core: SessionCore): AuthorSession {
+  return {
+    ...core,
+    clone: null,
+    items: [],
+    responses: {},
+    posted: {},
+    selfReview: null,
+    commits: [],
+    uncommitted: [],
+    lastPush: null,
+    mergeConflicts: [],
+    reviewersToReRequest: [],
+    lastReRequest: null,
+  }
+}
 
 export const PUSH_BEFORE_POSTING_ERROR = 'Push your commits before posting replies, so the replies point at code reviewers can see.'
 
@@ -8,13 +31,24 @@ export function isReplyPending(response: ItemResponse, posted: PostedReply | nul
   return !posted || posted.error !== null || posted.at < response.at
 }
 
-export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'posted'>): ItemResponse[] {
-  return Object.values(session.responses).filter((response) => isReplyPending(response, session.posted[response.itemId]))
+/** Returns the responses with an unposted reply on an item Rally can post to, leaving out self-review findings. */
+export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'posted' | 'items'>): ItemResponse[] {
+  const replyable = new Set(session.items.filter(canReplyTo).map((item) => item.id))
+  return Object.values(session.responses).filter(
+    (response) => replyable.has(response.itemId) && isReplyPending(response, session.posted[response.itemId]),
+  )
+}
+
+type WorkState = Pick<AuthorSession, 'commits' | 'responses' | 'posted' | 'items'>
+
+/** Returns whether the session holds work GitHub doesn't have yet: unpushed commits or unposted replies. */
+export function hasUnsharedWork(session: WorkState): boolean {
+  return session.commits.length > 0 || pendingReplies(session).length > 0
 }
 
 /** Returns whether the session has a running turn, an error, unpushed commits, or unposted replies. */
-export function hasPendingWork(session: Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted'>): boolean {
-  return session.status !== 'awaiting_feedback' || session.commits.length > 0 || pendingReplies(session).length > 0
+export function hasPendingWork(session: WorkState & Pick<AuthorSession, 'status'>): boolean {
+  return session.status !== 'awaiting_feedback' || hasUnsharedWork(session)
 }
 
 export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {
@@ -31,12 +65,4 @@ export function itemLocation(item: Pick<FeedbackItem, 'path' | 'line' | 'kind'>)
     default:
       return 'General'
   }
-}
-
-/** Returns the turn message asking Claude to rebase its commits after the branch moved on GitHub. */
-export function rebaseMessage(branch: string): string {
-  return (
-    `The branch moved on GitHub after you committed, so Rally couldn't push. In the clone, fetch origin, rebase your commits onto origin/${branch}, ` +
-    'resolve any conflicts, and rerun the checks you ran before. Then call publish_responses again for every item you fixed, with the new commit shas and replies that name them.'
-  )
 }

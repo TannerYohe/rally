@@ -1,51 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { AuthorSession, FeedbackItem, ItemResponse } from '@shared/types'
+import { authorSession, feedbackItem, itemResponse } from '@shared/authorSession.fixture'
+import type { AuthorSession, FeedbackItem } from '@shared/types'
+
+const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem(id, { kind, line: 1, url: null, comments: [], reactionSubjectId: null })
+const response = (itemId: string, reply: string) => itemResponse(itemId, reply)
+const session = (overrides: Partial<AuthorSession> = {}) => authorSession(1, overrides)
 import { feedbackRows, replyPosts, splitWaitingRows } from './authorView'
-
-const item = (id: string, kind: FeedbackItem['kind'] = 'thread'): FeedbackItem => ({
-  id,
-  kind,
-  author: 'bob',
-  authorIsBot: false,
-  avatarUrl: null,
-  path: 'a.ts',
-  line: 1,
-  url: null,
-  severity: null,
-  outdated: false,
-  answered: false,
-  comments: [],
-  replyToCommentId: 1,
-  reactionSubjectId: null,
-})
-
-const response = (itemId: string, reply: string): ItemResponse => ({ itemId, action: 'push_back', verdict: null, summary: '', reply, commits: [], at: '2026-11-02T00:00:00Z' })
-
-function session(overrides: Partial<AuthorSession> = {}): AuthorSession {
-  return {
-    id: 's',
-    pr: { owner: 'acme', repo: 'api', number: 1, url: '' },
-    prKey: 'acme/api#1',
-    sdkSessionId: null,
-    status: 'awaiting_feedback',
-    error: null,
-    timeline: [],
-    createdAt: '',
-    updatedAt: '',
-    clone: null,
-    items: [],
-    responses: {},
-    posted: {},
-    selfReview: null,
-    commits: [],
-    uncommitted: [],
-    lastPush: null,
-    remoteMoved: false,
-    reviewersToReRequest: [],
-    lastReRequest: null,
-    ...overrides,
-  }
-}
 
 describe('feedbackRows', () => {
   it('keeps closed items only while they have an unposted reply, and lists findings last', () => {
@@ -60,6 +20,14 @@ describe('feedbackRows', () => {
       ['closedPending', true, 'b'],
       ['self-1', false, null],
     ])
+  })
+})
+
+describe('feedbackRows with findings', () => {
+  it('lists a finding Claude answered once, as a finding', () => {
+    const finding = item('self-1', 'finding')
+    const s = session({ items: [finding], responses: { 'self-1': response('self-1', 'Fixed') }, selfReview: { verdict: '', reportMarkdown: '', findings: [finding] } })
+    expect(feedbackRows([], s).map((r) => [r.item.id, r.closedOnGithub])).toEqual([['self-1', false]])
   })
 })
 

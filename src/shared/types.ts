@@ -285,6 +285,7 @@ export type TimelineEntry =
   | { kind: 'step'; id: string; label: string; detail: string; done: boolean; at: string }
   | { kind: 'agent'; id: string; label: string; done: boolean; activity: number; background: boolean; at: string }
   | { kind: 'denied'; id: string; label: string; at: string }
+  | { kind: 'warning'; id: string; label: string; detail: string; at: string }
   | { kind: 'result'; id: string; ok: boolean; text: string; costUsd: number; durationMs: number; at: string }
 
 export interface ReviewThread {
@@ -422,6 +423,13 @@ export interface ReplyPost {
   itemId: string
   body: string
   resolve: boolean
+}
+
+/** A unified diff for display, whether it was cut off before its end, and the files it shows only as binary. */
+export interface DiffResult {
+  diff: string
+  truncated: boolean
+  binaryFiles: string[]
 }
 
 export interface LocalCommit {

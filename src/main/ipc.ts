@@ -61,10 +61,12 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.sendAuthorFeedback, (_event, id: string, message: string) => authorSessions.feedback(id, message))
   ipcMain.handle(IPC.cancelAuthorTurn, (_event, id: string) => authorSessions.cancel(id))
   ipcMain.handle(IPC.getAuthorDiff, (_event, id: string) => authorSessions.diff(id))
+  ipcMain.handle(IPC.getUncommittedDiff, (_event, id: string) => authorSessions.uncommittedDiff(id))
   ipcMain.handle(IPC.pushAuthorCommits, (_event, id: string) => authorSessions.push(id))
   ipcMain.handle(IPC.resolveMergeConflicts, (_event, id: string) => authorSessions.resolveConflicts(id))
   ipcMain.handle(IPC.abortMerge, (_event, id: string) => authorSessions.abortMerge(id))
   ipcMain.handle(IPC.discardUncommitted, (_event, id: string) => authorSessions.discardUncommitted(id))
+  ipcMain.handle(IPC.commitUncommitted, (_event, id: string, message: string) => authorSessions.commitUncommitted(id, message))
   ipcMain.handle(IPC.postAuthorReplies, (_event, id: string, replies: ReplyPost[], reRequestReviews: boolean) =>
     authorSessions.postReplies(id, replies, reRequestReviews),
   )

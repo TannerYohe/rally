@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
+import { canPush, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
 const response = (itemId: string, reply: string, at?: string) => itemResponse(itemId, reply, at ? { at } : {})
 const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem(id, { kind })
 
-function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted' | 'items'> {
-  return { status: 'awaiting_feedback', commits: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), ...overrides }
+function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'uncommitted' | 'responses' | 'posted' | 'items'> {
+  return { status: 'awaiting_feedback', commits: [], uncommitted: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), ...overrides }
 }
 
 describe('pendingReplies', () => {
@@ -52,8 +52,9 @@ describe('hasPendingWork', () => {
 })
 
 describe('hasUnsharedWork', () => {
-  it('ignores the last turn status and counts only unpushed commits and unposted replies', () => {
+  it('ignores the last turn status and counts only uncommitted edits, unpushed commits, and unposted replies', () => {
     expect(hasUnsharedWork(session({ status: 'error' }))).toBe(false)
+    expect(hasUnsharedWork(session({ uncommitted: ['a.ts'] }))).toBe(true)
     expect(hasUnsharedWork(session({ commits: [{ oid: 'a', subject: 'fix' }] }))).toBe(true)
     expect(hasUnsharedWork(session({ responses: { a: response('a', 'Done') } }))).toBe(true)
   })
@@ -64,5 +65,30 @@ describe('itemLocation', () => {
     expect(itemLocation({ kind: 'thread', path: 'a.ts', line: 3 })).toBe('a.ts:3')
     expect(itemLocation({ kind: 'review', path: null, line: null })).toBe('Review summary')
     expect(itemLocation({ kind: 'comment', path: null, line: null })).toBe('PR comment')
+  })
+})
+
+describe('canPush', () => {
+  const commits = [{ oid: 'a', subject: 'fix' }]
+
+  it('is true with commits and no open merge, even with uncommitted files', () => {
+    expect(canPush({ commits, mergeConflicts: [] })).toBe(true)
+    expect(canPush({ commits: [], mergeConflicts: [] })).toBe(false)
+    expect(canPush({ commits, mergeConflicts: ['a.ts'] })).toBe(false)
+  })
+})
+
+describe('committableFiles', () => {
+  it('lists uncommitted files except while a merge is open', () => {
+    expect(committableFiles({ uncommitted: ['a.ts'], mergeConflicts: [] })).toEqual(['a.ts'])
+    expect(committableFiles({ uncommitted: ['a.ts', 'merged.ts'], mergeConflicts: ['a.ts'] })).toEqual([])
+  })
+})
+
+describe('cloneChangeCount', () => {
+  it('adds committable files and unpushed commits', () => {
+    const commits = [{ oid: 'a', subject: 'fix' }]
+    expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'b.ts'], mergeConflicts: [] })).toBe(3)
+    expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'merged.ts'], mergeConflicts: ['a.ts'] })).toBe(1)
   })
 })

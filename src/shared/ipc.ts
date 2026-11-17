@@ -3,6 +3,7 @@ import type {
   ActionRequest,
   AppInfo,
   AuthorSession,
+  DiffResult,
   FeedbackItem,
   Config,
   Health,
@@ -50,11 +51,13 @@ export interface RallyApi {
   startSelfReview(pr: PrRef): Promise<AuthorSession>
   sendAuthorFeedback(sessionId: string, message: string): Promise<void>
   cancelAuthorTurn(sessionId: string): Promise<void>
-  getAuthorDiff(sessionId: string): Promise<string>
+  getAuthorDiff(sessionId: string): Promise<DiffResult>
+  getUncommittedDiff(sessionId: string): Promise<DiffResult>
   pushAuthorCommits(sessionId: string): Promise<void>
   resolveMergeConflicts(sessionId: string): Promise<void>
   abortMerge(sessionId: string): Promise<void>
   discardUncommitted(sessionId: string): Promise<void>
+  commitUncommitted(sessionId: string, message: string): Promise<void>
   postAuthorReplies(sessionId: string, replies: ReplyPost[], reRequestReviews: boolean): Promise<void>
   discardAuthorReply(sessionId: string, itemId: string): Promise<void>
   dismissFinding(sessionId: string, itemId: string): Promise<void>
@@ -96,10 +99,12 @@ export const IPC = {
   sendAuthorFeedback: 'author:feedback',
   cancelAuthorTurn: 'author:cancel',
   getAuthorDiff: 'author:diff',
+  getUncommittedDiff: 'author:uncommitted-diff',
   pushAuthorCommits: 'author:push',
   resolveMergeConflicts: 'author:resolve-conflicts',
   abortMerge: 'author:abort-merge',
   discardUncommitted: 'author:discard-uncommitted',
+  commitUncommitted: 'author:commit-uncommitted',
   postAuthorReplies: 'author:post-replies',
   discardAuthorReply: 'author:discard-reply',
   dismissFinding: 'author:dismiss-finding',

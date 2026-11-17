@@ -8,6 +8,8 @@ export interface FeedbackRow {
   closedOnGithub: boolean
 }
 
+export const NO_CHANGES_MESSAGE = 'Nothing to commit or push. Pick Fix on a comment, or message Claude, to change the code.'
+
 type SessionView = Pick<AuthorSession, 'items' | 'responses' | 'posted' | 'selfReview'>
 
 /** Returns the open items from GitHub, then items closed on GitHub that still have an unposted reply, then self-review findings. */

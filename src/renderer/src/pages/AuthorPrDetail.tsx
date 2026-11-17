@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
+import { canPush, cloneChangeCount, committableFiles, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
@@ -9,8 +9,8 @@ import { PrHeader } from '../components/PrHeader'
 import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
-import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
-import { age, fullTime } from '../lib/format'
+import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
+import { age, fullTime, plural } from '../lib/format'
 import { useActionRunner, useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
@@ -61,7 +61,11 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const { open: openRows, waiting: waitingRows } = splitWaitingRows(rows)
   const requests = Object.entries(picks).map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
-  const postBlocked = session && session.commits.length > 0 ? PUSH_BEFORE_POSTING_ERROR : null
+  const unpushed = session?.commits.length ?? 0
+  const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null
+  const changeCount = session ? cloneChangeCount(session) : 0
+  const leftBehind = session ? committableFiles(session).length : 0
+  const repliesLabel = plural(posts.length, 'reply', 'replies')
 
   const runActions = () =>
     run(async () => {
@@ -78,8 +82,9 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const primary = () => (requests.length > 0 ? runActions() : sendMessage(message))
   const canRunPrimary = !busy && (requests.length > 0 || (session !== null && Boolean(message.trim())))
   const selfReview = () => run(async () => onSession(await window.rally.startSelfReview(prRef)))
+  const push = () => session && run(() => window.rally.pushAuthorCommits(session.id))
   const postReplies = () => {
-    if (!session || !window.confirm(`Post ${posts.length} repl${posts.length === 1 ? 'y' : 'ies'} to GitHub as you?`)) return
+    if (!session || !window.confirm(`Post ${repliesLabel} to GitHub as you?`)) return
     void run(async () => {
       await window.rally.postAuthorReplies(session.id, posts, reRequestReviews)
       setReplyEdits({})
@@ -123,7 +128,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const badges: Record<AuthorTab, ReactNode> = {
     feedback: openRows.length > 0 && <TabCount count={openRows.length} />,
     activity: busy && <BusyDot className="h-2 w-2 bg-primary-400" />,
-    changes: session && session.commits.length > 0 && <TabCount count={session.commits.length} />,
+    changes: changeCount > 0 && <TabCount count={changeCount} />,
     report: session?.selfReview && (
       <span className="max-w-48 truncate text-xs font-normal text-ink-400" title={session.selfReview.verdict}>
         {session.selfReview.verdict}
@@ -133,7 +138,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const empty: Record<AuthorTab, boolean> = {
     feedback: rows.length === 0,
     activity: !session || session.timeline.length === 0,
-    changes: !session || (session.commits.length === 0 && !session.lastPush),
+    changes: !session || (changeCount === 0 && !session.lastPush),
     report: !session?.selfReview,
   }
 
@@ -205,15 +210,16 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
           <ChangesPanel
             session={session}
             disabled={busy}
-            onPush={() => run(() => window.rally.pushAuthorCommits(session.id))}
+            onPush={push}
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
             onDiscardUncommitted={() =>
-              window.confirm(`Discard ${session.uncommitted.length} uncommitted change(s) in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
+              window.confirm(`Discard ${plural(leftBehind, 'uncommitted file')} in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
             }
+            onCommitUncommitted={(message) => run(() => window.rally.commitUncommitted(session.id, message))}
           />
         ) : (
-          <EmptyTab>No changes yet. Pick Fix on a comment to have Claude change the code.</EmptyTab>
+          <EmptyTab>{NO_CHANGES_MESSAGE}</EmptyTab>
         )}
       </TabPanel>
 
@@ -235,7 +241,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
           }
           disabled={busy}
           canSend={canRunPrimary}
-          sendLabel={requests.length > 0 ? `Run ${requests.length} action${requests.length === 1 ? '' : 's'}` : 'Send to Claude'}
+          sendLabel={requests.length > 0 ? `Run ${plural(requests.length, 'action')}` : 'Send to Claude'}
           onChange={setMessage}
           onSend={() => void primary()}
         />
@@ -248,9 +254,24 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
               <input type="checkbox" checked={reRequestReviews} disabled={busy} onChange={(e) => setReRequestReviews(e.target.checked)} />
               Re-request review from people I reply to
             </label>
-            {postBlocked && <span className="text-xs text-amber-300">{postBlocked}</span>}
+            {postBlocked && (
+              <>
+                <span className="text-xs text-amber-300">{postBlocked}</span>
+                <button className={SECONDARY_BUTTON_CLASS} onClick={() => setChosenTab('changes')}>
+                  Review changes
+                </button>
+                {session && canPush(session) && (
+                  <>
+                    {leftBehind > 0 && <span className="text-xs text-amber-300">Push leaves out {plural(leftBehind, 'uncommitted file')}, and stops if GitHub has new commits.</span>}
+                    <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
+                      Push {plural(unpushed, 'commit')}
+                    </button>
+                  </>
+                )}
+              </>
+            )}
             <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy || postBlocked !== null} onClick={postReplies}>
-              Post {posts.length} repl{posts.length === 1 ? 'y' : 'ies'}
+              Post {repliesLabel}
             </button>
           </div>
         )}

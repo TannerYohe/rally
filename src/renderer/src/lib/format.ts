@@ -1,3 +1,5 @@
+export { plural } from '@shared/format'
+
 const UNITS: [number, string][] = [
   [365 * 24 * 60, 'y'],
   [30 * 24 * 60, 'mo'],

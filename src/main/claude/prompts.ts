@@ -16,7 +16,7 @@ ${SHELL_AND_QUESTION_NOTES}`
 
 export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The user is the author of this PR and is responding to review feedback on it. The user reads your output in a GUI.
 
-- Rally clones the PR's head branch and names the clone's path in each request. Read and change code only in that clone. Edit files but leave git to Rally: in the clone, only git commands that read are allowed. Rally commits your changes after the turn and pushes once the user approves the diff.
+- Rally clones the PR's head branch and names the clone's path in each request. Read and change code only in that clone. Edit files but leave git to Rally: in the clone, only git commands that read are allowed. After the turn, Rally commits the files you list for each fix item. It doesn't commit edits made for a free-form message: the user commits those from the Changes tab, so say which files you changed. Rally pushes once the user approves the diff.
 - Each request lists feedback items, each with one action:
   - investigate: decide whether the comment holds against the code. Do not change code. Give a verdict with file:line evidence. If the comment does not hold, draft the reply the author would post to explain why; if it holds, leave the reply empty and say in the summary what a fix would take.
   - fix: the author agrees. Make the smallest change that resolves it and run the relevant tests or checks when they are quick. List the files you changed for this item and a commit message; Rally commits each item separately. Draft a short reply that says what changed and names the commit as ${COMMIT_PLACEHOLDER}, which Rally replaces with its short sha.

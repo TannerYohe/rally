@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -8,6 +8,7 @@ import {
   abortMerge,
   cloneBranch,
   cloneDiff,
+  commitAll,
   commitFiles,
   concludeMerge,
   discardUncommitted,
@@ -17,6 +18,7 @@ import {
   MergeConflictError,
   pushClone,
   syncClone,
+  uncommittedDiff,
   uncommittedPaths,
   UncommittedChangesError,
 } from './prClone'
@@ -86,7 +88,7 @@ describe('prClone', () => {
     const commits = await localCommits(clone)
     expect(commits.map((c) => c.subject)).toEqual(['change c.txt'])
     expect(await uncommittedPaths(clone)).toEqual(['loose.txt'])
-    expect(await cloneDiff(clone)).toContain('+three')
+    expect((await cloneDiff(clone)).diff).toContain('+three')
 
     const pushed = await syncAndPush(clone, AT)
     expect(pushed).toEqual({ push: { at: AT, oid: commits[0].oid, commits }, clone: { ...clone, syncedHead: commits[0].oid }, rewritten: {} })
@@ -151,6 +153,108 @@ describe('prClone', () => {
     expect(await commitFiles(clone, ['fix.txt'], 'Nothing new')).toBeNull()
   })
 
+  it('commits every edit, including new and deleted files, and returns null when there are none', async () => {
+    const clone = await cloneBranch(join(root, 'session16'), source)
+    writeFileSync(join(clone.path, 'new.txt'), 'new\n')
+    rmSync(join(clone.path, 'a.txt'))
+
+    const oid = await commitAll(clone, 'Tidy up')
+    expect((await localCommits(clone))[0]).toEqual({ oid, subject: 'Tidy up' })
+    expect(git(clone.path, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['A\tnew.txt', 'D\ta.txt'])
+    expect(await uncommittedPaths(clone)).toEqual([])
+    expect(await commitAll(clone, 'Nothing new')).toBeNull()
+  })
+
+  it('lists and diffs each uncommitted file, including files in a new directory, without staging them', async () => {
+    const clone = await cloneBranch(join(root, 'session17'), source)
+    mkdirSync(join(clone.path, 'scratch'))
+    writeFileSync(join(clone.path, 'scratch', 'one.txt'), 'one\n')
+    writeFileSync(join(clone.path, 'scratch', 'two.txt'), 'two\n')
+    rmSync(join(clone.path, 'a.txt'))
+
+    expect((await uncommittedPaths(clone)).sort()).toEqual(['a.txt', 'scratch/one.txt', 'scratch/two.txt'])
+    const diff = (await uncommittedDiff(clone)).diff
+    expect(diff).toContain('+one')
+    expect(diff).toContain('+two')
+    expect(diff).toContain('deleted file mode')
+    expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('')
+    expect(readdirSync(join(clone.path, '.git')).filter((name) => name.startsWith('rally-uncommitted-'))).toEqual([])
+  })
+
+  it('lists renamed files once and keeps names with spaces or accents unquoted', async () => {
+    const clone = await cloneBranch(join(root, 'session18'), source)
+    commitFile(clone.path, 'move-me.txt', 'moving\n')
+    git(clone.path, 'mv', 'move-me.txt', 'moved.txt')
+    writeFileSync(join(clone.path, 'with space.txt'), 'spaced\n')
+    writeFileSync(join(clone.path, 'résumé.txt'), 'accent\n')
+
+    expect((await uncommittedPaths(clone)).sort()).toEqual(['moved.txt', 'résumé.txt', 'with space.txt'])
+  })
+
+  it('diffs commits and uncommitted edits as plain text with a/ and b/ headers whatever the clone configures', async () => {
+    const clone = await cloneBranch(join(root, 'session19'), source)
+    commitFile(clone.path, 'committed.txt', 'committed\n')
+    commitFile(clone.path, 'café.txt', 'café\n')
+    for (const [key, value] of [
+      ['core.quotePath', 'true'],
+      ['diff.mnemonicPrefix', 'true'],
+      ['diff.noprefix', 'true'],
+      ['diff.external', 'echo junk'],
+      ['color.ui', 'always'],
+    ]) {
+      git(clone.path, 'config', key, value)
+    }
+    writeFileSync(join(clone.path, '.git', 'info', 'attributes'), 'hidden.txt -diff\n')
+    writeFileSync(join(clone.path, 'new.txt'), 'new\n')
+    writeFileSync(join(clone.path, 'hidden.txt'), 'hidden\n')
+    writeFileSync(join(clone.path, 'résumé.txt'), 'accent\n')
+
+    const uncommitted = (await uncommittedDiff(clone)).diff
+    expect(uncommitted).toContain('diff --git a/new.txt b/new.txt')
+    expect(uncommitted).toContain('+new')
+    expect(uncommitted).toContain('+hidden')
+    expect(uncommitted).toContain('diff --git a/résumé.txt b/résumé.txt')
+    expect(uncommitted).not.toContain('junk')
+    expect(uncommitted).not.toContain('\u001b[')
+    const committed = (await cloneDiff(clone)).diff
+    expect(committed).toContain('diff --git a/committed.txt b/committed.txt')
+    expect(committed).toContain('+committed')
+    expect(committed).toContain('diff --git a/café.txt b/café.txt')
+  })
+
+  it('lists a text file with a NUL byte as binary and splits files only at real line starts', async () => {
+    const clone = await cloneBranch(join(root, 'session22'), source)
+    writeFileSync(join(clone.path, 'sneaky.ts'), 'const a = 1\n// \0\nconst b = 2\n')
+    writeFileSync(join(clone.path, 'tricky.txt'), 'one\rdiff --git a/x b/x\n')
+
+    const { diff, binaryFiles } = await uncommittedDiff(clone)
+    expect(binaryFiles).toEqual(['sneaky.ts'])
+    expect(diff).toContain('+one\rdiff --git a/x b/x')
+    expect(diff.split('\n').filter((line) => line.startsWith('diff --git '))).toHaveLength(2)
+  })
+
+  it('shows a binary file as one line so the files after it still fit', async () => {
+    const clone = await cloneBranch(join(root, 'session21'), source)
+    writeFileSync(join(clone.path, 'blob.bin'), Buffer.concat([Buffer.from([0]), Buffer.alloc(500_000, 0x41)]))
+    writeFileSync(join(clone.path, 'note.txt'), 'note\n')
+
+    const { diff, truncated, binaryFiles } = await uncommittedDiff(clone)
+    expect(truncated).toBe(false)
+    expect(binaryFiles).toEqual(['blob.bin'])
+    expect(diff).toContain('diff --git a/blob.bin b/blob.bin')
+    expect(diff).toContain('Binary files differ')
+    expect(diff).not.toContain('AAAA')
+    expect(diff).toContain('+note')
+  })
+
+  it('says when a diff was cut off', async () => {
+    const clone = await cloneBranch(join(root, 'session20'), source)
+    writeFileSync(join(clone.path, 'small.txt'), 'small\n')
+    expect((await uncommittedDiff(clone)).truncated).toBe(false)
+    writeFileSync(join(clone.path, 'big.txt'), 'x\n'.repeat(250_000))
+    expect(await uncommittedDiff(clone)).toMatchObject({ truncated: true, diff: expect.any(String) })
+  })
+
   it('fast-forwards a clone with no commits of its own on sync', async () => {
     const clone = await cloneBranch(join(root, 'session5'), source)
     const other = await cloneBranch(join(root, 'session6'), source)
@@ -170,7 +274,7 @@ describe('prClone', () => {
     await syncAndPush(other, AT)
     await syncClone(clone)
 
-    const diff = await cloneDiff(clone)
+    const diff = (await cloneDiff(clone)).diff
     expect(diff).toContain('mine.txt')
     expect(diff).not.toContain('theirs.txt')
   })
@@ -253,7 +357,7 @@ describe('prClone', () => {
       commitFile(clone.path, 'ours.txt', 'ours\n')
       await forcePush('theirs-forced.txt')
       git(clone.path, 'fetch', 'origin')
-      expect(diffFiles(await cloneDiff(clone))).toEqual(['ours.txt'])
+      expect(diffFiles((await cloneDiff(clone)).diff)).toEqual(['ours.txt'])
     })
 
     it('pairs old and new shas when the force-pushed head already contains one of the replayed commits', async () => {

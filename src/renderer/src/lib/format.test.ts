@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calendarDate, clockTime, fullTime, megabytes, plural } from './format'
+import { calendarDate, clockTime, fullTime, megabytes } from './format'
 
 const startedAt = new Date(2026, 10, 4, 15, 12)
 const iso = startedAt.toISOString()
@@ -34,13 +34,5 @@ describe('calendarDate', () => {
     const shown = calendarDate('2026-11-05T12:00:00')
     expect(shown).toContain('2026')
     expect(shown).not.toMatch(/\d:\d\d/)
-  })
-})
-
-describe('plural', () => {
-  it('uses the singular only for one', () => {
-    expect(plural(1, 'file')).toBe('1 file')
-    expect(plural(0, 'file')).toBe('0 files')
-    expect(plural(2, 'reply', 'replies')).toBe('2 replies')
   })
 })

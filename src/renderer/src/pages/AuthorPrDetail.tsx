@@ -214,7 +214,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
             onDiscardUncommitted={() =>
-              window.confirm(`Discard ${plural(session.uncommitted.length, 'uncommitted file')} in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
+              window.confirm(`Discard ${plural(leftBehind, 'uncommitted file')} in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
             }
             onCommitUncommitted={(message) => run(() => window.rally.commitUncommitted(session.id, message))}
           />
@@ -262,7 +262,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
                 </button>
                 {session && canPush(session) && (
                   <>
-                    {leftBehind > 0 && <span className="text-xs text-amber-300">Push leaves out {plural(leftBehind, 'uncommitted file')}.</span>}
+                    {leftBehind > 0 && <span className="text-xs text-amber-300">Push leaves out {plural(leftBehind, 'uncommitted file')}, and stops if GitHub has new commits.</span>}
                     <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
                       Push {plural(unpushed, 'commit')}
                     </button>

@@ -424,6 +424,12 @@ export interface ReplyPost {
   resolve: boolean
 }
 
+/** A unified diff for display, and whether it was cut off before its end. */
+export interface DiffResult {
+  diff: string
+  truncated: boolean
+}
+
 export interface LocalCommit {
   oid: string
   subject: string

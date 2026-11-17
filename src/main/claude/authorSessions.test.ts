@@ -6,6 +6,7 @@ import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { authorSession as stored, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
 import type { AuthorSession, Drafts, FeedbackItem } from '@shared/types'
 import type { AuthorToolHandlers } from './authorTools'
+import { UncommittedChangesError } from '../git/prClone'
 
 const CLONE = { path: join(tmpdir(), 'rally-author-test-clone'), branch: 'feature', baseRef: 'origin/main' }
 
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   integrateRemote: vi.fn(),
   commitFiles: vi.fn(),
   commitAll: vi.fn(),
+  uncommittedDiff: vi.fn(),
   concludeMerge: vi.fn(),
   abortMerge: vi.fn(),
   discardUncommitted: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock('../github/authorReplies', () => ({
 }))
 vi.mock('../git/prClone', async (importOriginal) => ({
   MergeConflictError: (await importOriginal<typeof import('../git/prClone')>()).MergeConflictError,
+  UncommittedChangesError: (await importOriginal<typeof import('../git/prClone')>()).UncommittedChangesError,
   CLONE_DIR_NAME: 'repo',
   commitFiles: mocks.commitFiles,
   commitAll: mocks.commitAll,
@@ -68,6 +71,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   pushClone: mocks.pushClone,
   integrateRemote: mocks.integrateRemote,
   cloneDiff: vi.fn(async () => ''),
+  uncommittedDiff: mocks.uncommittedDiff,
 }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
@@ -138,6 +142,8 @@ mocks.stored = [
   stored(49),
   stored(50, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-missing-clone') }, uncommitted: ['a.ts'] }),
   stored(51, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-missing-clone') }, uncommitted: ['a.ts'] }),
+  stored(52, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], uncommitted: ['a.ts'] }),
+  stored(53, { clone: CLONE, uncommitted: ['a.ts'] }),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
@@ -168,6 +174,7 @@ beforeEach(() => {
     mocks.integrateRemote,
     mocks.commitFiles,
     mocks.commitAll,
+    mocks.uncommittedDiff,
     mocks.concludeMerge,
     mocks.abortMerge,
     mocks.discardUncommitted,
@@ -273,6 +280,16 @@ describe('push', () => {
     expect(mocks.refreshOne).not.toHaveBeenCalledWith('acme', 'api', 18)
   })
 
+  it('leaves no session error when uncommitted files block merging new commits from GitHub', async () => {
+    const refused = new UncommittedChangesError(['a.ts'])
+    mocks.integrateRemote.mockRejectedValue(refused)
+    mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
+    mocks.uncommittedPaths.mockResolvedValue(['a.ts'])
+    await expect(authorSessions.push('author-52')).rejects.toThrow(refused.message)
+    expect(session(52)).toMatchObject({ status: 'awaiting_feedback', error: null, commits: [{ oid: 'abc', subject: 'fix' }] })
+    expect(mocks.pushClone).not.toHaveBeenCalled()
+  })
+
   it('saves the replayed shas and synced head before pushing, so a failed push keeps them', async () => {
     const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'bbbbbbb222', commits: [{ oid: 'bbbbbbb222', subject: 'fix' }] }
     mocks.integrateRemote.mockResolvedValue({ clone: { ...CLONE, syncedHead: 'new-head' }, rewritten: { aaaaaaa111: 'bbbbbbb222' } })
@@ -350,11 +367,18 @@ describe('push', () => {
 
   it('forgets uncommitted edits and refuses to commit or discard once the clone folder is gone', async () => {
     await expect(authorSessions.commitUncommitted('author-50', 'Tidy up')).rejects.toThrow('cleared from the temp folder')
-    expect(session(50).uncommitted).toEqual([])
+    expect(session(50)).toMatchObject({ uncommitted: [], status: 'error', error: expect.stringContaining('cleared from the temp folder') })
     await expect(authorSessions.discardUncommitted('author-50')).rejects.toThrow('cleared from the temp folder')
     await expect(authorSessions.uncommittedDiff('author-50')).rejects.toThrow('cleared from the temp folder')
     expect(mocks.commitAll).not.toHaveBeenCalled()
     expect(mocks.discardUncommitted).not.toHaveBeenCalled()
+  })
+
+  it('diffs uncommitted edits in the clone, and nothing without one', async () => {
+    mocks.uncommittedDiff.mockResolvedValue({ diff: '+edit', truncated: false })
+    expect(await authorSessions.uncommittedDiff('author-53')).toEqual({ diff: '+edit', truncated: false })
+    expect(mocks.uncommittedDiff).toHaveBeenCalledWith(CLONE)
+    expect(await authorSessions.uncommittedDiff('author-48')).toEqual({ diff: '', truncated: false })
   })
 
   it('rereads the clone when there is nothing to commit or the commit fails', async () => {

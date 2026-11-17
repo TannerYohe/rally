@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { canPush, cloneChangeCount, committableFiles, shortSha } from '@shared/authorSession'
-import type { AuthorSession } from '@shared/types'
+import type { AuthorSession, DiffResult } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { NO_CHANGES_MESSAGE } from '../lib/authorView'
 import { age, fullTime, plural } from '../lib/format'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 import { DiffView } from './DiffView'
+
+const TRUNCATED_NOTE = 'This diff is cut off at 400,000 characters, so it leaves out some changes.'
 
 const MERGE_BUTTON_CLASS = 'rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-amber-500/30 hover:bg-amber-500/25 disabled:opacity-40'
 
@@ -19,24 +21,41 @@ interface Props {
   onCommitUncommitted(message: string): Promise<boolean>
 }
 
+interface LoadedDiff extends DiffResult {
+  error: string | null
+}
+
+const NO_DIFF: LoadedDiff = { diff: '', truncated: false, error: null }
+
 /** Loads the diff whenever reloadKey changes, and shows nothing while it is empty. */
-function useDiff(sessionId: string, reloadKey: string, load: (sessionId: string) => Promise<string>): { diff: string; error: string | null } {
-  const [state, setState] = useState<{ diff: string; error: string | null }>({ diff: '', error: null })
+function useDiff(sessionId: string, reloadKey: string, load: (sessionId: string) => Promise<DiffResult>): LoadedDiff {
+  const [state, setState] = useState<LoadedDiff>(NO_DIFF)
   useEffect(() => {
     if (!reloadKey) {
-      setState({ diff: '', error: null })
+      setState(NO_DIFF)
       return
     }
     let current = true
     load(sessionId).then(
-      (diff) => current && setState({ diff, error: null }),
-      (error) => current && setState({ diff: '', error: errorMessage(error) }),
+      (result) => current && setState({ ...result, error: null }),
+      (error) => current && setState({ ...NO_DIFF, error: errorMessage(error) }),
     )
     return () => {
       current = false
     }
   }, [sessionId, reloadKey, load])
   return state
+}
+
+/** Shows a loaded diff, its loading error, or a warning that it was cut off. */
+function DiffSection({ loaded, what }: { loaded: LoadedDiff; what: string }) {
+  if (loaded.error) return <p className="text-sm text-rose-300">Couldn't read the {what}: {loaded.error}</p>
+  return (
+    <>
+      <DiffView diff={loaded.diff} />
+      {loaded.truncated && <p className="text-xs text-amber-300">{TRUNCATED_NOTE}</p>}
+    </>
+  )
 }
 
 /** Describes what the clone holds that GitHub doesn't: committable files, unpushed commits, or both. */
@@ -53,14 +72,19 @@ function changesSummary(session: AuthorSession): ReactNode {
   )
 }
 
-type ChangesActionProps = Pick<Props, 'session' | 'disabled' | 'onPush' | 'onDiscardUncommitted' | 'onCommitUncommitted'> & { committable: string[] }
+type ChangesActionProps = Pick<Props, 'session' | 'disabled' | 'onPush' | 'onDiscardUncommitted' | 'onCommitUncommitted'> & {
+  committable: string[]
+  uncommittedTruncated: boolean
+  commitsTruncated: boolean
+}
 
 /** Shows the Changes tab's actions: the commit form while files are committable, and Push while the commits can go. */
-function ChangesAction({ session, committable, disabled, onPush, onDiscardUncommitted, onCommitUncommitted }: ChangesActionProps) {
+function ChangesAction({ session, committable, uncommittedTruncated, commitsTruncated, disabled, onPush, onDiscardUncommitted, onCommitUncommitted }: ChangesActionProps) {
   const [commitMessage, setCommitMessage] = useState('')
   const [committing, setCommitting] = useState(false)
   const busy = disabled || committing
   const commit = async () => {
+    if (uncommittedTruncated && !window.confirm(`${TRUNCATED_NOTE} Commit anyway?`)) return
     setCommitting(true)
     try {
       if (await onCommitUncommitted(commitMessage)) setCommitMessage('')
@@ -94,7 +118,11 @@ function ChangesAction({ session, committable, disabled, onPush, onDiscardUncomm
         </form>
       )}
       {canPush(session) && (
-        <button className={committable.length > 0 ? SECONDARY_BUTTON_CLASS : `${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy} onClick={onPush}>
+        <button
+          className={committable.length > 0 ? SECONDARY_BUTTON_CLASS : `${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
+          disabled={busy}
+          onClick={() => (!commitsTruncated || window.confirm(`${TRUNCATED_NOTE} Push anyway?`)) && onPush()}
+        >
           Push to GitHub
         </button>
       )}
@@ -138,6 +166,8 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
             <ChangesAction
               session={session}
               committable={committable}
+              uncommittedTruncated={pending.truncated}
+              commitsTruncated={committed.truncated}
               disabled={disabled}
               onPush={onPush}
               onDiscardUncommitted={onDiscardUncommitted}
@@ -146,13 +176,13 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
           </div>
           {committable.length > 0 && (
             <div className="space-y-1">
-              <p className="text-xs text-ink-400">Not committed yet, so Push leaves them out. Commit them, or discard them.</p>
+              <p className="text-xs text-ink-400">Not committed yet, so Push leaves them out, and can't merge new commits from GitHub until you commit or discard them.</p>
               <ul className="space-y-0.5 font-mono text-xs text-amber-200">
                 {committable.map((path) => (
                   <li key={path}>{path}</li>
                 ))}
               </ul>
-              {pending.error ? <p className="text-sm text-rose-300">Couldn't read the uncommitted changes: {pending.error}</p> : <DiffView diff={pending.diff} />}
+              <DiffSection loaded={pending} what="uncommitted changes" />
             </div>
           )}
           {commits.length > 0 && (
@@ -165,7 +195,7 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
                   </li>
                 ))}
               </ul>
-              {committed.error ? <p className="text-sm text-rose-300">Couldn't read the diff: {committed.error}</p> : <DiffView diff={committed.diff} />}
+              <DiffSection loaded={committed} what="diff" />
             </>
           )}
         </div>

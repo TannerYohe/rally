@@ -3,6 +3,7 @@ import type {
   ActionRequest,
   AppInfo,
   AuthorSession,
+  DiffResult,
   FeedbackItem,
   Config,
   Health,
@@ -50,8 +51,8 @@ export interface RallyApi {
   startSelfReview(pr: PrRef): Promise<AuthorSession>
   sendAuthorFeedback(sessionId: string, message: string): Promise<void>
   cancelAuthorTurn(sessionId: string): Promise<void>
-  getAuthorDiff(sessionId: string): Promise<string>
-  getUncommittedDiff(sessionId: string): Promise<string>
+  getAuthorDiff(sessionId: string): Promise<DiffResult>
+  getUncommittedDiff(sessionId: string): Promise<DiffResult>
   pushAuthorCommits(sessionId: string): Promise<void>
   resolveMergeConflicts(sessionId: string): Promise<void>
   abortMerge(sessionId: string): Promise<void>

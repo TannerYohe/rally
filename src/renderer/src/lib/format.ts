@@ -1,3 +1,5 @@
+export { plural } from '@shared/format'
+
 const UNITS: [number, string][] = [
   [365 * 24 * 60, 'y'],
   [30 * 24 * 60, 'mo'],
@@ -11,11 +13,6 @@ export function age(iso: string, now = Date.now()): string {
   const minutes = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000))
   const [size, unit] = UNITS.find(([size]) => minutes >= size) ?? [1, 'm']
   return `${Math.floor(minutes / size)}${unit}`
-}
-
-/** Returns the count followed by the noun, in its plural form unless the count is one. */
-export function plural(count: number, noun: string, pluralNoun = `${noun}s`): string {
-  return `${count} ${count === 1 ? noun : pluralNoun}`
 }
 
 export function usd(amount: number): string {

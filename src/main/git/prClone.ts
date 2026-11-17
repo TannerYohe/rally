@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import type { CloneInfo, LocalCommit, PushRecord } from '@shared/types'
+import { plural } from '@shared/format'
+import type { CloneInfo, DiffResult, LocalCommit, PushRecord } from '@shared/types'
 
 const run = promisify(execFile)
 
@@ -27,7 +28,7 @@ export class MergeConflictError extends Error {
 
 export class UncommittedChangesError extends Error {
   constructor(readonly files: string[]) {
-    super(`Commit or discard the ${files.length} uncommitted change(s) in the Changes tab before Rally merges the branch's new commits from GitHub.`)
+    super(`The branch has new commits on GitHub, and Rally can't merge them while ${plural(files.length, 'uncommitted file')} sit in the clone. Commit or discard them in the Changes tab, then push again.`)
     this.name = 'UncommittedChangesError'
   }
 }
@@ -144,19 +145,23 @@ export async function uncommittedPaths(clone: CloneInfo): Promise<string[]> {
   return paths
 }
 
-/** Pins the a/ and b/ prefixes the diff view parses and shows file contents rather than a textconv or external driver's rendering. */
-const DIFF_DISPLAY_FLAGS = ['--src-prefix=a/', '--dst-prefix=b/', '--no-textconv', '--no-ext-diff']
+/** Shows every file's text with plain a/ and b/ headers, whatever the clone's diff config, attributes, or drivers say. */
+const DIFF_DISPLAY_FLAGS = ['--no-color', '--text', '--src-prefix=a/', '--dst-prefix=b/', '--no-textconv', '--no-ext-diff']
 
-const truncateDiff = (diff: string) => (diff.length > MAX_DIFF_CHARS ? `${diff.slice(0, MAX_DIFF_CHARS)}\n… diff truncated` : diff)
+/** Keeps git from quoting non-ASCII paths in diff headers. */
+const DIFF_DISPLAY_ENV = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.quotePath', GIT_CONFIG_VALUE_0: 'false' }
+
+const truncateDiff = (diff: string): DiffResult =>
+  diff.length > MAX_DIFF_CHARS ? { diff: diff.slice(0, MAX_DIFF_CHARS), truncated: true } : { diff, truncated: false }
 
 /** Returns the unified diff of the clone's unpushed commits, cut off at MAX_DIFF_CHARS. */
-export async function cloneDiff(clone: CloneInfo): Promise<string> {
-  return truncateDiff(await git(clone.path, ['diff', ...DIFF_DISPLAY_FLAGS, `${syncedRef(clone)}...HEAD`]))
+export async function cloneDiff(clone: CloneInfo): Promise<DiffResult> {
+  return truncateDiff(await git(clone.path, ['diff', ...DIFF_DISPLAY_FLAGS, `${syncedRef(clone)}...HEAD`], LOCAL_TIMEOUT_MS, DIFF_DISPLAY_ENV))
 }
 
 /** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index and cut off at MAX_DIFF_CHARS. */
-export async function uncommittedDiff(clone: CloneInfo): Promise<string> {
-  const env = { GIT_INDEX_FILE: join(clone.path, '.git', `rally-uncommitted-${randomUUID()}.index`) }
+export async function uncommittedDiff(clone: CloneInfo): Promise<DiffResult> {
+  const env = { ...DIFF_DISPLAY_ENV, GIT_INDEX_FILE: join(clone.path, '.git', `rally-uncommitted-${randomUUID()}.index`) }
   try {
     await git(clone.path, ['read-tree', 'HEAD'], LOCAL_TIMEOUT_MS, env)
     await git(clone.path, ['add', '-A', '--', '.'], LOCAL_TIMEOUT_MS, env)

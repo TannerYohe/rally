@@ -1,7 +1,27 @@
-import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply } from './types'
+import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, SessionCore } from './types'
 
 /** Where a fix reply names its commit; Rally replaces it with the short sha once it commits. */
 export const COMMIT_PLACEHOLDER = '{commit}'
+
+export const shortSha = (oid: string) => oid.slice(0, 7)
+
+/** Returns a new author session with nothing cloned, answered, or queued yet. */
+export function newAuthorSession(core: SessionCore): AuthorSession {
+  return {
+    ...core,
+    clone: null,
+    items: [],
+    responses: {},
+    posted: {},
+    selfReview: null,
+    commits: [],
+    uncommitted: [],
+    lastPush: null,
+    mergeConflicts: [],
+    reviewersToReRequest: [],
+    lastReRequest: null,
+  }
+}
 
 export const PUSH_BEFORE_POSTING_ERROR = 'Push your commits before posting replies, so the replies point at code reviewers can see.'
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
+import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import {
   prKey,
   type ActionRequest,
@@ -96,13 +96,11 @@ function receivedResponse(published: PublishedResponse, previous: ItemResponse |
   return { ...published, pendingCommit, commits: previous?.commits ?? [], commitError: null, at }
 }
 
-const fillCommit = (reply: string, oid: string) => reply.replaceAll(COMMIT_PLACEHOLDER, oid.slice(0, 7))
+const fillCommit = (reply: string, oid: string) => reply.replaceAll(COMMIT_PLACEHOLDER, shortSha(oid))
 
 const knownItemIds = (session: AuthorSession) => new Set([...session.items, ...(session.selfReview?.findings ?? [])].map((i) => i.id))
 
 class AuthorSessions extends ClaudeSessions<AuthorSession> {
-  private publishing = new Set<string>()
-
   constructor() {
     super(authorSessionsDir, restoreAuthorSession)
   }
@@ -115,8 +113,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   async runActions(pr: PrRef, requests: ActionRequest[], note: string): Promise<AuthorSession> {
     if (requests.length === 0) throw new Error('Pick an action for at least one comment.')
     const session = this.ensure(pr)
-    this.assertIdle(session.id)
-    if (session.mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
+    this.assertCanStartTurn(session.id)
     this.publishing.add(session.id)
     try {
       const items = [...(await fetchFeedbackItems(pr)), ...(session.selfReview?.findings ?? [])]
@@ -137,14 +134,9 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   async selfReview(pr: PrRef): Promise<AuthorSession> {
     const session = this.ensure(pr)
-    this.assertIdle(session.id)
+    this.assertCanStartTurn(session.id)
     void this.runTurn(session.id, reviewPrompt(pr, configFile.get().reviewSkill), 'self_review')
     return this.byId(session.id)
-  }
-
-  async feedback(sessionId: string, message: string): Promise<void> {
-    this.assertIdle(sessionId)
-    void this.runTurn(sessionId, message, 'refine')
   }
 
   async diff(sessionId: string): Promise<string> {
@@ -155,7 +147,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   async push(sessionId: string): Promise<void> {
     this.assertIdle(sessionId)
     const { clone, pr } = this.byId(sessionId)
-    if (!clone) throw new Error('Claude has not made any commits yet.')
+    if (!clone) throw new Error('There are no commits to push.')
     if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
     this.publishing.add(sessionId)
     this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
@@ -334,38 +326,13 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   private ensure(pr: PrRef): AuthorSession {
-    const key = prKey(pr.owner, pr.repo, pr.number)
-    return (
-      this.getByPr(key) ??
-      this.add({
-        id: randomUUID(),
-        pr,
-        prKey: key,
-        sdkSessionId: null,
-        status: 'awaiting_feedback',
-        error: null,
-        timeline: [],
-        createdAt: now(),
-        updatedAt: now(),
-        clone: null,
-        items: [],
-        responses: {},
-        posted: {},
-        selfReview: null,
-        commits: [],
-        uncommitted: [],
-        lastPush: null,
-        mergeConflicts: [],
-        reviewersToReRequest: [],
-        lastReRequest: null,
-      })
-    )
+    return this.getByPr(prKey(pr.owner, pr.repo, pr.number)) ?? this.add(newAuthorSession(this.newSessionCore(pr, 'awaiting_feedback')))
   }
 
-  private assertIdle(sessionId: string): void {
-    this.byId(sessionId)
-    if (this.isTurnRunning(sessionId)) throw new Error('Claude is already working on this PR')
-    if (this.publishing.has(sessionId)) throw new Error('Rally is busy with this PR. Try again when it finishes.')
+  /** Allows a new turn only while no merge is open; the merge's own resolution turn starts through resolveConflicts. */
+  protected assertCanStartTurn(sessionId: string): void {
+    super.assertCanStartTurn(sessionId)
+    if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
   }
 
   private async prepareClone(sessionId: string): Promise<CloneInfo> {

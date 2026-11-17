@@ -153,6 +153,10 @@ mocks.stored = [
   stored(11, { reviewersToReRequest: ['erin', 'frank'] }),
   stored(14, { clone: CLONE, mergeConflicts: ['a.ts'], items: [thread('T1')] }),
   stored(15, { clone: CLONE, items: [thread('T1')] }),
+  stored(40),
+  stored(41, { responses: { T1: response('T1', 'Unposted') }, items: [thread('T1')] }),
+  stored(42, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(43, { clone: CLONE, mergeConflicts: ['a.ts'] }),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
@@ -433,5 +437,16 @@ describe('self-review', () => {
 
   it('maps draft comments to findings', () => {
     expect(findingsFromDrafts(drafts, 'now')[0]).toMatchObject({ path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
+  })
+})
+
+// Runs last: pruning removes every session the other tests use.
+describe('pruneUnlisted', () => {
+  it('removes idle sessions for PRs that left the list unless they hold unpushed commits or an open merge', () => {
+    authorSessions.pruneUnlisted(new Set(['acme/api#40']))
+    expect(authorSessions.getByPr('acme/api#40')).not.toBeNull()
+    expect(authorSessions.getByPr('acme/api#41')).toBeNull()
+    expect(authorSessions.getByPr('acme/api#42')).not.toBeNull()
+    expect(authorSessions.getByPr('acme/api#43')).not.toBeNull()
   })
 })

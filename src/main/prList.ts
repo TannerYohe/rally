@@ -122,6 +122,7 @@ class PrList extends EventEmitter {
       this.source.pruneOnRefresh?.(prs)
       this.update({ prs: this.decorate(prs, true), viewer, refreshedAt, refreshing: false })
       this.files.cache.set({ viewer, refreshedAt, prs: this.state.prs })
+      this.emit('refreshed', new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number))))
       void this.fillSummaries()
     } catch (error) {
       this.update({ refreshing: false, error: errorMessage(error) })

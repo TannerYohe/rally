@@ -255,6 +255,15 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }, true)
   }
 
+  /** Removes idle sessions, and their clones, for PRs that left the list, keeping any with unpushed commits or an open merge. */
+  pruneUnlisted(listed: Set<string>): void {
+    for (const session of [...this.sessions.values()]) {
+      if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
+      if (session.commits.length > 0 || session.mergeConflicts.length > 0) continue
+      this.remove(session)
+    }
+  }
+
   discard(sessionId: string): void {
     const session = this.byId(sessionId)
     if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish pushing or posting before discarding this session')

@@ -228,7 +228,7 @@ function DescriptionUpdate({ draft, edit, disabled, canPush, pushesWithCommits, 
             disabled={disabled}
             onChange={(event) => onEdit({ title: event.target.value, body: next.body })}
           />
-          <BodyTextarea value={next.body} disabled={disabled} placeholder="PR description" onChange={(body) => onEdit({ title: next.title, body })} />
+          <BodyTextarea value={next.body} disabled={disabled} placeholder="PR description" maxRows={30} onChange={(body) => onEdit({ title: next.title, body })} />
         </div>
       ) : (
         <DescriptionDiff base={draft.base} next={next} />

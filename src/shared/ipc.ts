@@ -51,6 +51,7 @@ export interface RallyApi {
   sendAuthorFeedback(sessionId: string, message: string): Promise<void>
   cancelAuthorTurn(sessionId: string): Promise<void>
   getAuthorDiff(sessionId: string): Promise<string>
+  getUncommittedDiff(sessionId: string): Promise<string>
   pushAuthorCommits(sessionId: string): Promise<void>
   resolveMergeConflicts(sessionId: string): Promise<void>
   abortMerge(sessionId: string): Promise<void>
@@ -97,6 +98,7 @@ export const IPC = {
   sendAuthorFeedback: 'author:feedback',
   cancelAuthorTurn: 'author:cancel',
   getAuthorDiff: 'author:diff',
+  getUncommittedDiff: 'author:uncommitted-diff',
   pushAuthorCommits: 'author:push',
   resolveMergeConflicts: 'author:resolve-conflicts',
   abortMerge: 'author:abort-merge',

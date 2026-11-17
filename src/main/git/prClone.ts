@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -50,13 +51,13 @@ interface GitFailure {
   stderr?: string
 }
 
-async function git(cwd: string, args: string[], timeoutMs = LOCAL_TIMEOUT_MS): Promise<string> {
+async function git(cwd: string, args: string[], timeoutMs = LOCAL_TIMEOUT_MS, env: Record<string, string> = {}): Promise<string> {
   try {
     const { stdout } = await run('git', [...GH_CREDENTIALS, ...args], {
       cwd,
       maxBuffer: MAX_OUTPUT_BYTES,
       timeout: timeoutMs,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env },
     })
     return stdout
   } catch (error) {
@@ -132,18 +133,34 @@ export async function discardUncommitted(clone: CloneInfo): Promise<void> {
   await git(clone.path, ['clean', '-fd'])
 }
 
+/** Lists every changed, new, and deleted file in the clone that no commit holds, one entry per file even inside new directories. */
 export async function uncommittedPaths(clone: CloneInfo): Promise<string[]> {
-  const out = await git(clone.path, ['status', '--porcelain'])
-  return out
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => line.slice(3))
+  const entries = (await git(clone.path, ['status', '--porcelain', '-z', '--untracked-files=all'])).split('\0').filter(Boolean)
+  const paths: string[] = []
+  for (let i = 0; i < entries.length; i++) {
+    paths.push(entries[i].slice(3))
+    if (entries[i][0] === 'R' || entries[i][0] === 'C') i++
+  }
+  return paths
 }
+
+const truncateDiff = (diff: string) => (diff.length > MAX_DIFF_CHARS ? `${diff.slice(0, MAX_DIFF_CHARS)}\n… diff truncated` : diff)
 
 /** Returns the unified diff of the clone's unpushed commits, cut off at MAX_DIFF_CHARS. */
 export async function cloneDiff(clone: CloneInfo): Promise<string> {
-  const diff = await git(clone.path, ['diff', `${syncedRef(clone)}...HEAD`])
-  return diff.length > MAX_DIFF_CHARS ? `${diff.slice(0, MAX_DIFF_CHARS)}\n… diff truncated` : diff
+  return truncateDiff(await git(clone.path, ['diff', `${syncedRef(clone)}...HEAD`]))
+}
+
+/** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index and cut off at MAX_DIFF_CHARS. */
+export async function uncommittedDiff(clone: CloneInfo): Promise<string> {
+  const env = { GIT_INDEX_FILE: join(clone.path, '.git', `rally-uncommitted-${randomUUID()}.index`) }
+  try {
+    await git(clone.path, ['read-tree', 'HEAD'], LOCAL_TIMEOUT_MS, env)
+    await git(clone.path, ['add', '-A', '--', '.'], LOCAL_TIMEOUT_MS, env)
+    return truncateDiff(await git(clone.path, ['diff', '--cached', 'HEAD'], LOCAL_TIMEOUT_MS, env))
+  } finally {
+    await rm(env.GIT_INDEX_FILE, { force: true })
+  }
 }
 
 async function isAncestor(clone: CloneInfo, ancestor: string, descendant = 'HEAD'): Promise<boolean> {

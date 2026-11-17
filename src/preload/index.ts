@@ -33,6 +33,7 @@ const api: RallyApi = {
   sendAuthorFeedback: (id, message) => ipcRenderer.invoke(IPC.sendAuthorFeedback, id, message),
   cancelAuthorTurn: (id) => ipcRenderer.invoke(IPC.cancelAuthorTurn, id),
   getAuthorDiff: (id) => ipcRenderer.invoke(IPC.getAuthorDiff, id),
+  getUncommittedDiff: (id) => ipcRenderer.invoke(IPC.getUncommittedDiff, id),
   pushAuthorCommits: (id) => ipcRenderer.invoke(IPC.pushAuthorCommits, id),
   resolveMergeConflicts: (id) => ipcRenderer.invoke(IPC.resolveMergeConflicts, id),
   abortMerge: (id) => ipcRenderer.invoke(IPC.abortMerge, id),

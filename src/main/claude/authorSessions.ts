@@ -30,6 +30,7 @@ import {
   integrateRemote,
   pushClone,
   syncClone,
+  uncommittedDiff,
   uncommittedPaths,
 } from '../git/prClone'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
@@ -169,6 +170,11 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     return clone ? cloneDiff(clone) : ''
   }
 
+  async uncommittedDiff(sessionId: string): Promise<string> {
+    const { clone } = this.byId(sessionId)
+    return clone ? uncommittedDiff(clone) : ''
+  }
+
   async push(sessionId: string): Promise<void> {
     this.assertIdle(sessionId)
     const { clone, pr } = this.byId(sessionId)
@@ -222,13 +228,17 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /** Commits every edit in the clone that no fix committed, such as changes Claude made for a free-form message. */
   async commitUncommitted(sessionId: string, message: string): Promise<void> {
     this.assertIdle(sessionId)
-    const { clone, mergeConflicts } = this.byId(sessionId)
+    const { clone, mergeConflicts, pr } = this.byId(sessionId)
     if (!clone) throw new Error('There is nothing to commit.')
     if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
     if (!message.trim()) throw new Error('Write a commit message first.')
     await this.whilePublishing(sessionId, async () => {
       try {
-        if (!(await commitAll(clone, message.trim()))) throw new Error('The clone has no changes to commit.')
+        const oid = await commitAll(clone, message.trim()).catch((error: unknown) => {
+          console.error('Committing uncommitted changes failed', { pr: pr.url, sessionId, error })
+          throw error
+        })
+        if (!oid) throw new Error('The clone has no changes to commit.')
       } finally {
         await this.refreshClone(sessionId)
       }
@@ -315,7 +325,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   /**
    * Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a running turn,
-   * unpushed commits, unposted replies, an open merge, or queued re-requests. A failed or cancelled last turn doesn't count.
+   * uncommitted edits, unpushed commits, unposted replies, an open merge, or queued re-requests. A failed or cancelled last turn doesn't count.
    */
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {

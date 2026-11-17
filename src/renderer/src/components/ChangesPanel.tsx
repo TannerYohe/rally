@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { shortSha } from '@shared/authorSession'
+import { canPush, cloneChangeCount, shortSha } from '@shared/authorSession'
 import type { AuthorSession } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { age, fullTime } from '../lib/format'
+import { NO_CHANGES_MESSAGE } from '../lib/authorView'
+import { age, fullTime, plural } from '../lib/format'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 import { DiffView } from './DiffView'
 
@@ -18,31 +19,30 @@ interface Props {
   onCommitUncommitted(message: string): Promise<boolean>
 }
 
-function useCloneDiff(session: AuthorSession): { diff: string; error: string | null } {
+function useDiff(sessionId: string, key: string, load: (sessionId: string) => Promise<string>): { diff: string; error: string | null } {
   const [state, setState] = useState<{ diff: string; error: string | null }>({ diff: '', error: null })
-  const commitKey = session.commits.map((c) => c.oid).join(',')
   useEffect(() => {
-    if (!commitKey) {
+    if (!key) {
       setState({ diff: '', error: null })
       return
     }
     let current = true
-    window.rally.getAuthorDiff(session.id).then(
+    load(sessionId).then(
       (diff) => current && setState({ diff, error: null }),
       (error) => current && setState({ diff: '', error: errorMessage(error) }),
     )
     return () => {
       current = false
     }
-  }, [session.id, commitKey])
+  }, [sessionId, key, load])
   return state
 }
 
 /** Describes what the clone holds that GitHub doesn't: uncommitted files, unpushed commits, or both. */
 function changesSummary({ commits, uncommitted, clone }: AuthorSession): ReactNode {
   const parts = [
-    uncommitted.length > 0 && `${uncommitted.length} uncommitted file(s)`,
-    commits.length > 0 && `${commits.length} unpushed commit(s)`,
+    uncommitted.length > 0 && plural(uncommitted.length, 'uncommitted file'),
+    commits.length > 0 && plural(commits.length, 'unpushed commit'),
   ].filter(Boolean)
   return (
     <>
@@ -51,13 +51,55 @@ function changesSummary({ commits, uncommitted, clone }: AuthorSession): ReactNo
   )
 }
 
-export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge, onDiscardUncommitted, onCommitUncommitted }: Props) {
-  const { diff, error } = useCloneDiff(session)
-  const { commits, uncommitted, lastPush, mergeConflicts, clone } = session
+type ChangesActionProps = Pick<Props, 'session' | 'disabled' | 'onPush' | 'onDiscardUncommitted' | 'onCommitUncommitted'>
+
+/** Shows the Changes tab's main action: Push when the commits can go, the commit form while files are uncommitted, otherwise nothing. */
+function ChangesAction({ session, disabled, onPush, onDiscardUncommitted, onCommitUncommitted }: ChangesActionProps) {
   const [commitMessage, setCommitMessage] = useState('')
+  if (canPush(session)) {
+    return (
+      <button className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`} disabled={disabled} onClick={onPush}>
+        Push to GitHub
+      </button>
+    )
+  }
+  if (session.mergeConflicts.length > 0 || session.uncommitted.length === 0) return null
   const commit = async () => {
     if (await onCommitUncommitted(commitMessage)) setCommitMessage('')
   }
+  return (
+    <form
+      className="ml-auto flex min-w-96 flex-1 justify-end gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void commit()
+      }}
+    >
+      <input
+        className="min-w-48 flex-1 rounded-md border border-ink-800 bg-ink-950 px-2 py-1 text-sm text-ink-100"
+        placeholder="Commit message"
+        value={commitMessage}
+        disabled={disabled}
+        onChange={(event) => setCommitMessage(event.target.value)}
+      />
+      <button type="button" className={SECONDARY_BUTTON_CLASS} disabled={disabled} onClick={onDiscardUncommitted}>
+        Discard
+      </button>
+      <button type="submit" className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={disabled || !commitMessage.trim()}>
+        Commit {plural(session.uncommitted.length, 'file')}
+      </button>
+    </form>
+  )
+}
+
+const loadCommitsDiff = (sessionId: string) => window.rally.getAuthorDiff(sessionId)
+const loadUncommittedDiff = (sessionId: string) => window.rally.getUncommittedDiff(sessionId)
+
+export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge, onDiscardUncommitted, onCommitUncommitted }: Props) {
+  const { commits, uncommitted, lastPush, mergeConflicts } = session
+  const showUncommitted = uncommitted.length > 0 && mergeConflicts.length === 0
+  const committed = useDiff(session.id, commits.map((c) => c.oid).join(','), loadCommitsDiff)
+  const pending = useDiff(session.id, showUncommitted ? `${session.status}:${uncommitted.join('\n')}` : '', loadUncommittedDiff)
 
   return (
     <div className="space-y-4">
@@ -77,39 +119,19 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
           </div>
         </div>
       )}
-      {commits.length > 0 || uncommitted.length > 0 ? (
+      {cloneChangeCount(session) > 0 ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-sm font-semibold">{changesSummary(session)}</h3>
-            {mergeConflicts.length > 0 ? null : uncommitted.length > 0 ? (
-              <form
-                className="ml-auto flex min-w-96 flex-1 justify-end gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void commit()
-                }}
-              >
-                <input
-                  className="min-w-48 flex-1 rounded-md border border-ink-800 bg-ink-950 px-2 py-1 text-sm text-ink-100"
-                  placeholder="Commit message"
-                  value={commitMessage}
-                  disabled={disabled}
-                  onChange={(event) => setCommitMessage(event.target.value)}
-                />
-                <button type="button" className={SECONDARY_BUTTON_CLASS} disabled={disabled} onClick={onDiscardUncommitted}>
-                  Discard
-                </button>
-                <button type="submit" className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={disabled || !commitMessage.trim()}>
-                  Commit {uncommitted.length} file{uncommitted.length === 1 ? '' : 's'}
-                </button>
-              </form>
-            ) : (
-              <button className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`} disabled={disabled} onClick={onPush}>
-                Push to GitHub
-              </button>
-            )}
+            <ChangesAction
+              session={session}
+              disabled={disabled}
+              onPush={onPush}
+              onDiscardUncommitted={onDiscardUncommitted}
+              onCommitUncommitted={onCommitUncommitted}
+            />
           </div>
-          {uncommitted.length > 0 && mergeConflicts.length === 0 && (
+          {showUncommitted && (
             <div className="space-y-1">
               <p className="text-xs text-ink-400">Not committed yet, so not pushed. Commit them to push, or discard them.</p>
               <ul className="space-y-0.5 font-mono text-xs text-amber-200">
@@ -117,6 +139,7 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
                   <li key={path}>{path}</li>
                 ))}
               </ul>
+              {pending.error ? <p className="text-sm text-rose-300">Couldn't read the uncommitted changes: {pending.error}</p> : <DiffView diff={pending.diff} />}
             </div>
           )}
           {commits.length > 0 && (
@@ -129,12 +152,12 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
                   </li>
                 ))}
               </ul>
-              {error ? <p className="text-sm text-rose-300">Couldn't read the diff: {error}</p> : <DiffView diff={diff} />}
+              {committed.error ? <p className="text-sm text-rose-300">Couldn't read the diff: {committed.error}</p> : <DiffView diff={committed.diff} />}
             </>
           )}
         </div>
       ) : (
-        <p className="py-6 text-center text-sm text-ink-500">No unpushed commits. Pick Fix on a comment to have Claude change the code.</p>
+        <p className="py-6 text-center text-sm text-ink-500">{NO_CHANGES_MESSAGE}</p>
       )}
 
       {lastPush && (

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -18,6 +18,7 @@ import {
   MergeConflictError,
   pushClone,
   syncClone,
+  uncommittedDiff,
   uncommittedPaths,
   UncommittedChangesError,
 } from './prClone'
@@ -162,6 +163,21 @@ describe('prClone', () => {
     expect(git(clone.path, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['A\tnew.txt', 'D\ta.txt'])
     expect(await uncommittedPaths(clone)).toEqual([])
     expect(await commitAll(clone, 'Nothing new')).toBeNull()
+  })
+
+  it('lists and diffs each uncommitted file, including files in a new directory, without staging them', async () => {
+    const clone = await cloneBranch(join(root, 'session17'), source)
+    mkdirSync(join(clone.path, 'scratch'))
+    writeFileSync(join(clone.path, 'scratch', 'one.txt'), 'one\n')
+    writeFileSync(join(clone.path, 'scratch', 'two.txt'), 'two\n')
+    rmSync(join(clone.path, 'a.txt'))
+
+    expect((await uncommittedPaths(clone)).sort()).toEqual(['a.txt', 'scratch/one.txt', 'scratch/two.txt'])
+    const diff = await uncommittedDiff(clone)
+    expect(diff).toContain('+one')
+    expect(diff).toContain('+two')
+    expect(diff).toContain('deleted file mode')
+    expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('')
   })
 
   it('fast-forwards a clone with no commits of its own on sync', async () => {

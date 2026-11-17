@@ -61,7 +61,8 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const { open: openRows, waiting: waitingRows } = splitWaitingRows(rows)
   const requests = Object.entries(picks).map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
-  const postBlocked = session && session.commits.length > 0 ? PUSH_BEFORE_POSTING_ERROR : null
+  const unpushed = session?.commits.length ?? 0
+  const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null
 
   const runActions = () =>
     run(async () => {
@@ -78,6 +79,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const primary = () => (requests.length > 0 ? runActions() : sendMessage(message))
   const canRunPrimary = !busy && (requests.length > 0 || (session !== null && Boolean(message.trim())))
   const selfReview = () => run(async () => onSession(await window.rally.startSelfReview(prRef)))
+  const push = () => session && run(() => window.rally.pushAuthorCommits(session.id))
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${posts.length} repl${posts.length === 1 ? 'y' : 'ies'} to GitHub as you?`)) return
     void run(async () => {
@@ -205,7 +207,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
           <ChangesPanel
             session={session}
             disabled={busy}
-            onPush={() => run(() => window.rally.pushAuthorCommits(session.id))}
+            onPush={push}
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
             onDiscardUncommitted={() =>
@@ -248,7 +250,17 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
               <input type="checkbox" checked={reRequestReviews} disabled={busy} onChange={(e) => setReRequestReviews(e.target.checked)} />
               Re-request review from people I reply to
             </label>
-            {postBlocked && <span className="text-xs text-amber-300">{postBlocked}</span>}
+            {postBlocked && (
+              <>
+                <span className="text-xs text-amber-300">{postBlocked}</span>
+                <button className={SECONDARY_BUTTON_CLASS} onClick={() => setChosenTab('changes')}>
+                  Review changes
+                </button>
+                <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
+                  Push {unpushed} commit{unpushed === 1 ? '' : 's'}
+                </button>
+              </>
+            )}
             <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy || postBlocked !== null} onClick={postReplies}>
               Post {posts.length} repl{posts.length === 1 ? 'y' : 'ies'}
             </button>

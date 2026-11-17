@@ -3,12 +3,10 @@ import type { CloneSource } from '../git/prClone'
 import { github, pullParams, timeoutRequest } from './client'
 import { resolveThread, sameLogin } from './threads'
 
-const REPLIED_KINDS: Record<'review' | 'comment', string> = { review: 'review', comment: 'comment' }
-
 /** Returns a PR comment body that answers a review body or PR comment and links it, which marks it acknowledged. */
 export function conversationReplyBody(item: Pick<FeedbackItem, 'author' | 'url'> & { kind: 'review' | 'comment' }, body: string): string {
   const reviewer = item.author ? `@${item.author}'s` : 'the'
-  const target = item.url ? `[${REPLIED_KINDS[item.kind]}](${item.url})` : REPLIED_KINDS[item.kind]
+  const target = item.url ? `[${item.kind}](${item.url})` : item.kind
   return `In reply to ${reviewer} ${target}:\n\n${body}`
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
+import { canPush, cloneChangeCount, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
@@ -9,8 +9,8 @@ import { PrHeader } from '../components/PrHeader'
 import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
-import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
-import { age, fullTime } from '../lib/format'
+import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
+import { age, fullTime, plural } from '../lib/format'
 import { useActionRunner, useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
@@ -63,6 +63,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
   const unpushed = session?.commits.length ?? 0
   const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null
+  const changeCount = session ? cloneChangeCount(session) : 0
 
   const runActions = () =>
     run(async () => {
@@ -125,7 +126,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const badges: Record<AuthorTab, ReactNode> = {
     feedback: openRows.length > 0 && <TabCount count={openRows.length} />,
     activity: busy && <BusyDot className="h-2 w-2 bg-primary-400" />,
-    changes: session && session.commits.length + session.uncommitted.length > 0 && <TabCount count={session.commits.length + session.uncommitted.length} />,
+    changes: changeCount > 0 && <TabCount count={changeCount} />,
     report: session?.selfReview && (
       <span className="max-w-48 truncate text-xs font-normal text-ink-400" title={session.selfReview.verdict}>
         {session.selfReview.verdict}
@@ -135,7 +136,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const empty: Record<AuthorTab, boolean> = {
     feedback: rows.length === 0,
     activity: !session || session.timeline.length === 0,
-    changes: !session || (session.commits.length === 0 && session.uncommitted.length === 0 && !session.lastPush),
+    changes: !session || (changeCount === 0 && !session.lastPush),
     report: !session?.selfReview,
   }
 
@@ -216,7 +217,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             onCommitUncommitted={(message) => run(() => window.rally.commitUncommitted(session.id, message))}
           />
         ) : (
-          <EmptyTab>No changes yet. Pick Fix on a comment to have Claude change the code.</EmptyTab>
+          <EmptyTab>{NO_CHANGES_MESSAGE}</EmptyTab>
         )}
       </TabPanel>
 
@@ -257,9 +258,11 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
                 <button className={SECONDARY_BUTTON_CLASS} onClick={() => setChosenTab('changes')}>
                   Review changes
                 </button>
-                <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
-                  Push {unpushed} commit{unpushed === 1 ? '' : 's'}
-                </button>
+                {session && canPush(session) && (
+                  <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
+                    Push {plural(unpushed, 'commit')}
+                  </button>
+                )}
               </>
             )}
             <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy || postBlocked !== null} onClick={postReplies}>

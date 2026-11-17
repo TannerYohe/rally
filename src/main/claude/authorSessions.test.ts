@@ -233,7 +233,7 @@ describe('runActions', () => {
     expect(mocks.commitFiles).toHaveBeenCalledWith(CLONE, ['a.ts'], 'Rename the helper')
     expect(session(20).responses.T1).toMatchObject({ pendingCommit: false, commits: ['def4567890'], reply: 'Renamed in def4567.', commitError: null })
     expect(session(20).commits).toEqual([{ oid: 'def4567890', subject: 'Rename the helper' }])
-    expect(authorSessions.sessionState('acme/api#20')).toEqual({ status: 'awaiting_feedback', active: true })
+    expect(authorSessions.sessionState('acme/api#20')).toEqual({ status: 'awaiting_feedback', active: true, openFindings: 0 })
   })
 
   it('refuses items that are no longer open on GitHub without starting a turn', async () => {

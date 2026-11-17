@@ -69,7 +69,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
 
   sessionState(key: string): SessionState | null {
     const session = this.sessions.get(key)
-    return session ? { status: session.status, active: session.status !== 'submitted' } : null
+    return session ? { status: session.status, active: session.status !== 'submitted', openFindings: 0 } : null
   }
 
   async start(pr: PrRef): Promise<ReviewSession> {

@@ -88,6 +88,8 @@ export interface Pr {
   feedback: PrFeedback | null
   phase: Phase
   reviewStatus: SessionStatus | null
+  /** Self-review findings in Rally that wait on a terminal step; always 0 for PRs you review. */
+  openFindings: number
   summary: string | null
   summaryError: string | null
   hidden: PrHide | null

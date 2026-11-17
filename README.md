@@ -114,7 +114,7 @@ Settings → Reviews picks the review skill, and the model and effort for the re
 
 ### My PRs
 
-The **My PRs** tab in the header lists your own open PRs, independent of the author and repo lists in Settings. It has its own filters, sort, hides, and summaries. Each card shows how many comments are unanswered, who requested changes, and who approved, instead of the author.
+The **My PRs** tab in the header lists your own open PRs, independent of the author and repo lists in Settings. It has its own filters, sort, hides, and summaries. Each card shows how many comments are unanswered, how many self-review findings are open, who requested changes, and who approved, instead of the author.
 
 Reviewers resolve their own threads, so a comment counts as answered once you acknowledge it:
 
@@ -125,7 +125,7 @@ Reviewers resolve their own threads, so a comment counts as answered once you ac
 | Phase | Rule |
 |---|---|
 | In progress | Your Rally session for the PR has a running turn, an error, unpushed commits, or unposted replies. |
-| Needs response | A review thread, PR comment, or review body isn't acknowledged. This outranks Approved. |
+| Needs response | A review thread, PR comment, or review body isn't acknowledged, or a self-review finding is still open. This outranks Approved. |
 | Awaiting reviews | Anything else that isn't approved, including a change request whose comments you've all acknowledged. |
 | Approved | GitHub's review decision is Approved, or, in a repo that requires no reviews, a reviewer approved. |
 

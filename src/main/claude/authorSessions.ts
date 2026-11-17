@@ -138,7 +138,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   sessionState(key: string): SessionState | null {
     const session = this.getByPr(key)
-    return session ? { status: session.status, active: hasPendingWork(session) } : null
+    return session ? { status: session.status, active: hasPendingWork(session), openFindings: session.selfReview?.findings.length ?? 0 } : null
   }
 
   async runActions(pr: PrRef, requests: ActionRequest[], note: string): Promise<AuthorSession> {

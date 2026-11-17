@@ -193,7 +193,7 @@ describe('prList', () => {
     await prList.refresh()
     prList.hide('pr1', 'indefinite')
 
-    prList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: true }))
+    prList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: true, openFindings: 0 }))
     expect(prList.get().prs[0].hidden).toBeNull()
 
     prList.setSessionLookup(() => null)
@@ -254,9 +254,20 @@ describe('prList', () => {
     expect(mocks.searchPrs).toHaveBeenLastCalledWith(['authored'], 'authored')
     expect(authoredPrList.get().prs[0].phase).toBe('needs_response')
 
-    authoredPrList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: true }))
+    authoredPrList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: true, openFindings: 0 }))
     expect(authoredPrList.get().prs[0].phase).toBe('in_progress')
     expect(mocks.store.authoredPrCacheFile.get().prs).toHaveLength(1)
+  })
+
+  it('needs a response while a self-review finding is open, and counts the findings on the PR', async () => {
+    const feedback = { reviewDecision: 'APPROVED' as const, openThreads: 0, unacknowledged: 0, changesRequestedBy: [], approvedBy: ['bob'], truncated: false }
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ author: 'me', feedback })] })
+    authoredPrList.setSessionLookup(() => null)
+    await authoredPrList.refresh()
+    expect(authoredPrList.get().prs[0]).toMatchObject({ phase: 'approved', openFindings: 0 })
+
+    authoredPrList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: false, openFindings: 2 }))
+    expect(authoredPrList.get().prs[0]).toMatchObject({ phase: 'needs_response', openFindings: 2 })
   })
 
   it('refreshes each list without touching the files of the other list', async () => {

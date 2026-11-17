@@ -10,6 +10,7 @@ import type {
   HideMode,
   InstallAttempt,
   PrListKind,
+  PrDescription,
   PrListState,
   PrRef,
   ReplyPost,
@@ -49,11 +50,13 @@ export interface RallyApi {
   acknowledgeFeedback(pr: PrRef, itemId: string): Promise<void>
   runAuthorActions(pr: PrRef, requests: ActionRequest[], note: string): Promise<AuthorSession>
   startSelfReview(pr: PrRef): Promise<AuthorSession>
+  draftDescription(pr: PrRef): Promise<AuthorSession>
+  discardDescription(sessionId: string): Promise<void>
   sendAuthorFeedback(sessionId: string, message: string): Promise<void>
   cancelAuthorTurn(sessionId: string): Promise<void>
   getAuthorDiff(sessionId: string): Promise<DiffResult>
   getUncommittedDiff(sessionId: string): Promise<DiffResult>
-  pushAuthorCommits(sessionId: string): Promise<void>
+  pushAuthorCommits(sessionId: string, descriptionEdit: PrDescription | null): Promise<void>
   resolveMergeConflicts(sessionId: string): Promise<void>
   abortMerge(sessionId: string): Promise<void>
   discardUncommitted(sessionId: string): Promise<void>
@@ -96,6 +99,8 @@ export const IPC = {
   acknowledgeFeedback: 'author:acknowledge',
   runAuthorActions: 'author:run',
   startSelfReview: 'author:self-review',
+  draftDescription: 'author:draft-description',
+  discardDescription: 'author:discard-description',
   sendAuthorFeedback: 'author:feedback',
   cancelAuthorTurn: 'author:cancel',
   getAuthorDiff: 'author:diff',

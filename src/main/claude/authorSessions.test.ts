@@ -166,6 +166,8 @@ mocks.stored = [
   }),
   stored(62, { description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' } }),
   stored(63),
+  stored(64),
+  stored(65),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
 ]
 
@@ -630,6 +632,23 @@ describe('description updates', () => {
     expect(await mocks.handlers!.onDescription({ title: ' Fix the bug ', body: 'New body\n' })).toContain('saved')
     expect(session(63).description).toMatchObject({ title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body\r\n' } })
     expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: true })
+  })
+
+  it('asks Claude to update the description from the clone, quoting the current one', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body\nSecond line' })
+    finishTurn()
+    await authorSessions.draftDescription(pr(64))
+    await vi.waitFor(() => expect(session(64).status).toBe('awaiting_feedback'))
+    const prompt = mocks.query.mock.calls[0][0].prompt as string
+    expect(prompt).toContain('Current title: Fix')
+    expect(prompt).toContain('> Old body\n> Second line')
+    expect(prompt).toContain(`checked out at ${CLONE.path}`)
+  })
+
+  it("doesn't start a turn when reading the current description fails", async () => {
+    mocks.fetchDescription.mockRejectedValue(new Error('Not Found'))
+    await expect(authorSessions.draftDescription(pr(65))).rejects.toThrow('Not Found')
+    expect(mocks.query).not.toHaveBeenCalled()
   })
 
   it('updates GitHub with the author\'s edit and clears the draft', async () => {

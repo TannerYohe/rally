@@ -58,7 +58,7 @@ import { authoredPrList, type SessionState } from '../prList'
 import { authorSessionsDir, configFile } from '../store'
 import { createAuthorServer, type PublishedResponse } from './authorTools'
 import { ClaudeSessions, now, sessionDir, type TurnSetup } from './claudeSessions'
-import { AUTHOR_PROTOCOL, authorActionsPrompt, mergeConflictPrompt, reviewPrompt } from './prompts'
+import { AUTHOR_PROTOCOL, authorActionsPrompt, descriptionPrompt, mergeConflictPrompt, reviewPrompt } from './prompts'
 
 const INTERRUPTED_TURN_ERROR = 'Interrupted when Rally closed. Send a message or run actions to resume.'
 const INTERRUPTED_PUBLISH_ERROR = 'Rally closed while pushing or posting. Check the PR on GitHub before trying again.'
@@ -163,22 +163,44 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   async runActions(pr: PrRef, requests: ActionRequest[], note: string): Promise<AuthorSession> {
     if (requests.length === 0) throw new Error('Pick an action for at least one comment.')
     const session = this.ensure(pr)
-    this.assertCanStartTurn(session.id)
-    await this.whilePublishing(session.id, async () => {
+    await this.startCloneTurn(session.id, 'respond', async () => {
+      const items = [...(await fetchFeedbackItems(pr)), ...(session.selfReview?.findings ?? [])]
+      const available = new Set(items.map((item) => item.id))
+      if (requests.some((request) => !available.has(request.itemId))) throw new Error(STALE_ITEMS_ERROR)
+      const requested = new Set(requests.map((request) => request.itemId))
+      this.patch(session.id, (s) => ({ items: mergeItems(s.items, items.filter((i) => requested.has(i.id))) }), true)
+      return (clone) => authorActionsPrompt(pr, clone, items, requests, note)
+    })
+    return this.byId(session.id)
+  }
+
+  /** Starts a turn asking Claude to bring the PR's title and description up to date with its code, including unpushed commits. */
+  async draftDescription(pr: PrRef): Promise<AuthorSession> {
+    const session = this.ensure(pr)
+    await this.startCloneTurn(session.id, 'describe', async () => {
+      const current = await fetchDescription(pr)
+      return (clone) => descriptionPrompt(pr, clone, current)
+    })
+    return this.byId(session.id)
+  }
+
+  /**
+   * Runs `prepare`, clones or updates the PR branch, then starts a turn with the prompt `prepare` builds for the clone.
+   * A failure before the turn starts is recorded on the session and rethrown.
+   */
+  private async startCloneTurn(sessionId: string, mode: TurnMode, prepare: () => Promise<(clone: CloneInfo) => string>): Promise<void> {
+    this.assertCanStartTurn(sessionId)
+    await this.whilePublishing(sessionId, async () => {
       try {
-        const items = [...(await fetchFeedbackItems(pr)), ...(session.selfReview?.findings ?? [])]
-        const available = new Set(items.map((item) => item.id))
-        if (requests.some((request) => !available.has(request.itemId))) throw new Error(STALE_ITEMS_ERROR)
-        const requested = new Set(requests.map((request) => request.itemId))
-        this.patch(session.id, (s) => ({ status: 'running', error: null, items: mergeItems(s.items, items.filter((i) => requested.has(i.id))) }), true)
-        const clone = await this.prepareClone(session.id)
-        void this.runTurn(session.id, authorActionsPrompt(pr, clone, items, requests, note), 'respond')
+        const prompt = await prepare()
+        this.patch(sessionId, () => ({ status: 'running', error: null }), true)
+        const clone = await this.prepareClone(sessionId)
+        void this.runTurn(sessionId, prompt(clone), mode)
       } catch (error) {
-        if (this.byId(session.id).status === 'running') this.patch(session.id, () => ({ status: 'error', error: errorMessage(error) }), true)
+        if (this.byId(sessionId).status === 'running') this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
         throw error
       }
     })
-    return this.byId(session.id)
   }
 
   async selfReview(pr: PrRef): Promise<AuthorSession> {

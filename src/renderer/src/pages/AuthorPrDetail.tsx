@@ -83,7 +83,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const primary = () => (requests.length > 0 ? runActions() : sendMessage(message))
   const canRunPrimary = !busy && (requests.length > 0 || (session !== null && Boolean(message.trim())))
   const selfReview = () => run(async () => onSession(await window.rally.startSelfReview(prRef)))
-  const push = () => session && run(() => window.rally.pushAuthorCommits(session.id))
+  const push = () => session && run(() => window.rally.pushAuthorCommits(session.id, null))
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${repliesLabel} to GitHub as you?`)) return
     void run(async () => {

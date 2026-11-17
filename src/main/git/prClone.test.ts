@@ -88,7 +88,7 @@ describe('prClone', () => {
     const commits = await localCommits(clone)
     expect(commits.map((c) => c.subject)).toEqual(['change c.txt'])
     expect(await uncommittedPaths(clone)).toEqual(['loose.txt'])
-    expect(await cloneDiff(clone)).toContain('+three')
+    expect((await cloneDiff(clone)).diff).toContain('+three')
 
     const pushed = await syncAndPush(clone, AT)
     expect(pushed).toEqual({ push: { at: AT, oid: commits[0].oid, commits }, clone: { ...clone, syncedHead: commits[0].oid }, rewritten: {} })
@@ -173,7 +173,7 @@ describe('prClone', () => {
     rmSync(join(clone.path, 'a.txt'))
 
     expect((await uncommittedPaths(clone)).sort()).toEqual(['a.txt', 'scratch/one.txt', 'scratch/two.txt'])
-    const diff = await uncommittedDiff(clone)
+    const diff = (await uncommittedDiff(clone)).diff
     expect(diff).toContain('+one')
     expect(diff).toContain('+two')
     expect(diff).toContain('deleted file mode')
@@ -191,12 +191,40 @@ describe('prClone', () => {
     expect((await uncommittedPaths(clone)).sort()).toEqual(['moved.txt', 'résumé.txt', 'with space.txt'])
   })
 
-  it('diffs uncommitted edits with a/ and b/ prefixes whatever the clone configures', async () => {
+  it('diffs commits and uncommitted edits as plain text with a/ and b/ headers whatever the clone configures', async () => {
     const clone = await cloneBranch(join(root, 'session19'), source)
-    git(clone.path, 'config', 'diff.mnemonicPrefix', 'true')
+    commitFile(clone.path, 'committed.txt', 'committed\n')
+    for (const [key, value] of [
+      ['diff.mnemonicPrefix', 'true'],
+      ['diff.noprefix', 'true'],
+      ['diff.external', 'echo junk'],
+      ['color.ui', 'always'],
+    ]) {
+      git(clone.path, 'config', key, value)
+    }
+    writeFileSync(join(clone.path, '.git', 'info', 'attributes'), 'hidden.txt -diff\n')
     writeFileSync(join(clone.path, 'new.txt'), 'new\n')
+    writeFileSync(join(clone.path, 'hidden.txt'), 'hidden\n')
+    writeFileSync(join(clone.path, 'résumé.txt'), 'accent\n')
 
-    expect(await uncommittedDiff(clone)).toContain('diff --git a/new.txt b/new.txt')
+    const uncommitted = (await uncommittedDiff(clone)).diff
+    expect(uncommitted).toContain('diff --git a/new.txt b/new.txt')
+    expect(uncommitted).toContain('+new')
+    expect(uncommitted).toContain('+hidden')
+    expect(uncommitted).toContain('diff --git a/résumé.txt b/résumé.txt')
+    expect(uncommitted).not.toContain('junk')
+    expect(uncommitted).not.toContain('\u001b[')
+    const committed = (await cloneDiff(clone)).diff
+    expect(committed).toContain('diff --git a/committed.txt b/committed.txt')
+    expect(committed).toContain('+committed')
+  })
+
+  it('says when a diff was cut off', async () => {
+    const clone = await cloneBranch(join(root, 'session20'), source)
+    writeFileSync(join(clone.path, 'small.txt'), 'small\n')
+    expect((await uncommittedDiff(clone)).truncated).toBe(false)
+    writeFileSync(join(clone.path, 'big.txt'), 'x\n'.repeat(250_000))
+    expect(await uncommittedDiff(clone)).toMatchObject({ truncated: true, diff: expect.any(String) })
   })
 
   it('fast-forwards a clone with no commits of its own on sync', async () => {
@@ -218,7 +246,7 @@ describe('prClone', () => {
     await syncAndPush(other, AT)
     await syncClone(clone)
 
-    const diff = await cloneDiff(clone)
+    const diff = (await cloneDiff(clone)).diff
     expect(diff).toContain('mine.txt')
     expect(diff).not.toContain('theirs.txt')
   })
@@ -301,7 +329,7 @@ describe('prClone', () => {
       commitFile(clone.path, 'ours.txt', 'ours\n')
       await forcePush('theirs-forced.txt')
       git(clone.path, 'fetch', 'origin')
-      expect(diffFiles(await cloneDiff(clone))).toEqual(['ours.txt'])
+      expect(diffFiles((await cloneDiff(clone)).diff)).toEqual(['ours.txt'])
     })
 
     it('pairs old and new shas when the force-pushed head already contains one of the replayed commits', async () => {

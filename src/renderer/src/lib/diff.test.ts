@@ -25,10 +25,30 @@ describe('splitDiffFiles', () => {
   })
 
   it('keeps the metadata of files with no hunks', () => {
-    const diff = ['diff --git a/run.sh b/run.sh', 'old mode 100644', 'new mode 100755', 'diff --git a/logo.png b/logo.png', 'index 1..2 100644', 'Binary files a/logo.png and b/logo.png differ'].join('\n')
+    const diff = [
+      'diff --git a/run.sh b/run.sh',
+      'old mode 100644',
+      'new mode 100755',
+      'diff --git a/logo.png b/logo.png',
+      'index 1..2 100644',
+      'Binary files a/logo.png and b/logo.png differ',
+      'diff --git a/move-me.txt b/moved.txt',
+      'similarity index 100%',
+      'rename from move-me.txt',
+      'rename to moved.txt',
+    ].join('\n')
     expect(splitDiffFiles(diff)).toEqual([
       { path: 'run.sh', lines: ['old mode 100644', 'new mode 100755'] },
       { path: 'logo.png', lines: ['Binary files a/logo.png and b/logo.png differ'] },
+      { path: 'moved.txt', lines: ['similarity index 100%', 'rename from move-me.txt', 'rename to moved.txt'] },
+    ])
+  })
+
+  it('starts a file at a header with a quoted path instead of adding its lines to the previous file', () => {
+    const diff = ['diff --git a/a.ts b/a.ts', '@@ -1 +1 @@', '+a', 'diff --git "a/\\"q.sh" "b/\\"q.sh"', '@@ -0,0 +1 @@', '+q'].join('\n')
+    expect(splitDiffFiles(diff)).toEqual([
+      { path: 'a.ts', lines: ['@@ -1 +1 @@', '+a'] },
+      { path: '"a/\\"q.sh" "b/\\"q.sh"', lines: ['@@ -0,0 +1 @@', '+q'] },
     ])
   })
 

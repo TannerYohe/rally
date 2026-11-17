@@ -239,6 +239,17 @@ describe('searchPrs', () => {
     expect(variables.request.signal).toBeInstanceOf(AbortSignal)
   })
 
+  it('never pages back through my reviews on PRs I opened', async () => {
+    const replies = [replyReview(1), replyReview(2)]
+    graphql.mockResolvedValueOnce({ search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [rawPr(replies, { hasPreviousPage: true, startCursor: 'c1' })] } })
+    graphql.mockResolvedValueOnce(commentsFor(replies))
+
+    const { prs } = await searchPrs(['query'], 'authored')
+
+    expect(graphql).toHaveBeenCalledTimes(2)
+    expect(prs[0].myReviews.map((r) => r.databaseId)).toEqual([1001, 1002])
+  })
+
   it('pages back only for the PR whose newest reviews are all replies', async () => {
     const replies = [replyReview(1), replyReview(2)]
     const real = realReview()

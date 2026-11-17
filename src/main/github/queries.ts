@@ -202,10 +202,14 @@ async function olderReviewsUntilCounted(gh: GithubClient, raw: RawPr, newest: My
   return reviews
 }
 
-async function myReviewsOf(gh: GithubClient, raws: RawPr[]): Promise<MyReview[][]> {
+/** Returns my reviews on each PR, paging back past thread replies only for PRs I review; author phases don't read them. */
+async function myReviewsOf(gh: GithubClient, raws: RawPr[], kind: PrListKind): Promise<MyReview[][]> {
   const replyOnly = await replyOnlyReviewIds(gh, raws.flatMap((raw) => raw.reviews.nodes))
   return Promise.all(
-    raws.map((raw) => olderReviewsUntilCounted(gh, raw, raw.reviews.nodes.map((r) => toMyReview(r, replyOnly.has(r.id))))),
+    raws.map((raw) => {
+      const newest = raw.reviews.nodes.map((r) => toMyReview(r, replyOnly.has(r.id)))
+      return isAuthored(kind) ? newest : olderReviewsUntilCounted(gh, raw, newest)
+    }),
   )
 }
 
@@ -281,7 +285,7 @@ export async function searchPrs(queries: string[], kind: PrListKind): Promise<{ 
     }
   }
   const raws = [...byId.values()]
-  const myReviews = await myReviewsOf(gh, raws)
+  const myReviews = await myReviewsOf(gh, raws, kind)
   return { viewer: gh.login, prs: raws.map((raw, index) => toPr(raw, gh.login, myReviews[index])) }
 }
 
@@ -296,6 +300,6 @@ export async function fetchPr(owner: string, repo: string, number: number, kind:
     request: timeoutRequest(),
   })
   const raw = response.repository.pullRequest
-  const [myReviews] = await myReviewsOf(gh, [raw])
+  const [myReviews] = await myReviewsOf(gh, [raw], kind)
   return toPr(raw, gh.login, myReviews)
 }

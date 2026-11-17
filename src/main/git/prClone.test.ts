@@ -8,6 +8,7 @@ import {
   abortMerge,
   cloneBranch,
   cloneDiff,
+  commitAll,
   commitFiles,
   concludeMerge,
   discardUncommitted,
@@ -149,6 +150,18 @@ describe('prClone', () => {
     expect(git(clone.path, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['A\tfix.txt', 'D\ta.txt'])
     expect(await uncommittedPaths(clone)).toEqual(['other.txt'])
     expect(await commitFiles(clone, ['fix.txt'], 'Nothing new')).toBeNull()
+  })
+
+  it('commits every edit, including new and deleted files, and returns null when there are none', async () => {
+    const clone = await cloneBranch(join(root, 'session16'), source)
+    writeFileSync(join(clone.path, 'new.txt'), 'new\n')
+    rmSync(join(clone.path, 'a.txt'))
+
+    const oid = await commitAll(clone, 'Tidy up')
+    expect((await localCommits(clone))[0]).toEqual({ oid, subject: 'Tidy up' })
+    expect(git(clone.path, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['A\tnew.txt', 'D\ta.txt'])
+    expect(await uncommittedPaths(clone)).toEqual([])
+    expect(await commitAll(clone, 'Nothing new')).toBeNull()
   })
 
   it('fast-forwards a clone with no commits of its own on sync', async () => {

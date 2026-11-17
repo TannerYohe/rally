@@ -165,6 +165,11 @@ export async function commitFiles(clone: CloneInfo, files: string[], message: st
   return (await git(clone.path, ['rev-parse', 'HEAD'])).trim()
 }
 
+/** Commits every edit in the clone, including new and deleted files, and returns the new commit's sha, or null when there are none. */
+export function commitAll(clone: CloneInfo, message: string): Promise<string | null> {
+  return commitFiles(clone, ['.'], message)
+}
+
 async function conflictedFiles(clone: CloneInfo): Promise<string[]> {
   const out = await git(clone.path, ['diff', '--name-only', '--diff-filter=U'])
   return out.split('\n').filter(Boolean)

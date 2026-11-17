@@ -63,6 +63,14 @@ describe('feedbackRows', () => {
   })
 })
 
+describe('feedbackRows with findings', () => {
+  it('lists a finding Claude answered once, as a finding', () => {
+    const finding = item('self-1', 'finding')
+    const s = session({ items: [finding], responses: { 'self-1': response('self-1', 'Fixed') }, selfReview: { verdict: '', reportMarkdown: '', findings: [finding] } })
+    expect(feedbackRows([], s).map((r) => [r.item.id, r.closedOnGithub])).toEqual([['self-1', false]])
+  })
+})
+
 describe('replyPosts', () => {
   it('applies edits and resolve choices to pending replies and skips findings and blanked replies', () => {
     const s = session({

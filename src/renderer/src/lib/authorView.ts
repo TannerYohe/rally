@@ -21,7 +21,7 @@ export function feedbackRows(open: FeedbackItem[], session: SessionView | null):
   if (!session) return open.map((item) => row(item, false))
   const openIds = new Set(open.map((item) => item.id))
   const pendingIds = new Set(pendingReplies(session).map((r) => r.itemId))
-  const closed = session.items.filter((item) => !openIds.has(item.id) && pendingIds.has(item.id))
+  const closed = session.items.filter((item) => canReplyTo(item) && !openIds.has(item.id) && pendingIds.has(item.id))
   return [...open.map((item) => row(item, false)), ...closed.map((item) => row(item, true)), ...(session.selfReview?.findings ?? []).map((item) => row(item, false))]
 }
 

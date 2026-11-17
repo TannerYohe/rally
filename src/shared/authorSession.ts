@@ -8,12 +8,16 @@ export function isReplyPending(response: ItemResponse, posted: PostedReply | nul
   return !posted || posted.error !== null || posted.at < response.at
 }
 
-export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'posted'>): ItemResponse[] {
-  return Object.values(session.responses).filter((response) => isReplyPending(response, session.posted[response.itemId]))
+/** Returns the responses with an unposted reply on an item Rally can post to, leaving out self-review findings. */
+export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'posted' | 'items'>): ItemResponse[] {
+  const replyable = new Set(session.items.filter(canReplyTo).map((item) => item.id))
+  return Object.values(session.responses).filter(
+    (response) => replyable.has(response.itemId) && isReplyPending(response, session.posted[response.itemId]),
+  )
 }
 
 /** Returns whether the session has a running turn, an error, unpushed commits, or unposted replies. */
-export function hasPendingWork(session: Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted'>): boolean {
+export function hasPendingWork(session: Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted' | 'items'>): boolean {
   return session.status !== 'awaiting_feedback' || session.commits.length > 0 || pendingReplies(session).length > 0
 }
 

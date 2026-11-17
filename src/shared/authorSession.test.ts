@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { hasPendingWork, itemLocation, pendingReplies } from './authorSession'
-import type { AuthorSession, ItemResponse } from './types'
+import type { AuthorSession, FeedbackItem, ItemResponse } from './types'
 
 const response = (itemId: string, reply: string, at = '2026-11-02T00:00:00Z'): ItemResponse => ({
   itemId,
@@ -12,8 +12,10 @@ const response = (itemId: string, reply: string, at = '2026-11-02T00:00:00Z'): I
   at,
 })
 
-function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted'> {
-  return { status: 'awaiting_feedback', commits: [], responses: {}, posted: {}, ...overrides }
+const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => ({ id, kind }) as FeedbackItem
+
+function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted' | 'items'> {
+  return { status: 'awaiting_feedback', commits: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), ...overrides }
 }
 
 describe('pendingReplies', () => {
@@ -34,6 +36,14 @@ describe('pendingReplies', () => {
       },
     })
     expect(pendingReplies(s).map((r) => r.itemId)).toEqual(['a', 'b'])
+  })
+})
+
+describe('pendingReplies on findings', () => {
+  it('leaves out replies Rally can never post, so a fixed finding does not pin the PR in progress', () => {
+    const s = session({ items: [item('self-1', 'finding')], responses: { 'self-1': response('self-1', 'Fixed in abc') } })
+    expect(pendingReplies(s)).toEqual([])
+    expect(hasPendingWork(s)).toBe(false)
   })
 })
 

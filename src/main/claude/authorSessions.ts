@@ -222,7 +222,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (!session?.clone || existsSync(session.clone.path)) return false
     if (session.uncommitted.length > 0) {
       console.warn('Forgetting the uncommitted edits of a cleared clone', { pr: session.pr.url, sessionId, files: session.uncommitted })
-      this.append(sessionId, { kind: 'step', id: randomUUID(), label: CLONE_CLEARED_ERROR, detail: session.uncommitted.join(', '), done: true, at: now() })
+      this.append(sessionId, { kind: 'warning', id: randomUUID(), label: CLONE_CLEARED_ERROR, detail: session.uncommitted.join(', '), at: now() })
       this.patch(sessionId, () => ({ uncommitted: [] }), true)
     }
     return true

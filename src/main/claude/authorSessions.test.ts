@@ -369,7 +369,7 @@ describe('push', () => {
   it('forgets uncommitted edits and refuses to commit or discard once the clone folder is gone', async () => {
     await expect(authorSessions.commitUncommitted('author-50', 'Tidy up')).rejects.toThrow('cleared from the temp folder')
     expect(session(50)).toMatchObject({ uncommitted: [], status: 'error', error: expect.stringContaining('cleared from the temp folder') })
-    expect(session(50).timeline.at(-1)).toMatchObject({ kind: 'step', label: expect.stringContaining('cleared from the temp folder'), detail: 'a.ts', done: true })
+    expect(session(50).timeline.at(-1)).toMatchObject({ kind: 'warning', label: expect.stringContaining('cleared from the temp folder'), detail: 'a.ts' })
     await expect(authorSessions.discardUncommitted('author-50')).rejects.toThrow('cleared from the temp folder')
     await expect(authorSessions.uncommittedDiff('author-50')).rejects.toThrow('cleared from the temp folder')
     expect(mocks.commitAll).not.toHaveBeenCalled()
@@ -380,7 +380,7 @@ describe('push', () => {
     mocks.uncommittedDiff.mockResolvedValue({ diff: '+edit', truncated: false })
     expect(await authorSessions.uncommittedDiff('author-53')).toEqual({ diff: '+edit', truncated: false })
     expect(mocks.uncommittedDiff).toHaveBeenCalledWith(CLONE)
-    expect(await authorSessions.uncommittedDiff('author-48')).toEqual({ diff: '', truncated: false })
+    expect(await authorSessions.uncommittedDiff('author-48')).toEqual({ diff: '', truncated: false, binaryFiles: [] })
   })
 
   it('rereads the clone when there is nothing to commit or the commit fails', async () => {

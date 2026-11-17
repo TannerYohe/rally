@@ -49,6 +49,11 @@ function commentsFor(reviews: { id: string }[]) {
   return { nodes: reviews.map((r) => ({ id: r.id, comments: { nodes: [reply] } })) }
 }
 
+function olderPage(reviews: { id: string; body: string }[], startCursor: string, hasPreviousPage = true) {
+  const nodes = reviews.map((r) => ({ ...r, comments: { nodes: r.body ? [] : [reply] } }))
+  return { node: { reviews: { pageInfo: { hasPreviousPage, startCursor }, nodes } } }
+}
+
 describe('fetchPr', () => {
   beforeEach(() => graphql.mockReset())
 
@@ -76,13 +81,13 @@ describe('fetchPr', () => {
     const real = { id: 'PRR_real', databaseId: 7, state: 'COMMENTED', submittedAt: '2026-11-04T00:00:00Z', body: 'nits', commit: { oid: 'old' } }
     graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c20' }) } })
     graphql.mockResolvedValueOnce(commentsFor(newest))
-    graphql.mockResolvedValueOnce({ node: { reviews: { pageInfo: { hasPreviousPage: true, startCursor: 'c0' }, nodes: [real, ...olderReplies] } } })
-    graphql.mockResolvedValueOnce(commentsFor(olderReplies))
+    graphql.mockResolvedValueOnce(olderPage([real, ...olderReplies], 'c0'))
 
     const pr = await fetchPr('acme', 'api', 12)
 
     expect(graphql.mock.calls[2][1]).toMatchObject({ id: 'PR_1', viewer: 'me', before: 'c20' })
-    expect(graphql).toHaveBeenCalledTimes(4)
+    expect(graphql.mock.calls[2][0]).toMatch(/comments\(first: 20\)/)
+    expect(graphql).toHaveBeenCalledTimes(3)
     expect(pr.myReviews).toHaveLength(26)
     expect(pr.myReviews[0]).toEqual({ databaseId: 7, state: 'COMMENTED', submittedAt: '2026-11-04T00:00:00Z', commitOid: 'old', replyOnly: false })
     expect(pr.myReviews.slice(1).every((r) => r.replyOnly)).toBe(true)
@@ -95,7 +100,7 @@ describe('fetchPr', () => {
     const replies = [replyReview(1), replyReview(2)]
     graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr([dismissed, ...replies, pending], { hasPreviousPage: true, startCursor: 'c1' }) } })
     graphql.mockResolvedValueOnce(commentsFor(replies))
-    graphql.mockResolvedValueOnce({ node: { reviews: { pageInfo: { hasPreviousPage: false, startCursor: 'c0' }, nodes: [real] } } })
+    graphql.mockResolvedValueOnce(olderPage([real], 'c0', false))
 
     const pr = await fetchPr('acme', 'api', 12)
 

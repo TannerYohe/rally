@@ -7,7 +7,9 @@ export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 's
 
 const REVIEW_PAGE_SIZE = 20
 const MAX_REVIEW_PAGES = 10
-const REVIEW_PAGE = `pageInfo { hasPreviousPage startCursor } nodes { id databaseId state submittedAt body commit { oid } }`
+const REVIEW_FIELDS = 'id databaseId state submittedAt body commit { oid }'
+const REVIEW_PAGE = `pageInfo { hasPreviousPage startCursor } nodes { ${REVIEW_FIELDS} }`
+const REVIEW_COMMENTS = 'comments(first: 20) { nodes { replyTo { id } } }'
 
 const PR_FIELDS = `
   fragment PrFields on PullRequest {
@@ -43,13 +45,20 @@ const SINGLE_QUERY = `
 
 const OLDER_REVIEWS_QUERY = `
   query($id: ID!, $viewer: String!, $before: String!) {
-    node(id: $id) { ... on PullRequest { reviews(author: $viewer, last: ${REVIEW_PAGE_SIZE}, before: $before) { ${REVIEW_PAGE} } } }
+    node(id: $id) {
+      ... on PullRequest {
+        reviews(author: $viewer, last: ${REVIEW_PAGE_SIZE}, before: $before) {
+          pageInfo { hasPreviousPage startCursor }
+          nodes { ${REVIEW_FIELDS} ${REVIEW_COMMENTS} }
+        }
+      }
+    }
   }
 `
 
 const REVIEW_COMMENTS_QUERY = `
   query($ids: [ID!]!) {
-    nodes(ids: $ids) { ... on PullRequestReview { id comments(first: 20) { nodes { replyTo { id } } } } }
+    nodes(ids: $ids) { ... on PullRequestReview { id ${REVIEW_COMMENTS} } }
   }
 `
 
@@ -75,6 +84,11 @@ interface ReviewPage {
 }
 
 type ReviewCommentsNode = { id: string; comments: { nodes: ReviewComment[] } }
+
+interface OlderReviewPage {
+  pageInfo: ReviewPage['pageInfo']
+  nodes: (RawReview & ReviewCommentsNode)[]
+}
 
 interface RawPr {
   id: string
@@ -134,13 +148,13 @@ async function replyOnlyReviewIds(gh: GithubClient, reviews: RawReview[]): Promi
   return replyOnly
 }
 
-function toMyReview(review: RawReview, replyOnly: Set<string>): MyReview {
+function toMyReview(review: RawReview, replyOnly: boolean): MyReview {
   return {
     databaseId: review.databaseId,
     state: review.state,
     submittedAt: review.submittedAt,
     commitOid: review.commit?.oid ?? null,
-    replyOnly: replyOnly.has(review.id),
+    replyOnly,
   }
 }
 
@@ -150,14 +164,13 @@ async function olderReviewsUntilCounted(gh: GithubClient, raw: RawPr, newest: My
   for (let pages = 1; pages < MAX_REVIEW_PAGES; pages++) {
     if (reviews.some((r) => countsAsReview(r))) break
     if (!page.hasPreviousPage || !page.startCursor) break
-    const response = await gh.graphql<{ node: { reviews: ReviewPage } }>(OLDER_REVIEWS_QUERY, {
+    const response = await gh.graphql<{ node: { reviews: OlderReviewPage } }>(OLDER_REVIEWS_QUERY, {
       id: raw.id,
       viewer: gh.login,
       before: page.startCursor,
     })
     const older = response.node.reviews
-    const replyOnly = await replyOnlyReviewIds(gh, older.nodes)
-    reviews = [...older.nodes.map((r) => toMyReview(r, replyOnly)), ...reviews]
+    reviews = [...older.nodes.map((r) => toMyReview(r, isReplyOnly(r, r.comments.nodes))), ...reviews]
     page = older.pageInfo
   }
   return reviews
@@ -165,11 +178,9 @@ async function olderReviewsUntilCounted(gh: GithubClient, raw: RawPr, newest: My
 
 async function myReviewsOf(gh: GithubClient, raws: RawPr[]): Promise<MyReview[][]> {
   const replyOnly = await replyOnlyReviewIds(gh, raws.flatMap((raw) => raw.reviews.nodes))
-  const result: MyReview[][] = []
-  for (const raw of raws) {
-    result.push(await olderReviewsUntilCounted(gh, raw, raw.reviews.nodes.map((r) => toMyReview(r, replyOnly))))
-  }
-  return result
+  return Promise.all(
+    raws.map((raw) => olderReviewsUntilCounted(gh, raw, raw.reviews.nodes.map((r) => toMyReview(r, replyOnly.has(r.id))))),
+  )
 }
 
 function forcePushedToHeadAt(raw: RawPr): string | null {

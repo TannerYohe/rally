@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { MAX_DIFF_CHARS } from '@shared/diff'
 import { plural } from '@shared/format'
 import type { CloneInfo, DiffResult, LocalCommit, PushRecord } from '@shared/types'
 
@@ -11,7 +12,6 @@ const run = promisify(execFile)
 const GH_CREDENTIAL_HELPER = '!gh auth git-credential'
 const GH_CREDENTIALS = ['-c', 'credential.helper=', '-c', `credential.helper=${GH_CREDENTIAL_HELPER}`]
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
-const MAX_DIFF_CHARS = 400_000
 const FIELD_SEPARATOR = '\x1f'
 
 export const CLONE_DIR_NAME = 'repo'
@@ -52,6 +52,9 @@ interface GitFailure {
   stderr?: string
 }
 
+/** Returns the git subcommand in args, skipping `-c key=value` pairs before it. */
+const subcommand = (args: string[]) => args.find((arg, index) => arg !== '-c' && args[index - 1] !== '-c') ?? ''
+
 async function git(cwd: string, args: string[], timeoutMs = LOCAL_TIMEOUT_MS, env: Record<string, string> = {}): Promise<string> {
   try {
     const { stdout } = await run('git', [...GH_CREDENTIALS, ...args], {
@@ -64,7 +67,7 @@ async function git(cwd: string, args: string[], timeoutMs = LOCAL_TIMEOUT_MS, en
   } catch (error) {
     const failure = error as GitFailure
     const reason = failure.killed ? `timed out after ${Math.round(timeoutMs / 1000)}s` : failure.stderr?.trim() || (error as Error).message
-    throw Object.assign(new Error(`git ${args[0]} failed: ${reason}`), { code: failure.code })
+    throw Object.assign(new Error(`git ${subcommand(args)} failed: ${reason}`), { code: failure.code })
   }
 }
 
@@ -148,24 +151,39 @@ export async function uncommittedPaths(clone: CloneInfo): Promise<string[]> {
 /** Shows every file's text with plain a/ and b/ headers, whatever the clone's diff config, attributes, or drivers say. */
 const DIFF_DISPLAY_FLAGS = ['--no-color', '--text', '--src-prefix=a/', '--dst-prefix=b/', '--no-textconv', '--no-ext-diff']
 
-/** Keeps git from quoting non-ASCII paths in diff headers. */
-const DIFF_DISPLAY_ENV = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.quotePath', GIT_CONFIG_VALUE_0: 'false' }
+/** Runs `git diff` with core.quotePath off so non-ASCII paths keep plain headers. */
+const DISPLAY_DIFF_COMMAND = ['-c', 'core.quotePath=false', 'diff', ...DIFF_DISPLAY_FLAGS]
 
-const truncateDiff = (diff: string): DiffResult =>
-  diff.length > MAX_DIFF_CHARS ? { diff: diff.slice(0, MAX_DIFF_CHARS), truncated: true } : { diff, truncated: false }
-
-/** Returns the unified diff of the clone's unpushed commits, cut off at MAX_DIFF_CHARS. */
-export async function cloneDiff(clone: CloneInfo): Promise<DiffResult> {
-  return truncateDiff(await git(clone.path, ['diff', ...DIFF_DISPLAY_FLAGS, `${syncedRef(clone)}...HEAD`], LOCAL_TIMEOUT_MS, DIFF_DISPLAY_ENV))
+/** Replaces the body of each file whose diff holds a NUL byte with a one-line binary notice. */
+function collapseBinaryFiles(diff: string): string {
+  return diff
+    .split(/(?=^diff --git )/m)
+    .map((section) => {
+      if (!section.includes('\0')) return section
+      const firstHunk = section.search(/^@@/m)
+      return `${firstHunk === -1 ? section : section.slice(0, firstHunk)}Binary files differ\n`
+    })
+    .join('')
 }
 
-/** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index and cut off at MAX_DIFF_CHARS. */
+/** Collapses binary files and cuts the diff off at MAX_DIFF_CHARS. */
+function displayDiff(raw: string): DiffResult {
+  const diff = collapseBinaryFiles(raw)
+  return diff.length > MAX_DIFF_CHARS ? { diff: diff.slice(0, MAX_DIFF_CHARS), truncated: true } : { diff, truncated: false }
+}
+
+/** Returns the unified diff of the clone's unpushed commits for display. */
+export async function cloneDiff(clone: CloneInfo): Promise<DiffResult> {
+  return displayDiff(await git(clone.path, [...DISPLAY_DIFF_COMMAND, `${syncedRef(clone)}...HEAD`]))
+}
+
+/** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index for display. */
 export async function uncommittedDiff(clone: CloneInfo): Promise<DiffResult> {
-  const env = { ...DIFF_DISPLAY_ENV, GIT_INDEX_FILE: join(clone.path, '.git', `rally-uncommitted-${randomUUID()}.index`) }
+  const env = { GIT_INDEX_FILE: join(clone.path, '.git', `rally-uncommitted-${randomUUID()}.index`) }
   try {
     await git(clone.path, ['read-tree', 'HEAD'], LOCAL_TIMEOUT_MS, env)
     await git(clone.path, ['add', '-A', '--', '.'], LOCAL_TIMEOUT_MS, env)
-    return truncateDiff(await git(clone.path, ['diff', '--cached', ...DIFF_DISPLAY_FLAGS, 'HEAD'], LOCAL_TIMEOUT_MS, env))
+    return displayDiff(await git(clone.path, [...DISPLAY_DIFF_COMMAND, '--cached', 'HEAD'], LOCAL_TIMEOUT_MS, env))
   } finally {
     await rm(env.GIT_INDEX_FILE, { force: true })
   }

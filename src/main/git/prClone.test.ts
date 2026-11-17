@@ -194,7 +194,9 @@ describe('prClone', () => {
   it('diffs commits and uncommitted edits as plain text with a/ and b/ headers whatever the clone configures', async () => {
     const clone = await cloneBranch(join(root, 'session19'), source)
     commitFile(clone.path, 'committed.txt', 'committed\n')
+    commitFile(clone.path, 'café.txt', 'café\n')
     for (const [key, value] of [
+      ['core.quotePath', 'true'],
       ['diff.mnemonicPrefix', 'true'],
       ['diff.noprefix', 'true'],
       ['diff.external', 'echo junk'],
@@ -217,6 +219,20 @@ describe('prClone', () => {
     const committed = (await cloneDiff(clone)).diff
     expect(committed).toContain('diff --git a/committed.txt b/committed.txt')
     expect(committed).toContain('+committed')
+    expect(committed).toContain('diff --git a/café.txt b/café.txt')
+  })
+
+  it('shows a binary file as one line so the files after it still fit', async () => {
+    const clone = await cloneBranch(join(root, 'session21'), source)
+    writeFileSync(join(clone.path, 'blob.bin'), Buffer.concat([Buffer.from([0]), Buffer.alloc(500_000, 0x41)]))
+    writeFileSync(join(clone.path, 'note.txt'), 'note\n')
+
+    const { diff, truncated } = await uncommittedDiff(clone)
+    expect(truncated).toBe(false)
+    expect(diff).toContain('diff --git a/blob.bin b/blob.bin')
+    expect(diff).toContain('Binary files differ')
+    expect(diff).not.toContain('AAAA')
+    expect(diff).toContain('+note')
   })
 
   it('says when a diff was cut off', async () => {

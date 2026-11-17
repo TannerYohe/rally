@@ -56,12 +56,10 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getFailedInstall, () => updater.failedInstall())
   ipcMain.handle(IPC.dismissFailedInstall, () => updater.dismissFailedInstall())
 
-  const soundCues = new SoundCues(prList.get().prs, () => configFile.get(), (playback) => broadcast(IPC.soundCue, playback))
-  prList.on('changed', (state) => {
-    broadcast(IPC.prsChanged, state)
-    soundCues.prsChanged(state.prs)
-  })
+  prList.on('changed', (state) => broadcast(IPC.prsChanged, state))
   prList.setReviewStatusLookup((key) => reviewSessions.statusOf(key))
+  const soundCues = new SoundCues(prList.get().prs, () => configFile.get(), (playback) => broadcast(IPC.soundCue, playback))
+  prList.on('changed', (state) => soundCues.prsChanged(state.prs))
   reviewSessions.on('changed', (session) => {
     broadcast(IPC.sessionChanged, session)
     soundCues.sessionChanged(session.prKey, session.status)

@@ -60,7 +60,7 @@ function itemSection(item: FeedbackItem, request: ActionRequest): string {
   return lines.join('\n\n')
 }
 
-/** Returns the turn prompt asking Claude to investigate, fix, or push back on each requested item. */
+/** Returns the turn prompt asking Claude to investigate, fix, push back on, or answer each requested item. */
 export function authorActionsPrompt(pr: PrRef, clone: CloneInfo, items: FeedbackItem[], requests: ActionRequest[], note: string): string {
   const byId = new Map(items.map((item) => [item.id, item]))
   const sections = requests.flatMap((request) => {

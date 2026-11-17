@@ -18,7 +18,7 @@ const responseSchema = z.object({
   verdict: z
     .enum(RESPONSE_VERDICTS)
     .nullable()
-    .describe('For investigate: whether the comment holds against the code. Null for fix and push_back.'),
+    .describe('For investigate: whether the comment holds against the code. Null for every action except investigate.'),
   summary: z.string().describe('Markdown: what you found or changed, with file:line evidence'),
   reply_body: z.string().describe('The reply to post on the thread as the author, or an empty string for none'),
   commits: z.array(z.string()).describe('Full shas of the commits made for this item, oldest first; empty when none'),

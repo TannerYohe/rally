@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
   type ActionRequest,
@@ -53,7 +54,6 @@ const NOTHING_TO_COMMIT_ERROR = 'Claude listed files for this fix, but they had 
 const TURN_DID_NOT_FINISH_ERROR = `The turn didn't finish, so Rally didn't commit these files. Run Fix again.`
 const CLONE_LOST_ERROR = `Rally's clone of this PR is gone, probably cleared from the temp folder, and its unpushed commits with it. Start over to clone again.`
 const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp folder, and its uncommitted edits with it."
-const NO_DIFF: DiffResult = { diff: '', truncated: false }
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
 /** Marks fixes waiting on a commit as not committed, for a turn that didn't finish. */
@@ -171,12 +171,14 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   async diff(sessionId: string): Promise<DiffResult> {
     const { clone } = this.byId(sessionId)
-    return clone ? cloneDiff(clone) : NO_DIFF
+    if (!clone) return EMPTY_DIFF
+    this.assertCloneFolder(sessionId)
+    return cloneDiff(clone)
   }
 
   async uncommittedDiff(sessionId: string): Promise<DiffResult> {
     const { clone } = this.byId(sessionId)
-    if (!clone) return NO_DIFF
+    if (!clone) return EMPTY_DIFF
     this.assertCloneFolder(sessionId)
     return uncommittedDiff(clone)
   }
@@ -214,12 +216,13 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     else this.refreshPr(pr)
   }
 
-  /** Returns whether the clone's folder is gone, forgetting and logging the uncommitted edits that went with it. */
+  /** Returns whether the clone's folder is gone, forgetting the uncommitted edits that went with it and noting them in the log and the timeline. */
   private cloneFolderGone(sessionId: string): boolean {
     const session = this.find(sessionId)
     if (!session?.clone || existsSync(session.clone.path)) return false
     if (session.uncommitted.length > 0) {
       console.warn('Forgetting the uncommitted edits of a cleared clone', { pr: session.pr.url, sessionId, files: session.uncommitted })
+      this.append(sessionId, { kind: 'step', id: randomUUID(), label: CLONE_CLEARED_ERROR, detail: session.uncommitted.join(', '), done: true, at: now() })
       this.patch(sessionId, () => ({ uncommitted: [] }), true)
     }
     return true

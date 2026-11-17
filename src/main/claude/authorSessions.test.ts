@@ -300,7 +300,8 @@ describe('push', () => {
     expect(mocks.pushClone).toHaveBeenCalledWith({ ...CLONE, syncedHead: 'new-head' }, expect.any(String))
   })
 
-  it('refuses to push or clone again when the clone holding unpushed commits is gone', async () => {
+  it('refuses to push, diff, or clone again when the clone holding unpushed commits is gone', async () => {
+    await expect(authorSessions.diff('author-24')).rejects.toThrow("Rally's clone of this PR is gone")
     await expect(authorSessions.push('author-24')).rejects.toThrow("Rally's clone of this PR is gone")
     expect(mocks.pushClone).not.toHaveBeenCalled()
     mocks.fetchFeedbackItems.mockResolvedValue([thread('T1')])
@@ -368,6 +369,7 @@ describe('push', () => {
   it('forgets uncommitted edits and refuses to commit or discard once the clone folder is gone', async () => {
     await expect(authorSessions.commitUncommitted('author-50', 'Tidy up')).rejects.toThrow('cleared from the temp folder')
     expect(session(50)).toMatchObject({ uncommitted: [], status: 'error', error: expect.stringContaining('cleared from the temp folder') })
+    expect(session(50).timeline.at(-1)).toMatchObject({ kind: 'step', label: expect.stringContaining('cleared from the temp folder'), detail: 'a.ts', done: true })
     await expect(authorSessions.discardUncommitted('author-50')).rejects.toThrow('cleared from the temp folder')
     await expect(authorSessions.uncommittedDiff('author-50')).rejects.toThrow('cleared from the temp folder')
     expect(mocks.commitAll).not.toHaveBeenCalled()

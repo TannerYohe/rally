@@ -1,7 +1,7 @@
 import { GraphqlResponseError } from '@octokit/graphql'
 import type { MyReview, Pr, PrListKind, ReviewState } from '@shared/types'
 import { authorFeedback, type RawAuthorFields } from './authorPhase'
-import { decisionsField } from './feedbackFields'
+import { decisionsField, prCommentsField, reviewSummariesField, threadsField } from './feedbackFields'
 import { github, timeoutRequest, type GithubClient } from './client'
 import { MY_REVIEW_WINDOW } from './phase'
 
@@ -23,15 +23,9 @@ const PR_FIELDS = `
     }
     reviewDecision @include(if: $authored)
     ${decisionsField(AUTHORED)}
-    reviewThreads(first: 100) @include(if: $authored) {
-      nodes { isResolved comments(last: 1) { nodes { author { login } reactionGroups { viewerHasReacted } } } }
-    }
-    comments(last: 100) @include(if: $authored) {
-      nodes { url body createdAt isMinimized author { __typename login } reactionGroups { viewerHasReacted } }
-    }
-    allReviews: reviews(last: 100) @include(if: $authored) {
-      nodes { url body state submittedAt author { __typename login } reactionGroups { viewerHasReacted } }
-    }
+    ${threadsField('first: 100', AUTHORED)}
+    ${prCommentsField('last: 100', AUTHORED)}
+    ${reviewSummariesField('last: 100', AUTHORED, 'allReviews')}
   }
 `
 

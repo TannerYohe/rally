@@ -72,9 +72,9 @@ describe('fetchPr', () => {
       timelineItems: { nodes: [] },
       reviewDecision: 'CHANGES_REQUESTED',
       latestOpinionatedReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'bob' } }] },
-      reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'bob' }, reactionGroups: [] }] } }] },
-      comments: { nodes: [{ url: 'https://github.com/acme/api/pull/13#issuecomment-1', body: 'Why?', createdAt: '', author: { login: 'carol', __typename: 'User' }, reactionGroups: [] }] },
-      allReviews: { nodes: [] },
+      reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [{ isResolved: false, latest: { nodes: [{ author: { login: 'bob' }, reactionGroups: [] }] } }] },
+      comments: { pageInfo: { hasPreviousPage: false }, nodes: [{ url: 'https://github.com/acme/api/pull/13#issuecomment-1', body: 'Why?', createdAt: '', author: { login: 'carol', __typename: 'User' }, reactionGroups: [] }] },
+      allReviews: { pageInfo: { hasPreviousPage: true }, nodes: [] },
     }
     graphql.mockResolvedValueOnce({ repository: { pullRequest: raw } })
 
@@ -87,6 +87,7 @@ describe('fetchPr', () => {
       unacknowledged: 2,
       changesRequestedBy: ['bob'],
       approvedBy: [],
+      truncated: true,
     })
   })
 })

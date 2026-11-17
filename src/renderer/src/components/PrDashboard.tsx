@@ -44,6 +44,13 @@ function FeedbackNote({ feedback }: { feedback: PrFeedback }) {
       </span>,
     )
   }
+  if (feedback.truncated) {
+    parts.push(
+      <span key="truncated" className="text-amber-300" title="This PR has more threads, comments, or reviews than the list reads. Open it to check them all.">
+        too much activity to check here
+      </span>,
+    )
+  }
   if (feedback.changesRequestedBy.length > 0) {
     parts.push(
       <span key="changes" className="text-amber-300">

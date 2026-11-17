@@ -29,6 +29,8 @@ export interface PrFeedback {
   unacknowledged: number
   changesRequestedBy: string[]
   approvedBy: string[]
+  /** True when the PR has more threads, comments, or reviews than the list query reads, so some feedback went unchecked. */
+  truncated: boolean
 }
 
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'

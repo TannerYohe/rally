@@ -136,6 +136,8 @@ mocks.stored = [
   stored(47, { clone: CLONE, uncommitted: ['a.ts'] }),
   stored(48),
   stored(49),
+  stored(50, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-missing-clone') }, uncommitted: ['a.ts'] }),
+  stored(51, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-missing-clone') }, uncommitted: ['a.ts'] }),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
@@ -346,6 +348,15 @@ describe('push', () => {
     await vi.waitFor(() => expect(session(49).status).toBe('awaiting_feedback'))
   })
 
+  it('forgets uncommitted edits and refuses to commit or discard once the clone folder is gone', async () => {
+    await expect(authorSessions.commitUncommitted('author-50', 'Tidy up')).rejects.toThrow('cleared from the temp folder')
+    expect(session(50).uncommitted).toEqual([])
+    await expect(authorSessions.discardUncommitted('author-50')).rejects.toThrow('cleared from the temp folder')
+    await expect(authorSessions.uncommittedDiff('author-50')).rejects.toThrow('cleared from the temp folder')
+    expect(mocks.commitAll).not.toHaveBeenCalled()
+    expect(mocks.discardUncommitted).not.toHaveBeenCalled()
+  })
+
   it('rereads the clone when there is nothing to commit or the commit fails', async () => {
     mocks.uncommittedPaths.mockResolvedValue(['b.ts'])
     mocks.localCommits.mockResolvedValue([{ oid: 'x', subject: 'Earlier' }])
@@ -553,7 +564,7 @@ describe('self-review', () => {
 })
 
 describe('pruneUnlisted', () => {
-  const own = [40, 41, 42, 43, 44, 45, 46, 47].map((n) => `acme/api#${n}`)
+  const own = [40, 41, 42, 43, 44, 45, 46, 47, 51].map((n) => `acme/api#${n}`)
   const othersListed = () => new Set(mocks.stored.map((st) => st.prKey).filter((key) => !own.includes(key)))
 
   it('removes sessions with no work left for PRs that left the list, with their session folders', async () => {
@@ -570,6 +581,7 @@ describe('pruneUnlisted', () => {
 
     expect(authorSessions.getByPr('acme/api#40')).toBeNull()
     expect(authorSessions.getByPr('acme/api#46')).toBeNull()
+    expect(authorSessions.getByPr('acme/api#51')).toBeNull()
     await vi.waitFor(() => expect(existsSync(dir40)).toBe(false))
     expect(authorSessions.getByPr('acme/api#41')).not.toBeNull()
     expect(authorSessions.getByPr('acme/api#42')).not.toBeNull()

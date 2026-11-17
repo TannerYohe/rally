@@ -50,6 +50,7 @@ const MERGE_IN_PROGRESS_ERROR = 'Finish or abort the merge in the Changes tab fi
 const NOTHING_TO_COMMIT_ERROR = 'Claude listed files for this fix, but they had no changes to commit.'
 const TURN_DID_NOT_FINISH_ERROR = `The turn didn't finish, so Rally didn't commit these files. Run Fix again.`
 const CLONE_LOST_ERROR = `Rally's clone of this PR is gone, probably cleared from the temp folder, and its unpushed commits with it. Start over to clone again.`
+const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp folder, and its uncommitted edits with it."
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
 /** Marks fixes waiting on a commit as not committed, for a turn that didn't finish. */
@@ -172,7 +173,9 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   async uncommittedDiff(sessionId: string): Promise<string> {
     const { clone } = this.byId(sessionId)
-    return clone ? uncommittedDiff(clone) : ''
+    if (!clone) return ''
+    this.assertCloneFolder(sessionId)
+    return uncommittedDiff(clone)
   }
 
   async push(sessionId: string): Promise<void> {
@@ -213,11 +216,25 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }
   }
 
+  /** Forgets the uncommitted edits of a clone whose folder is gone, since they went with it, and returns whether it is gone. */
+  private forgetEditsOfLostClone(sessionId: string): boolean {
+    const session = this.find(sessionId)
+    if (!session?.clone || existsSync(session.clone.path)) return false
+    if (session.uncommitted.length > 0) this.patch(sessionId, () => ({ uncommitted: [] }), true)
+    return true
+  }
+
+  /** Throws when the clone's folder is gone, after forgetting the uncommitted edits that went with it. */
+  private assertCloneFolder(sessionId: string): void {
+    if (this.forgetEditsOfLostClone(sessionId)) throw new Error(CLONE_CLEARED_ERROR)
+  }
+
   /** Throws away edits in the clone that no fix committed, such as those left by a cancelled turn. */
   async discardUncommitted(sessionId: string): Promise<void> {
     this.assertIdle(sessionId)
     const { clone, mergeConflicts } = this.byId(sessionId)
     if (!clone) throw new Error('There is nothing to discard.')
+    this.assertCloneFolder(sessionId)
     if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
     await this.whilePublishing(sessionId, async () => {
       await discardUncommitted(clone)
@@ -230,6 +247,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.assertIdle(sessionId)
     const { clone, mergeConflicts, pr } = this.byId(sessionId)
     if (!clone) throw new Error('There is nothing to commit.')
+    this.assertCloneFolder(sessionId)
     if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
     if (!message.trim()) throw new Error('Write a commit message first.')
     await this.whilePublishing(sessionId, async () => {
@@ -330,7 +348,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
       if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
-      const hasWork = hasUnsharedWork(session) || session.mergeConflicts.length > 0
+      this.forgetEditsOfLostClone(session.id)
+      const hasWork = hasUnsharedWork(this.byId(session.id)) || session.mergeConflicts.length > 0
       if (hasWork || session.reviewersToReRequest.length > 0) continue
       console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId: session.id })
       this.remove(session)
@@ -455,7 +474,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   private async refreshClone(sessionId: string): Promise<void> {
     const clone = this.find(sessionId)?.clone
-    if (!clone || !existsSync(clone.path)) return
+    if (!clone || this.forgetEditsOfLostClone(sessionId)) return
     try {
       const [commits, uncommitted] = await Promise.all([localCommits(clone), uncommittedPaths(clone)])
       this.patch(sessionId, () => ({ commits, uncommitted }), true)

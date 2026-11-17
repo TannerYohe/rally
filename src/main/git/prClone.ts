@@ -21,22 +21,29 @@ export class RemoteMovedError extends Error {
   }
 }
 
+const LOCAL_TIMEOUT_MS = 60_000
+const NETWORK_TIMEOUT_MS = 3 * 60_000
+const CLONE_TIMEOUT_MS = 10 * 60_000
+
 interface GitFailure {
   code?: number | string
+  killed?: boolean
   stderr?: string
 }
 
-async function git(cwd: string, args: string[]): Promise<string> {
+async function git(cwd: string, args: string[], timeoutMs = LOCAL_TIMEOUT_MS): Promise<string> {
   try {
     const { stdout } = await run('git', [...GH_CREDENTIALS, ...args], {
       cwd,
       maxBuffer: MAX_OUTPUT_BYTES,
+      timeout: timeoutMs,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     })
     return stdout
   } catch (error) {
-    const stderr = (error as GitFailure).stderr?.trim()
-    throw Object.assign(new Error(`git ${args[0]} failed: ${stderr || (error as Error).message}`), { code: (error as GitFailure).code })
+    const failure = error as GitFailure
+    const reason = failure.killed ? `timed out after ${Math.round(timeoutMs / 1000)}s` : failure.stderr?.trim() || (error as Error).message
+    throw Object.assign(new Error(`git ${args[0]} failed: ${reason}`), { code: failure.code })
   }
 }
 
@@ -54,24 +61,24 @@ export async function cloneBranch(dir: string, source: CloneSource): Promise<Clo
   const path = join(dir, CLONE_DIR_NAME)
   await mkdir(dir, { recursive: true })
   await rm(path, { recursive: true, force: true })
-  await git(dir, ['clone', '--filter=blob:none', '--single-branch', '--branch', source.branch, source.headUrl, path])
+  await git(dir, ['clone', '--filter=blob:none', '--single-branch', '--branch', source.branch, source.headUrl, path], CLONE_TIMEOUT_MS)
   await git(path, ['config', '--local', '--add', 'credential.helper', ''])
   await git(path, ['config', '--local', '--add', 'credential.helper', GH_CREDENTIAL_HELPER])
   const baseRemote = source.baseUrl === source.headUrl ? 'origin' : 'upstream'
   if (baseRemote === 'upstream') await git(path, ['remote', 'add', 'upstream', source.baseUrl])
-  await git(path, ['fetch', baseRemote, trackingRefspec(baseRemote, source.baseBranch)])
+  await git(path, ['fetch', baseRemote, trackingRefspec(baseRemote, source.baseBranch)], NETWORK_TIMEOUT_MS)
   return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}` }
 }
 
 async function fetchBranch(clone: CloneInfo): Promise<void> {
-  await git(clone.path, ['fetch', 'origin', trackingRefspec('origin', clone.branch)])
+  await git(clone.path, ['fetch', 'origin', trackingRefspec('origin', clone.branch)], NETWORK_TIMEOUT_MS)
 }
 
 /** Fetches the head and base branches, and fast-forwards the clone to GitHub when it has no commits of its own. */
 export async function syncClone(clone: CloneInfo): Promise<void> {
   await fetchBranch(clone)
   const [baseRemote, ...baseBranch] = clone.baseRef.split('/')
-  await git(clone.path, ['fetch', baseRemote, trackingRefspec(baseRemote, baseBranch.join('/'))])
+  await git(clone.path, ['fetch', baseRemote, trackingRefspec(baseRemote, baseBranch.join('/'))], NETWORK_TIMEOUT_MS)
   if ((await localCommits(clone)).length === 0) await git(clone.path, ['reset', '--hard', `origin/${clone.branch}`])
 }
 
@@ -116,7 +123,7 @@ export async function pushClone(clone: CloneInfo, at: string): Promise<PushRecor
   if (commits.length === 0) throw new Error('There are no commits to push.')
   await fetchBranch(clone)
   if (!(await isAncestor(clone, `origin/${clone.branch}`))) throw new RemoteMovedError(clone.branch)
-  await git(clone.path, ['push', 'origin', `HEAD:refs/heads/${clone.branch}`])
+  await git(clone.path, ['push', 'origin', `HEAD:refs/heads/${clone.branch}`], NETWORK_TIMEOUT_MS)
   await fetchBranch(clone)
   const oid = (await git(clone.path, ['rev-parse', 'HEAD'])).trim()
   return { at, oid, commits }

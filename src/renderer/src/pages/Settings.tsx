@@ -6,11 +6,14 @@ import {
   type InstallAttempt,
   EFFORT_LABELS,
   MODEL_LABELS,
+  REVIEW_DONE_SOUND_LABELS,
   type Config,
   type EffortChoice,
   type Health,
   type ModelChoice,
   type ReleaseInfo,
+  type ReviewDoneSound,
+  type SoundCue,
   type UpdateState,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
@@ -25,12 +28,14 @@ import { calendarDate, clockTime, megabytes } from '../lib/format'
 import { useFailedInstall, useUpdateState } from '../lib/hooks'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
 import { SKIN_IDS, SKINS, parseSkinId, useSkinPreview } from '../lib/skins'
+import { playSound } from '../lib/sounds'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
   'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
   reviews: { label: 'Reviews', icon: <SparkleIcon /> },
   appearance: { label: 'Appearance', icon: <PaletteIcon /> },
+  sounds: { label: 'Sounds', icon: <SpeakerIcon /> },
   accounts: { label: 'Accounts', icon: <PersonIcon /> },
   about: { label: 'About', icon: <InfoIcon /> },
 }
@@ -154,6 +159,8 @@ function SectionBody({ section, ...props }: SectionProps & { section: SettingsSe
       return <ReviewsSection {...props} />
     case 'appearance':
       return <AppearanceSection {...props} />
+    case 'sounds':
+      return <SoundsSection {...props} />
     case 'accounts':
       return <AccountsSection {...props} />
     case 'about':
@@ -286,6 +293,92 @@ function AppearanceSection({ config, onChange }: SectionProps) {
         </div>
       </Card>
     </>
+  )
+}
+
+function SoundsSection({ config, onChange }: SectionProps) {
+  const preview = (cue: SoundCue) => playSound({ cue, pack: config.soundPack ?? config.skin, volume: config.soundVolume })
+  return (
+    <>
+      <SectionHeader title="Sounds">Rally plays a short sound when something changes. Each skin has its own set.</SectionHeader>
+      <Card>
+        <Row label="Play sounds">
+          <Switch label="Play sounds" checked={config.soundsEnabled} onChange={(soundsEnabled) => onChange({ ...config, soundsEnabled })} />
+        </Row>
+        <Row label="Volume">
+          <span className="flex items-center gap-3">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              aria-label="Volume"
+              className="w-40 accent-secondary-500"
+              value={config.soundVolume}
+              onChange={(e) => onChange({ ...config, soundVolume: Number(e.target.value) })}
+            />
+            <span className="w-9 text-right text-xs tabular-nums text-ink-400">{config.soundVolume}%</span>
+          </span>
+        </Row>
+        <Row label="Sound set" description="A skin picked here keeps its sounds when you change skins.">
+          <select
+            className={`${FIELD_CLASS} w-56`}
+            value={config.soundPack ?? ''}
+            onChange={(e) => onChange({ ...config, soundPack: e.target.value ? parseSkinId(e.target.value) : null })}
+          >
+            <option value="">Match skin ({SKINS[config.skin].name})</option>
+            {SKIN_IDS.map((id) => (
+              <option key={id} value={id}>
+                {SKINS[id].name}
+              </option>
+            ))}
+          </select>
+        </Row>
+      </Card>
+      <Card title="When to play" description="Sounds play while Rally's window is open, even when it's in the background.">
+        <Row label="Claude finishes a turn" description="A review turn ends or errors. Cancelling a turn plays nothing.">
+          <span className="flex items-center gap-2">
+            <select
+              className={`${FIELD_CLASS} w-56`}
+              value={config.reviewDoneSound}
+              onChange={(e) => onChange({ ...config, reviewDoneSound: e.target.value as ReviewDoneSound })}
+            >
+              {(Object.keys(REVIEW_DONE_SOUND_LABELS) as ReviewDoneSound[]).map((choice) => (
+                <option key={choice} value={choice}>
+                  {REVIEW_DONE_SOUND_LABELS[choice]}
+                </option>
+              ))}
+            </select>
+            <PreviewButton label="Claude finishes a turn" onClick={() => preview('reviewDone')} />
+          </span>
+        </Row>
+        <Row
+          label="A PR needs your attention"
+          description="A PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. Drafts and hidden PRs stay quiet."
+        >
+          <span className="flex items-center gap-2">
+            <Switch label="A PR needs your attention" checked={config.attentionSound} onChange={(attentionSound) => onChange({ ...config, attentionSound })} />
+            <PreviewButton label="A PR needs your attention" onClick={() => preview('needsAttention')} />
+          </span>
+        </Row>
+        <Row label="You approve a PR" description="A new approval of yours shows up on a PR, whether you submitted it in Rally or on GitHub.">
+          <span className="flex items-center gap-2">
+            <Switch label="You approve a PR" checked={config.approvedSound} onChange={(approvedSound) => onChange({ ...config, approvedSound })} />
+            <PreviewButton label="You approve a PR" onClick={() => preview('approved')} />
+          </span>
+        </Row>
+      </Card>
+    </>
+  )
+}
+
+function PreviewButton({ label, onClick }: { label: string; onClick(): void }) {
+  return (
+    <button type="button" title="Play" aria-label={`Play: ${label}`} className="rounded-md p-1.5 text-ink-400 hover:bg-white/5 hover:text-ink-100" onClick={onClick}>
+      <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+        <path d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.8L9.5 4.6A1 1 0 0 0 8 5.5Z" />
+      </svg>
+    </button>
   )
 }
 
@@ -673,6 +766,15 @@ function PaletteIcon() {
       <circle cx="7.5" cy="11" r="1" fill="currentColor" />
       <circle cx="10.5" cy="7" r="1" fill="currentColor" />
       <circle cx="15" cy="7.5" r="1" fill="currentColor" />
+    </svg>
+  )
+}
+
+function SpeakerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
+      <path strokeLinejoin="round" d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path strokeLinecap="round" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
     </svg>
   )
 }

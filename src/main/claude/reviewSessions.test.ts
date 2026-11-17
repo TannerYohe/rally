@@ -275,8 +275,8 @@ describe('submit', () => {
     mocks.submitReview.mockReturnValue(new Promise((resolve) => (finish = resolve)))
     const pending = reviewSessions.submit('test-session-15', 'COMMENT', NO_CHANGES, [])
     expect(session(15).status).toBe('submitting')
-    await expect(reviewSessions.submit('test-session-15', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('already submitting')
-    await expect(reviewSessions.feedback('test-session-15', 'one more thing')).rejects.toThrow('already submitting')
+    await expect(reviewSessions.submit('test-session-15', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('already posting')
+    await expect(reviewSessions.feedback('test-session-15', 'one more thing')).rejects.toThrow('already posting')
     expect(() => reviewSessions.discard('test-session-15')).toThrow('Wait for Rally to finish submitting')
     finish(SUBMITTED)
     await pending

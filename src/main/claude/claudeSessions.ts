@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
-import type { SessionCore, TimelineEntry, TurnMode } from '@shared/types'
+import { prKey, type PrRef, type SessionCore, type SessionStatus, type TimelineEntry, type TurnMode } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import type { JsonDir } from '../jsonFile'
 import { configFile } from '../store'
@@ -37,6 +37,8 @@ export interface TurnSetup {
 export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter {
   protected sessions: Map<string, S>
   protected controllers = new Map<string, AbortController>()
+  /** Sessions Rally is writing to GitHub for, outside a Claude turn. */
+  protected publishing = new Set<string>()
   private pendingFlush: NodeJS.Timeout | null = null
   private dirty = new Set<string>()
 
@@ -57,7 +59,38 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     this.controllers.get(sessionId)?.abort()
   }
 
+  async feedback(sessionId: string, message: string): Promise<void> {
+    this.assertCanStartTurn(sessionId)
+    void this.runTurn(sessionId, message, 'refine')
+  }
+
   protected abstract turnSetup(sessionId: string): TurnSetup
+
+  protected assertIdle(sessionId: string): void {
+    this.byId(sessionId)
+    if (this.isTurnRunning(sessionId)) throw new Error('Claude is already working on this PR')
+    if (this.publishing.has(sessionId)) throw new Error('Rally is already posting to GitHub for this PR. Try again when it finishes.')
+  }
+
+  /** Throws unless a new Claude turn may start; sessions add their own conditions. */
+  protected assertCanStartTurn(sessionId: string): void {
+    this.assertIdle(sessionId)
+  }
+
+  /** Runs a GitHub write for the session, marking it busy so no turn or other write starts meanwhile. */
+  protected async whilePublishing<T>(sessionId: string, action: () => Promise<T>): Promise<T> {
+    this.publishing.add(sessionId)
+    try {
+      return await action()
+    } finally {
+      this.publishing.delete(sessionId)
+    }
+  }
+
+  protected newSessionCore(pr: PrRef, status: SessionStatus): SessionCore {
+    const at = now()
+    return { id: randomUUID(), pr, prKey: prKey(pr.owner, pr.repo, pr.number), sdkSessionId: null, status, error: null, timeline: [], createdAt: at, updatedAt: at }
+  }
 
   protected isTurnRunning(sessionId: string): boolean {
     return this.controllers.has(sessionId)

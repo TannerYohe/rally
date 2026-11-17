@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { CloneInfo, LocalCommit, PushRecord } from '@shared/types'
@@ -14,12 +14,17 @@ const FIELD_SEPARATOR = '\x1f'
 
 export const CLONE_DIR_NAME = 'repo'
 
-export class RemoteMovedError extends Error {
-  constructor(branch: string) {
-    super(`origin/${branch} moved on GitHub and your commits are not on top of it. Rebase onto it before pushing.`)
-    this.name = 'RemoteMovedError'
+export class MergeConflictError extends Error {
+  constructor(
+    branch: string,
+    readonly files: string[],
+  ) {
+    super(`Merging origin/${branch} conflicted in ${files.join(', ')}.`)
+    this.name = 'MergeConflictError'
   }
 }
+
+const CONFLICT_MARKER = /^(?:<{7}|={7}|>{7})(?: |$)/m
 
 const LOCAL_TIMEOUT_MS = 60_000
 const NETWORK_TIMEOUT_MS = 3 * 60_000
@@ -56,14 +61,12 @@ export interface CloneSource {
   baseBranch: string
 }
 
-/** Clones the PR's head branch into `<dir>/repo`, fetches its base branch, and lets git in the clone use gh's credentials. */
+/** Clones the PR's head branch into `<dir>/repo` and fetches its base branch. Rally passes gh's credentials on each network command. */
 export async function cloneBranch(dir: string, source: CloneSource): Promise<CloneInfo> {
   const path = join(dir, CLONE_DIR_NAME)
   await mkdir(dir, { recursive: true })
   await rm(path, { recursive: true, force: true })
   await git(dir, ['clone', '--filter=blob:none', '--single-branch', '--branch', source.branch, source.headUrl, path], CLONE_TIMEOUT_MS)
-  await git(path, ['config', '--local', '--add', 'credential.helper', ''])
-  await git(path, ['config', '--local', '--add', 'credential.helper', GH_CREDENTIAL_HELPER])
   const baseRemote = source.baseUrl === source.headUrl ? 'origin' : 'upstream'
   if (baseRemote === 'upstream') await git(path, ['remote', 'add', 'upstream', source.baseUrl])
   await git(path, ['fetch', baseRemote, trackingRefspec(baseRemote, source.baseBranch)], NETWORK_TIMEOUT_MS)
@@ -117,12 +120,50 @@ async function isAncestor(clone: CloneInfo, ancestor: string): Promise<boolean> 
   }
 }
 
-/** Pushes the clone's commits to the head branch without force, refusing when GitHub has commits the clone lacks. */
+/** Commits the listed files, including deletions, and returns the new commit's sha, or null when they have no changes. */
+export async function commitFiles(clone: CloneInfo, files: string[], message: string): Promise<string | null> {
+  await git(clone.path, ['add', '-A', '--', ...files])
+  const staged = await git(clone.path, ['diff', '--cached', '--name-only'])
+  if (!staged.trim()) return null
+  await git(clone.path, ['commit', '-m', message, '--', ...files])
+  return (await git(clone.path, ['rev-parse', 'HEAD'])).trim()
+}
+
+async function conflictedFiles(clone: CloneInfo): Promise<string[]> {
+  const out = await git(clone.path, ['diff', '--name-only', '--diff-filter=U'])
+  return out.split('\n').filter(Boolean)
+}
+
+/** Merges the remote branch into the clone, leaving the merge in progress and throwing MergeConflictError when it conflicts. */
+export async function mergeRemote(clone: CloneInfo): Promise<void> {
+  try {
+    await git(clone.path, ['merge', '--no-edit', `origin/${clone.branch}`])
+  } catch (error) {
+    const files = await conflictedFiles(clone)
+    if (files.length === 0) throw error
+    throw new MergeConflictError(clone.branch, files)
+  }
+}
+
+/** Commits a merge whose conflicts were resolved, refusing while any of the files still has conflict markers. */
+export async function concludeMerge(clone: CloneInfo, files: string[]): Promise<void> {
+  const contents = await Promise.all(files.map(async (file) => [file, await readFile(join(clone.path, file), 'utf8').catch(() => '')] as const))
+  const unresolved = contents.filter(([, text]) => CONFLICT_MARKER.test(text)).map(([file]) => file)
+  if (unresolved.length > 0) throw new Error(`Conflict markers remain in ${unresolved.join(', ')}.`)
+  await git(clone.path, ['add', '-A', '--', ...files])
+  await git(clone.path, ['commit', '--no-edit'])
+}
+
+export async function abortMerge(clone: CloneInfo): Promise<void> {
+  await git(clone.path, ['merge', '--abort'])
+}
+
+/** Pushes the clone's commits to the head branch without force, first merging in commits that landed on GitHub since. */
 export async function pushClone(clone: CloneInfo, at: string): Promise<PushRecord> {
-  const commits = await localCommits(clone)
-  if (commits.length === 0) throw new Error('There are no commits to push.')
+  if ((await localCommits(clone)).length === 0) throw new Error('There are no commits to push.')
   await fetchBranch(clone)
-  if (!(await isAncestor(clone, `origin/${clone.branch}`))) throw new RemoteMovedError(clone.branch)
+  if (!(await isAncestor(clone, `origin/${clone.branch}`))) await mergeRemote(clone)
+  const commits = await localCommits(clone)
   await git(clone.path, ['push', 'origin', `HEAD:refs/heads/${clone.branch}`], NETWORK_TIMEOUT_MS)
   await fetchBranch(clone)
   const oid = (await git(clone.path, ['rev-parse', 'HEAD'])).trim()

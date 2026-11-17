@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { cloneBranch, cloneDiff, localCommits, pushClone, RemoteMovedError, syncClone, uncommittedPaths } from './prClone'
+import { abortMerge, cloneBranch, cloneDiff, commitFiles, concludeMerge, localCommits, MergeConflictError, pushClone, syncClone, uncommittedPaths } from './prClone'
 
 const root = mkdtempSync(join(tmpdir(), 'rally-clone-test-'))
 const remote = join(root, 'remote.git')
@@ -32,6 +32,7 @@ function commitFile(cwd: string, name: string, content: string): void {
 const source = { headUrl: `file://${remote}`, branch: 'feature', baseUrl: `file://${remote}`, baseBranch: 'main' }
 
 beforeAll(() => {
+  for (const key of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const) process.env[key] = TEST_GIT_ENV[key]
   git(root, 'init', '--bare', '--initial-branch=main', remote)
   git(root, 'init', '--initial-branch=main', seed)
   commitFile(seed, 'a.txt', 'one\n')
@@ -69,14 +70,60 @@ describe('prClone', () => {
     expect(await localCommits(clone)).toEqual([])
   })
 
-  it('refuses to push when the branch moved on GitHub', async () => {
+  it('merges commits that landed on GitHub before pushing', async () => {
     const clone = await cloneBranch(join(root, 'session3'), source)
     const other = await cloneBranch(join(root, 'session4'), source)
     commitFile(other.path, 'd.txt', 'four\n')
-    await pushClone(other, AT)
+    const theirs = await pushClone(other, AT)
 
     commitFile(clone.path, 'e.txt', 'five\n')
-    await expect(pushClone(clone, AT)).rejects.toBeInstanceOf(RemoteMovedError)
+    const pushed = await pushClone(clone, AT)
+    expect(git(root, '--git-dir', remote, 'rev-parse', 'feature').trim()).toBe(pushed.oid)
+    expect(git(clone.path, 'log', '-1', '--format=%P').trim().split(' ')).toContain(theirs.oid)
+  })
+
+  it('leaves a conflicting merge in progress and commits it once resolved', async () => {
+    const clone = await cloneBranch(join(root, 'session11'), source)
+    const other = await cloneBranch(join(root, 'session12'), source)
+    commitFile(other.path, 'b.txt', 'theirs\n')
+    await pushClone(other, AT)
+    commitFile(clone.path, 'b.txt', 'mine\n')
+
+    const conflict = await pushClone(clone, AT).catch((error: unknown) => error)
+    expect(conflict).toBeInstanceOf(MergeConflictError)
+    expect((conflict as MergeConflictError).files).toEqual(['b.txt'])
+    await expect(concludeMerge(clone, ['b.txt'])).rejects.toThrow('Conflict markers remain in b.txt')
+
+    writeFileSync(join(clone.path, 'b.txt'), 'both\n')
+    await concludeMerge(clone, ['b.txt'])
+    const pushed = await pushClone(clone, AT)
+    expect(git(root, '--git-dir', remote, 'show', `${pushed.oid}:b.txt`)).toBe('both\n')
+  })
+
+  it('aborts a conflicting merge', async () => {
+    const clone = await cloneBranch(join(root, 'session13'), source)
+    const other = await cloneBranch(join(root, 'session14'), source)
+    commitFile(other.path, 'a.txt', 'theirs\n')
+    await pushClone(other, AT)
+    commitFile(clone.path, 'a.txt', 'mine\n')
+    await pushClone(clone, AT).catch(() => {})
+
+    await abortMerge(clone)
+    expect(await uncommittedPaths(clone)).toEqual([])
+    expect((await localCommits(clone)).map((c) => c.subject)).toEqual(['change a.txt'])
+  })
+
+  it('commits only the listed files and returns null when they have no changes', async () => {
+    const clone = await cloneBranch(join(root, 'session15'), source)
+    writeFileSync(join(clone.path, 'fix.txt'), 'fix\n')
+    writeFileSync(join(clone.path, 'other.txt'), 'other\n')
+    rmSync(join(clone.path, 'a.txt'))
+
+    const oid = await commitFiles(clone, ['fix.txt', 'a.txt'], 'Fix the thing')
+    expect((await localCommits(clone))[0]).toEqual({ oid, subject: 'Fix the thing' })
+    expect(git(clone.path, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['A\tfix.txt', 'D\ta.txt'])
+    expect(await uncommittedPaths(clone)).toEqual(['other.txt'])
+    expect(await commitFiles(clone, ['fix.txt'], 'Nothing new')).toBeNull()
   })
 
   it('fast-forwards a clone with no commits of its own on sync', async () => {

@@ -14,6 +14,7 @@ interface Props {
   onPush(): void
   onResolveConflicts(): void
   onAbortMerge(): void
+  onDiscardUncommitted(): void
 }
 
 function useCloneDiff(session: AuthorSession): { diff: string; error: string | null } {
@@ -36,7 +37,7 @@ function useCloneDiff(session: AuthorSession): { diff: string; error: string | n
   return state
 }
 
-export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge }: Props) {
+export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge, onDiscardUncommitted }: Props) {
   const { diff, error } = useCloneDiff(session)
   const { commits, uncommitted, lastPush, mergeConflicts, clone } = session
 
@@ -58,9 +59,14 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
           </div>
         </div>
       )}
-      {uncommitted.length > 0 && (
-        <div className="rounded-lg bg-amber-950/50 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/20" title={uncommitted.join('\n')}>
-          {uncommitted.length} changed file(s) in the clone aren't part of any fix Claude listed, so Rally didn't commit them. They won't be pushed.
+      {uncommitted.length > 0 && mergeConflicts.length === 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-amber-950/50 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/20">
+          <span title={uncommitted.join('\n')}>
+            {uncommitted.length} changed file(s) in the clone aren't part of a committed fix, so they won't be pushed, and Rally can't merge new commits from GitHub over them.
+          </span>
+          <button className={`${MERGE_BUTTON_CLASS} ml-auto`} disabled={disabled} onClick={onDiscardUncommitted}>
+            Discard uncommitted changes
+          </button>
         </div>
       )}
 

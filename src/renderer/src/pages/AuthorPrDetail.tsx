@@ -208,6 +208,9 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             onPush={() => run(() => window.rally.pushAuthorCommits(session.id))}
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
+            onDiscardUncommitted={() =>
+              window.confirm(`Discard ${session.uncommitted.length} uncommitted change(s) in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
+            }
           />
         ) : (
           <EmptyTab>No changes yet. Pick Fix on a comment to have Claude change the code.</EmptyTab>

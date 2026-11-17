@@ -264,7 +264,7 @@ export interface SubmittedReview {
   foldedDraftIds?: string[]
 }
 
-export type FeedbackItemKind = 'thread' | 'review' | 'finding'
+export type FeedbackItemKind = 'thread' | 'review' | 'comment' | 'finding'
 
 export interface FeedbackComment {
   author: string | null
@@ -288,6 +288,8 @@ export interface FeedbackItem {
   answered: boolean
   comments: FeedbackComment[]
   replyToCommentId: number | null
+  /** Node id of the comment an acknowledgment reaction goes on, or null when there is nothing to react to. */
+  reactionSubjectId: string | null
 }
 
 export interface PrRef {
@@ -319,7 +321,7 @@ export interface ReviewSession extends SessionCore {
   submitAttemptReviewId?: number
 }
 
-export const RESPONSE_ACTIONS = ['investigate', 'fix', 'push_back'] as const
+export const RESPONSE_ACTIONS = ['investigate', 'fix', 'push_back', 'answer'] as const
 
 export type ResponseAction = (typeof RESPONSE_ACTIONS)[number]
 
@@ -327,6 +329,7 @@ export const RESPONSE_ACTION_LABELS: Record<ResponseAction, string> = {
   investigate: 'Investigate',
   fix: 'Fix',
   push_back: 'Push back',
+  answer: 'Answer',
 }
 
 export const RESPONSE_VERDICTS = ['valid', 'partly_valid', 'not_valid', 'unclear'] as const

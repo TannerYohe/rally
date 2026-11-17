@@ -23,7 +23,14 @@ export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {
 
 export function itemLocation(item: Pick<FeedbackItem, 'path' | 'line' | 'kind'>): string {
   if (item.path) return item.line === null ? item.path : `${item.path}:${item.line}`
-  return item.kind === 'review' ? 'Review comment' : 'General'
+  switch (item.kind) {
+    case 'review':
+      return 'Review summary'
+    case 'comment':
+      return 'PR comment'
+    default:
+      return 'General'
+  }
 }
 
 /** Returns the turn message asking Claude to rebase its commits after the branch moved on GitHub. */

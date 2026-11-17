@@ -52,6 +52,7 @@ describe('hasPendingWork', () => {
 describe('itemLocation', () => {
   it('names the file and line, or the kind of comment', () => {
     expect(itemLocation({ kind: 'thread', path: 'a.ts', line: 3 })).toBe('a.ts:3')
-    expect(itemLocation({ kind: 'review', path: null, line: null })).toBe('Review comment')
+    expect(itemLocation({ kind: 'review', path: null, line: null })).toBe('Review summary')
+    expect(itemLocation({ kind: 'comment', path: null, line: null })).toBe('PR comment')
   })
 })

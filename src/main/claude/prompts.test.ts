@@ -36,6 +36,7 @@ describe('authorActionsPrompt', () => {
       { author: 'me', avatarUrl: null, body: 'Which name?', createdAt: '', url: '' },
     ],
     replyToCommentId: 1,
+    reactionSubjectId: 'C2',
   }
 
   it('lists each requested item with its action, thread, and note', () => {

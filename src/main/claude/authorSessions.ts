@@ -53,6 +53,7 @@ export function findingsFromDrafts(drafts: Drafts, at: string): FeedbackItem[] {
     answered: false,
     comments: [{ author: null, avatarUrl: null, body: comment.body, createdAt: at, url: '' }],
     replyToCommentId: null,
+    reactionSubjectId: null,
   }))
 }
 

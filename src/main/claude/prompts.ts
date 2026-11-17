@@ -1,5 +1,5 @@
 import { itemLocation } from '@shared/authorSession'
-import { DEFAULT_CONFIG, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneInfo, type FeedbackItem, type PrRef } from '@shared/types'
+import { DEFAULT_CONFIG, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneInfo, type FeedbackItem, type FeedbackItemKind, type PrRef } from '@shared/types'
 import { PUBLISH_RESPONSES_TOOL } from './authorTools'
 import { PUBLISH_DRAFTS_TOOL } from './rallyTools'
 
@@ -21,6 +21,7 @@ export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The
   - investigate: decide whether the comment holds against the code. Do not change code. Give a verdict with file:line evidence. If the comment does not hold, draft the reply the author would post to explain why; if it holds, leave the reply empty and say in the summary what a fix would take.
   - fix: the author agrees. Make the smallest change that resolves it, run the relevant tests or checks when they are quick, and commit. Draft a short reply naming the commit's short sha and what changed.
   - push_back: the author disagrees. Do not change code. Draft a short, respectful reply that explains why, citing the code.
+  - answer: the comment asks a question or makes a remark rather than pointing out a problem. Do not change code. Draft a reply that answers it, reading the code when the answer depends on it.
 - The author's note on an item overrides your own judgement.
 - After handling the items, call ${PUBLISH_RESPONSES_TOOL} once with an entry for every item in the request. Each later turn that changes an item's result, call it again for that item.
 - Replies post under the author's name. Write them in the first person as the author, plain and brief, with no greeting or sign-off.
@@ -41,8 +42,15 @@ function quote(text: string): string {
     .join('\n')
 }
 
+const ITEM_SOURCE_LABELS: Record<FeedbackItemKind, string> = {
+  thread: 'Thread',
+  review: 'Review',
+  comment: 'PR comment',
+  finding: 'Self-review finding',
+}
+
 function itemSection(item: FeedbackItem, request: ActionRequest): string {
-  const source = item.kind === 'finding' ? 'Self-review finding' : `${item.kind === 'review' ? 'Review' : 'Thread'} by @${item.author ?? 'ghost'}`
+  const source = item.kind === 'finding' ? 'Self-review finding' : `${ITEM_SOURCE_LABELS[item.kind]} by @${item.author ?? 'ghost'}`
   const lines = [
     `## Item ${item.id}: ${RESPONSE_ACTION_LABELS[request.action]}`,
     `${source} on ${itemLocation(item)}${item.outdated ? ' (outdated)' : ''}${item.severity ? `, severity ${item.severity}` : ''}`,

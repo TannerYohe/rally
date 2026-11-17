@@ -25,6 +25,7 @@ const thread = (id: string): FeedbackItem => ({
   answered: false,
   comments: [{ author: 'bob', avatarUrl: null, body: 'Rename this', createdAt: '2026-11-01T00:00:00Z', url: '' }],
   replyToCommentId: 1,
+  reactionSubjectId: 'C1',
 })
 
 const response = (itemId: string, reply: string): ItemResponse => ({

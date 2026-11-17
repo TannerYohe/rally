@@ -236,7 +236,7 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
-export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review'
+export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review' | 'resolve_merge'
 
 export type TimelineEntry =
   | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }

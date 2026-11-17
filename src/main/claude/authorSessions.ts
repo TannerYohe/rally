@@ -13,6 +13,7 @@ import {
   type PostedReply,
   type PrRef,
   type ReplyPost,
+  type TurnMode,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import {
@@ -22,6 +23,7 @@ import {
   cloneDiff,
   commitFiles,
   concludeMerge,
+  discardUncommitted,
   localCommits,
   MergeConflictError,
   pushClone,
@@ -29,6 +31,7 @@ import {
   uncommittedPaths,
 } from '../git/prClone'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
+import { github } from '../github/client'
 import { uniqueLogins } from '../github/logins'
 import { fetchApprovers, isRejectedRequest, repliedReviewers, requestReview, reviewersReady } from '../github/reviewRequests'
 import { fetchCloneSource, postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
@@ -42,6 +45,8 @@ const INTERRUPTED_TURN_ERROR = 'Interrupted when Rally closed. Send a message or
 const INTERRUPTED_PUBLISH_ERROR = 'Rally closed while pushing or posting. Check the PR on GitHub before trying again.'
 const MERGE_IN_PROGRESS_ERROR = 'Finish or abort the merge in the Changes tab first.'
 const NOTHING_TO_COMMIT_ERROR = 'Claude listed files for this fix, but they had no changes to commit.'
+const TURN_DID_NOT_FINISH_ERROR = `The turn didn't finish, so Rally didn't commit these files. Run Fix again.`
+const CLONE_LOST_ERROR = `Rally's clone of this PR is gone, probably cleared from the temp folder, and its unpushed commits with it. Start over to clone again.`
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
 function restoreAuthorSession(stored: AuthorSession): AuthorSession {
@@ -98,6 +103,18 @@ function receivedResponse(published: PublishedResponse, previous: ItemResponse |
 
 const fillCommit = (reply: string, oid: string) => reply.replaceAll(COMMIT_PLACEHOLDER, shortSha(oid))
 
+/** Points each response's commits and reply at the shas Rally gave its commits when replaying them onto a force-pushed branch. */
+function rewriteCommits(responses: Record<string, ItemResponse>, rewritten: Record<string, string>): Record<string, ItemResponse> {
+  const pairs = Object.entries(rewritten).filter(([from, to]) => from !== to)
+  if (pairs.length === 0) return responses
+  const rewrite = (response: ItemResponse): ItemResponse => ({
+    ...response,
+    commits: response.commits.map((oid) => rewritten[oid] ?? oid),
+    reply: pairs.reduce((reply, [from, to]) => reply.replaceAll(shortSha(from), shortSha(to)), response.reply),
+  })
+  return Object.fromEntries(Object.entries(responses).map(([id, response]) => [id, rewrite(response)]))
+}
+
 const knownItemIds = (session: AuthorSession) => new Set([...session.items, ...(session.selfReview?.findings ?? [])].map((i) => i.id))
 
 class AuthorSessions extends ClaudeSessions<AuthorSession> {
@@ -149,12 +166,13 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const { clone, pr } = this.byId(sessionId)
     if (!clone) throw new Error('There are no commits to push.')
     if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
+    this.assertCloneExists(sessionId)
     this.publishing.add(sessionId)
     this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
     let conflicts: string[] = []
     try {
-      const lastPush = await pushClone(clone, now())
-      this.patch(sessionId, () => ({ status: 'awaiting_feedback', lastPush, commits: [] }), true)
+      const { push: lastPush, clone: pushed, rewritten } = await pushClone(clone, now())
+      this.patch(sessionId, (s) => ({ status: 'awaiting_feedback', lastPush, clone: pushed, commits: [], responses: rewriteCommits(s.responses, rewritten) }), true)
     } catch (error) {
       await this.refreshClone(sessionId)
       if (!(error instanceof MergeConflictError)) {
@@ -167,8 +185,27 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     } finally {
       this.publishing.delete(sessionId)
     }
-    if (conflicts.length > 0) void this.runTurn(sessionId, mergeConflictPrompt(clone, conflicts), 'refine')
+    if (conflicts.length > 0) void this.runTurn(sessionId, mergeConflictPrompt(clone, conflicts), 'resolve_merge')
     else this.refreshPr(pr)
+  }
+
+  /** Throws when the clone recorded unpushed commits but its folder is gone, rather than silently cloning again. */
+  private assertCloneExists(sessionId: string): void {
+    const { clone, commits } = this.byId(sessionId)
+    if (clone && !existsSync(clone.path) && commits.length > 0) {
+      this.patch(sessionId, () => ({ status: 'error', error: CLONE_LOST_ERROR }), true)
+      throw new Error(CLONE_LOST_ERROR)
+    }
+  }
+
+  /** Throws away edits in the clone that no fix committed, such as those left by a cancelled turn. */
+  async discardUncommitted(sessionId: string): Promise<void> {
+    this.assertIdle(sessionId)
+    const { clone, mergeConflicts } = this.byId(sessionId)
+    if (!clone) throw new Error('There is nothing to discard.')
+    if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
+    await discardUncommitted(clone)
+    await this.refreshClone(sessionId)
   }
 
   /** Starts a Claude turn to resolve the conflicts left by merging the remote branch. */
@@ -176,7 +213,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.assertIdle(sessionId)
     const { clone, mergeConflicts } = this.byId(sessionId)
     if (!clone || mergeConflicts.length === 0) throw new Error('There is no merge to resolve.')
-    void this.runTurn(sessionId, mergeConflictPrompt(clone, mergeConflicts), 'refine')
+    void this.runTurn(sessionId, mergeConflictPrompt(clone, mergeConflicts), 'resolve_merge')
   }
 
   async abortMerge(sessionId: string): Promise<void> {
@@ -212,7 +249,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         else answered.push(items.get(post.itemId)!)
         this.patch(sessionId, (s) => ({ posted: { ...s.posted, [post.itemId]: posted } }), true)
       }
-      if (reRequestReviews) this.queueReRequests(sessionId, repliedReviewers(answered, this.viewer()))
+      if (reRequestReviews) this.queueReRequests(sessionId, repliedReviewers(answered, (await github()).login))
       await this.settleReRequests(sessionId)
     } finally {
       this.publishing.delete(sessionId)
@@ -247,11 +284,12 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }, true)
   }
 
-  /** Removes idle sessions, and their clones, for PRs that left the list, keeping any with unpushed commits or an open merge. */
+  /** Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a turn, commits, replies, a merge, or queued re-requests. */
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
       if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
-      if (session.commits.length > 0 || session.mergeConflicts.length > 0) continue
+      if (hasPendingWork(session) || session.mergeConflicts.length > 0 || session.reviewersToReRequest.length > 0) continue
+      console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId: session.id })
       this.remove(session)
     }
   }
@@ -294,15 +332,20 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer, readOnlyGitRepos: [join(sessionDir(sessionId), CLONE_DIR_NAME)] }
   }
 
-  /** Commits what a successful turn produced, a resolved merge or the files listed for each fix, then reads the clone's state after any turn. */
-  protected async turnEnded(sessionId: string, succeeded: boolean): Promise<void> {
+  /**
+   * Commits what a successful turn produced: the merge on a merge-resolution turn, else the files listed for each fix.
+   * A failed or cancelled turn commits nothing and marks its pending fixes as not committed. The clone's state is read after any turn.
+   */
+  protected async turnEnded(sessionId: string, succeeded: boolean, mode: TurnMode): Promise<void> {
     const session = this.find(sessionId)
-    const clone = session?.clone
-    if (!session || !clone || !existsSync(clone.path)) return
+    if (!session) return
+    if (!succeeded) this.dropPendingCommits(sessionId)
+    const clone = session.clone
+    if (!clone || !existsSync(clone.path)) return
     try {
-      if (succeeded && session.mergeConflicts.length > 0) {
-        await concludeMerge(clone, session.mergeConflicts)
-        this.patch(sessionId, () => ({ mergeConflicts: [] }), true)
+      if (succeeded && mode === 'resolve_merge') {
+        const merged = await concludeMerge(clone, session.mergeConflicts)
+        this.patch(sessionId, () => ({ mergeConflicts: [], clone: merged }), true)
       } else if (succeeded) {
         await this.commitPublishedFixes(sessionId, clone)
       }
@@ -311,16 +354,34 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }
   }
 
-  /** Commits each fix's listed files in its own commit and puts the short sha into its reply. */
+  private dropPendingCommits(sessionId: string): void {
+    this.patch(
+      sessionId,
+      (s) => ({
+        responses: Object.fromEntries(
+          Object.entries(s.responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError: TURN_DID_NOT_FINISH_ERROR } : r]),
+        ),
+      }),
+      true,
+    )
+  }
+
+  /** Commits each fix's listed files in its own commit and puts the short sha into its reply; one fix failing to commit doesn't stop the rest. */
   private async commitPublishedFixes(sessionId: string, clone: CloneInfo): Promise<void> {
     const committedFile = new Map<string, string>()
     for (const response of Object.values(this.byId(sessionId).responses).filter((r) => r.pendingCommit)) {
-      const oid = await commitFiles(clone, response.files, response.commitMessage.trim() || `Address review comment ${response.itemId}`)
-      if (oid) for (const file of response.files) committedFile.set(file, oid)
-      const covering = oid ?? response.files.map((file) => committedFile.get(file)).find(Boolean) ?? response.commits.at(-1) ?? null
-      const update: ItemResponse = covering
-        ? { ...response, pendingCommit: false, commits: oid ? [...response.commits, oid] : response.commits, reply: fillCommit(response.reply, covering) }
-        : { ...response, pendingCommit: false, commitError: NOTHING_TO_COMMIT_ERROR }
+      let update: ItemResponse
+      try {
+        const oid = await commitFiles(clone, response.files, response.commitMessage.trim() || `Address review comment ${response.itemId}`)
+        if (oid) for (const file of response.files) committedFile.set(file, oid)
+        const covering = oid ?? response.files.map((file) => committedFile.get(file)).find(Boolean) ?? response.commits.at(-1) ?? null
+        update = covering
+          ? { ...response, pendingCommit: false, commits: oid ? [...response.commits, oid] : response.commits, reply: fillCommit(response.reply, covering) }
+          : { ...response, pendingCommit: false, commitError: NOTHING_TO_COMMIT_ERROR }
+      } catch (error) {
+        console.error('Committing a fix failed', { sessionId, itemId: response.itemId, files: response.files, error })
+        update = { ...response, pendingCommit: false, commitError: `Rally couldn't commit this fix: ${errorMessage(error)}` }
+      }
       this.patch(sessionId, (s) => ({ responses: { ...s.responses, [response.itemId]: update } }), true)
     }
   }
@@ -344,9 +405,11 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       this.patch(sessionId, (s) => ({ timeline: s.timeline.map((e) => (e.id === stepId && e.kind === 'step' ? { ...e, done: true } : e)) }))
     try {
       if (clone && existsSync(clone.path)) {
-        await syncClone(clone)
-        return clone
+        const synced = await syncClone(clone)
+        this.patch(sessionId, () => ({ clone: synced }), true)
+        return synced
       }
+      this.assertCloneExists(sessionId)
       const fresh = await cloneBranch(sessionDir(sessionId), await fetchCloneSource(pr))
       this.patch(sessionId, () => ({ clone: fresh }), true)
       return fresh
@@ -390,10 +453,6 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.patch(sessionId, (s) => ({ reviewersToReRequest: uniqueLogins([...s.reviewersToReRequest, ...reviewers]) }), true)
   }
 
-  private viewer(): string {
-    return authoredPrList.get().viewer ?? ''
-  }
-
   /** Re-requests each queued reviewer with nothing left unanswered, one at a time so GitHub rejecting one doesn't hold back the rest. */
   private async settleReRequests(sessionId: string): Promise<void> {
     const { pr, reviewersToReRequest } = this.byId(sessionId)
@@ -401,7 +460,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     let split
     try {
       const [items, approvers] = await Promise.all([fetchFeedbackItems(pr), fetchApprovers(pr)])
-      split = reviewersReady(reviewersToReRequest, items, approvers, this.viewer())
+      split = reviewersReady(reviewersToReRequest, items, approvers, (await github()).login)
     } catch (error) {
       console.error('Checking reviewers to re-request failed', { pr: pr.url, error })
       this.patch(sessionId, () => ({ lastReRequest: { at: now(), reviewers: [], error: errorMessage(error) } }), true)

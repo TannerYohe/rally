@@ -157,7 +157,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
   }
 
   /** Runs after every turn, whether it succeeded, failed, or was cancelled, while the session still counts as busy. */
-  protected async turnEnded(_sessionId: string, _succeeded: boolean): Promise<void> {}
+  protected async turnEnded(_sessionId: string, _succeeded: boolean, _mode: TurnMode): Promise<void> {}
 
   private finishTurn(sessionId: string, resultOk: boolean): void {
     this.patchCore(
@@ -239,7 +239,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
       failure = error
     }
     try {
-      await this.turnEnded(sessionId, failure === null && resultOk)
+      await this.turnEnded(sessionId, failure === null && resultOk, mode)
     } catch (error) {
       console.error('Finishing a turn failed', { sessionId, error })
       failure ??= error

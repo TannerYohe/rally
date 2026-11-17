@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   commitFiles: vi.fn(),
   concludeMerge: vi.fn(),
   abortMerge: vi.fn(),
+  discardUncommitted: vi.fn(),
   refreshOne: vi.fn(async () => {}),
   handlers: null as AuthorToolHandlers | null,
 }))
@@ -37,7 +38,8 @@ vi.mock('../store', () => ({
   configFile: { get: () => ({ reviewSkill: 'review-pr' }) },
   authorSessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
 }))
-vi.mock('../prList', () => ({ authoredPrList: { refreshOne: mocks.refreshOne, get: () => ({ viewer: 'me' }) } }))
+vi.mock('../prList', () => ({ authoredPrList: { refreshOne: mocks.refreshOne } }))
+vi.mock('../github/client', () => ({ github: async () => ({ login: 'me' }) }))
 vi.mock('../github/authorFeedback', () => ({ fetchFeedbackItems: mocks.fetchFeedbackItems, acknowledgeFeedbackItem: mocks.acknowledgeFeedbackItem }))
 vi.mock('../github/reviewRequests', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../github/reviewRequests')>()),
@@ -55,6 +57,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   commitFiles: mocks.commitFiles,
   concludeMerge: mocks.concludeMerge,
   abortMerge: mocks.abortMerge,
+  discardUncommitted: mocks.discardUncommitted,
   cloneBranch: mocks.cloneBranch,
   syncClone: mocks.syncClone,
   localCommits: mocks.localCommits,
@@ -95,10 +98,33 @@ mocks.stored = [
   stored(11, { reviewersToReRequest: ['erin', 'frank'] }),
   stored(14, { clone: CLONE, mergeConflicts: ['a.ts'], items: [thread('T1')] }),
   stored(15, { clone: CLONE, items: [thread('T1')] }),
+  stored(16, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', '', { action: 'fix', pendingCommit: true, files: ['a.ts'] }) } }),
+  stored(17, {
+    clone: CLONE,
+    items: [thread('T1'), thread('T2'), thread('T3'), thread('T4')],
+    responses: {
+      T1: response('T1', 'Renamed in {commit}', { action: 'fix', pendingCommit: true, files: ['a.ts'], commitMessage: 'Rename' }),
+      T2: response('T2', 'Also in {commit}', { action: 'fix', pendingCommit: true, files: ['a.ts'] }),
+      T3: response('T3', 'Gone in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }),
+      T4: response('T4', 'Bad path {commit}', { action: 'fix', pendingCommit: true, files: ['../outside.ts'] }),
+    },
+  }),
+  stored(18, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(19, {
+    clone: { ...CLONE, syncedHead: 'old-head' },
+    commits: [{ oid: 'aaaaaaa111', subject: 'fix' }],
+    items: [thread('T1')],
+    responses: { T1: response('T1', 'Fixed in aaaaaaa.', { action: 'fix', commits: ['aaaaaaa111'] }) },
+  }),
+  stored(24, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-missing-clone') }, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(25, { clone: CLONE, uncommitted: ['a.ts'] }),
+  stored(26, { clone: CLONE, mergeConflicts: ['a.ts'] }),
   stored(40),
   stored(41, { responses: { T1: response('T1', 'Unposted') }, items: [thread('T1')] }),
   stored(42, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
   stored(43, { clone: CLONE, mergeConflicts: ['a.ts'] }),
+  stored(44, { reviewersToReRequest: ['bob'] }),
+  stored(45),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
@@ -128,6 +154,8 @@ beforeEach(() => {
     mocks.pushClone,
     mocks.commitFiles,
     mocks.concludeMerge,
+    mocks.abortMerge,
+    mocks.discardUncommitted,
     mocks.requestReview,
     mocks.acknowledgeFeedbackItem,
   ])
@@ -199,9 +227,9 @@ describe('runActions', () => {
 describe('push', () => {
   it('clears local commits after a push', async () => {
     const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
-    mocks.pushClone.mockResolvedValue(lastPush)
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: { ...CLONE, syncedHead: 'abc' }, rewritten: {} })
     await authorSessions.push('author-3')
-    expect(session(3)).toMatchObject({ status: 'awaiting_feedback', commits: [], lastPush, mergeConflicts: [] })
+    expect(session(3)).toMatchObject({ status: 'awaiting_feedback', commits: [], lastPush, mergeConflicts: [], clone: { syncedHead: 'abc' } })
     expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 3)
   })
 
@@ -214,6 +242,49 @@ describe('push', () => {
     await vi.waitFor(() => expect(mocks.concludeMerge).toHaveBeenCalledWith(CLONE, ['a.ts']))
     expect(mocks.query.mock.calls[0][0].prompt).toContain('- a.ts')
     await vi.waitFor(() => expect(session(4)).toMatchObject({ status: 'awaiting_feedback', mergeConflicts: [] }))
+  })
+
+  it('records a push that fails for a reason other than a conflict and keeps the commits', async () => {
+    mocks.pushClone.mockRejectedValue(new Error('git push failed: rejected'))
+    mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
+    await expect(authorSessions.push('author-18')).rejects.toThrow('rejected')
+    expect(session(18)).toMatchObject({ status: 'error', error: 'git push failed: rejected', commits: [{ oid: 'abc', subject: 'fix' }], mergeConflicts: [] })
+    expect(mocks.query).not.toHaveBeenCalled()
+    expect(mocks.refreshOne).not.toHaveBeenCalledWith('acme', 'api', 18)
+  })
+
+  it('points replies and commits at the new shas after replaying onto a force-pushed branch', async () => {
+    const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'bbbbbbb222', commits: [{ oid: 'bbbbbbb222', subject: 'fix' }] }
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: { ...CLONE, syncedHead: 'bbbbbbb222' }, rewritten: { aaaaaaa111: 'bbbbbbb222' } })
+    await authorSessions.push('author-19')
+    expect(session(19).responses.T1).toMatchObject({ commits: ['bbbbbbb222'], reply: 'Fixed in bbbbbbb.' })
+  })
+
+  it('refuses to push or clone again when the clone holding unpushed commits is gone', async () => {
+    await expect(authorSessions.push('author-24')).rejects.toThrow("Rally's clone of this PR is gone")
+    expect(mocks.pushClone).not.toHaveBeenCalled()
+    mocks.fetchFeedbackItems.mockResolvedValue([thread('T1')])
+    await expect(authorSessions.runActions(pr(24), [{ itemId: 'T1', action: 'fix', note: '' }], '')).rejects.toThrow("Rally's clone of this PR is gone")
+    expect(mocks.cloneBranch).not.toHaveBeenCalledWith(join(tmpdir(), 'rally', 'author-24'), expect.anything())
+  })
+
+  it('aborts an open merge and lets new turns start again', async () => {
+    await authorSessions.abortMerge('author-26')
+    expect(mocks.abortMerge).toHaveBeenCalledWith(CLONE)
+    expect(session(26)).toMatchObject({ mergeConflicts: [], status: 'awaiting_feedback' })
+  })
+
+  it('refuses a self-review or a message while a merge is open', async () => {
+    await expect(authorSessions.selfReview(pr(14))).rejects.toThrow('Finish or abort the merge')
+    await expect(authorSessions.feedback('author-14', 'hi')).rejects.toThrow('Finish or abort the merge')
+    expect(mocks.query).not.toHaveBeenCalled()
+  })
+
+  it('discards uncommitted edits', async () => {
+    mocks.uncommittedPaths.mockResolvedValue([])
+    await authorSessions.discardUncommitted('author-25')
+    expect(mocks.discardUncommitted).toHaveBeenCalledWith(CLONE)
+    expect(session(25).uncommitted).toEqual([])
   })
 
   it('keeps the merge open when conflict markers remain', async () => {
@@ -236,7 +307,34 @@ describe('turn exits', () => {
     await authorSessions.feedback('author-15', 'fix it')
     await vi.waitFor(() => expect(session(15).status).toBe('error'))
     expect(mocks.commitFiles).not.toHaveBeenCalled()
-    expect(session(15)).toMatchObject({ uncommitted: ['a.ts'], responses: { T1: { pendingCommit: true } } })
+    expect(session(15)).toMatchObject({ uncommitted: ['a.ts'], responses: { T1: { pendingCommit: false, commitError: expect.stringContaining("didn't finish") } } })
+  })
+
+  it('never commits a fix left pending by an earlier failed turn on a later turn', async () => {
+    mocks.query.mockImplementation(async function* () {
+      throw new Error('aborted')
+    })
+    await authorSessions.feedback('author-16', 'go')
+    await vi.waitFor(() => expect(session(16).status).toBe('error'))
+    finishTurn()
+    await authorSessions.feedback('author-16', 'something else')
+    await vi.waitFor(() => expect(session(16).status).toBe('awaiting_feedback'))
+    expect(mocks.commitFiles).not.toHaveBeenCalled()
+  })
+
+  it('commits each fix separately, shares a commit between fixes of the same file, and keeps going past a failure', async () => {
+    mocks.commitFiles.mockImplementation(async (_clone, files: string[]) => {
+      if (files[0] === '../outside.ts') throw new Error("pathspec '../outside.ts' is outside repository")
+      return files[0] === 'a.ts' && !mocks.commitFiles.mock.calls.slice(0, -1).some(([, f]) => f[0] === 'a.ts') ? 'aaaaaaa999' : null
+    })
+    finishTurn()
+    await authorSessions.feedback('author-17', 'commit them')
+    await vi.waitFor(() => expect(session(17).status).toBe('awaiting_feedback'))
+    const { T1, T2, T3, T4 } = session(17).responses
+    expect(T1).toMatchObject({ pendingCommit: false, commits: ['aaaaaaa999'], reply: 'Renamed in aaaaaaa', commitError: null })
+    expect(T2).toMatchObject({ pendingCommit: false, commits: [], reply: 'Also in aaaaaaa', commitError: null })
+    expect(T3).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('no changes to commit') })
+    expect(T4).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('outside repository') })
   })
 })
 
@@ -382,13 +480,31 @@ describe('self-review', () => {
   })
 })
 
-// Runs last: pruning removes every session the other tests use.
 describe('pruneUnlisted', () => {
-  it('removes idle sessions for PRs that left the list unless they hold unpushed commits or an open merge', () => {
-    authorSessions.pruneUnlisted(new Set(['acme/api#40']))
-    expect(authorSessions.getByPr('acme/api#40')).not.toBeNull()
-    expect(authorSessions.getByPr('acme/api#41')).toBeNull()
+  const own = [40, 41, 42, 43, 44, 45].map((n) => `acme/api#${n}`)
+  const othersListed = () => new Set(mocks.stored.map((st) => st.prKey).filter((key) => !own.includes(key)))
+
+  it('removes sessions with no work left for PRs that left the list, with their session folders', async () => {
+    const dir40 = join(tmpdir(), 'rally', 'author-40')
+    mkdirSync(dir40, { recursive: true })
+    let release: () => void = () => {}
+    mocks.query.mockImplementation(async function* () {
+      await new Promise<void>((resolve) => (release = resolve))
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+    await authorSessions.feedback('author-45', 'still working')
+
+    authorSessions.pruneUnlisted(othersListed())
+
+    expect(authorSessions.getByPr('acme/api#40')).toBeNull()
+    await vi.waitFor(() => expect(existsSync(dir40)).toBe(false))
+    expect(authorSessions.getByPr('acme/api#41')).not.toBeNull()
     expect(authorSessions.getByPr('acme/api#42')).not.toBeNull()
     expect(authorSessions.getByPr('acme/api#43')).not.toBeNull()
+    expect(authorSessions.getByPr('acme/api#44')).not.toBeNull()
+    expect(authorSessions.getByPr('acme/api#45')).not.toBeNull()
+    expect(authorSessions.getByPr('acme/api#3')).not.toBeNull()
+    release()
+    await vi.waitFor(() => expect(session(45).status).toBe('awaiting_feedback'))
   })
 })

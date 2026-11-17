@@ -10,6 +10,7 @@ import { fetchFeedbackItems } from './github/authorFeedback'
 import { github, resetGithubClient } from './github/client'
 import { classifyGithubFailure } from './github/failure'
 import { authoredPrList, prList, prLists } from './prList'
+import { connectSoundCues } from './soundCues'
 import { configFile } from './store'
 import { appInfo, updater } from './update/updater'
 
@@ -80,13 +81,16 @@ export function registerIpc(): void {
   for (const list of Object.values(prLists)) {
     list.on('changed', (state) => broadcast(IPC.prsChanged, { list: list.kind, state }))
   }
-  prList.setSessionLookup((key) => reviewSessions.sessionState(key))
+  connectSoundCues(
+    { reviewing: { list: prList, sessions: reviewSessions }, authored: { list: authoredPrList, sessions: authorSessions } },
+    () => configFile.get(),
+    (playback) => broadcast(IPC.soundCue, playback),
+  )
   reviewSessions.on('changed', (session) => {
     broadcast(IPC.sessionChanged, session)
     prList.reapplyPhases()
   })
   reviewSessions.on('removed', () => prList.reapplyPhases())
-  authoredPrList.setSessionLookup((key) => authorSessions.sessionState(key))
   authoredPrList.addPruner((listed) => authorSessions.pruneUnlisted(listed))
   authorSessions.on('changed', (session) => {
     broadcast(IPC.authorSessionChanged, session)

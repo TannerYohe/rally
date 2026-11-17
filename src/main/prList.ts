@@ -71,6 +71,8 @@ class PrList extends EventEmitter {
   private summarizing = new Set<string>()
   private summaryErrors = new Map<string, string>()
   private sessionOf: SessionLookup = () => null
+  private refreshGeneration = 0
+  private fetchedDuringRefresh = new Map<string, GithubPr>()
   private pruners: Pruner[] = []
   private readonly files: PrListFiles
 
@@ -122,9 +124,12 @@ class PrList extends EventEmitter {
 
   async refresh(): Promise<void> {
     if (this.state.refreshing) return
+    this.refreshGeneration++
+    this.fetchedDuringRefresh.clear()
     this.update({ refreshing: true, error: null })
     try {
-      const { viewer, prs } = await searchPrs(this.source.searchQueries(), this.kind)
+      const { viewer, prs: searched } = await searchPrs(this.source.searchQueries(), this.kind)
+      const prs = searched.map((pr) => this.fetchedDuringRefresh.get(pr.id) ?? pr)
       const refreshedAt = new Date().toISOString()
       const listed = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
       for (const prune of this.pruners) prune(listed)
@@ -136,8 +141,12 @@ class PrList extends EventEmitter {
     }
   }
 
+  /** Fetches one PR; a full refresh already in flight keeps this newer copy instead of its own. */
   async refreshOne(owner: string, repo: string, number: number): Promise<void> {
-    const [fresh] = this.decorate([await fetchPr(owner, repo, number, this.kind)], false)
+    const startedDuringRefresh = this.state.refreshing ? this.refreshGeneration : null
+    const fetched = await fetchPr(owner, repo, number, this.kind)
+    if (this.state.refreshing && this.refreshGeneration === startedDuringRefresh) this.fetchedDuringRefresh.set(fetched.id, fetched)
+    const [fresh] = this.decorate([fetched], false)
     const prs = this.state.prs.some((p) => p.id === fresh.id)
       ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p))
       : [...this.state.prs, fresh]

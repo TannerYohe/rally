@@ -59,7 +59,7 @@ PRs are squash-merged, so the PR title becomes the commit semantic-release reads
 
 ### Dashboard
 
-The **Reviewing** tab lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand.
+The **Reviewing** tab lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand. After you submit a review, Rally fetches that PR again, and a full refresh already in flight keeps that newer copy.
 
 Each row shows author, title, repo, age, phase, and a one-line summary. Claude Haiku writes the summary, and it is cached per head SHA. If summarizing fails, the row shows **Summary unavailable** with the error on hover, and Rally retries on the next refresh.
 
@@ -147,6 +147,20 @@ The **Changes** tab shows the clone's unpushed commits and their diff against wh
 **Re-request review from people I reply to**, next to **Post replies** and on by default, queues the author of each comment you replied to, leaving out you and bots. People whose latest review is an approval are never re-requested and leave the queue. Rally re-requests a queued person's review as soon as none of their comments are left unanswered: right after posting, or later when another reply or a **👍 Acknowledge** answers their last one. Acknowledging alone never queues anyone. Rally requests each person separately. Someone GitHub refuses with a 422, such as a non-collaborator, leaves the queue; any other error keeps them queued. The page shows who was re-requested, who is still queued, and the errors.
 
 **Self-review** runs your review skill from Settings on the PR. Nothing is posted: the report shows in the **Self-review** tab, and each draft comment becomes a finding in the comment list with Investigate, Fix, and Dismiss. **Start over** discards the session, its clone, unpushed commits, and unposted replies. Once a PR leaves My PRs, Rally removes its session and clone the same way, unless it still has work: a running turn, unpushed commits, unposted replies, an open merge, or queued re-requests. A last turn that failed or was cancelled doesn't keep it. The logic lives in `src/main/claude/authorSessions.ts`, and the git steps in `src/main/git/prClone.ts`.
+
+### Sounds
+
+Rally plays a short sound for three cues, each with its own sound in every skin:
+
+| Cue | When it plays |
+|---|---|
+| Claude finishes a turn | A turn in a review, a self-review, or a My PRs response session ends or errors. A cancelled turn plays nothing. Set it to play after every turn, only when no other turn is still running in either tab, or never. |
+| A PR needs your attention | In **Reviewing**, a PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. In **My PRs**, a PR is newly listed as needs response, or moves to it. A PR leaving In progress doesn't count, since that only follows your own work in Rally, and its phase can lag until the refresh after a submit lands. Drafts and hidden PRs stay quiet until they show up: a draft marked ready, or a hidden PR that resurfaces or that you unhide, counts as newly listed. |
+| A PR is approved | In **Reviewing**, a new approval of yours appears, whether you submitted it in Rally or on GitHub. In **My PRs**, a reviewer who hadn't approved before approves. |
+
+One PR list update plays at most one sound, and an approval outranks a PR needing attention. The first refresh after launch compares against the list Rally cached when it last ran, so changes made while Rally was closed play once.
+
+Settings → Sounds turns sounds on or off, sets the volume, toggles each cue, and plays a preview of each. The sound set follows the skin unless you pick one. The sounds are synthesized with the Web Audio API, so Rally ships no audio files. The main process decides when a cue fires (`src/main/soundCues.ts`), taking its baseline after the lists recompute phases from your sessions at launch, and the window plays it (`src/renderer/src/lib/sounds.ts`), so sounds play only while Rally's window is open. A sound that fails to play is logged to the window's console.
 
 ### Updates
 

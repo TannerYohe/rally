@@ -49,6 +49,7 @@ const api: RallyApi = {
   getFailedInstall: () => ipcRenderer.invoke(IPC.getFailedInstall),
   dismissFailedInstall: () => ipcRenderer.invoke(IPC.dismissFailedInstall),
   onUpdateChanged: (listener) => subscribe(IPC.updateChanged, listener),
+  onSoundCue: (listener) => subscribe(IPC.soundCue, listener),
 }
 
 contextBridge.exposeInMainWorld('rally', api)

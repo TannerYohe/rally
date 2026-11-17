@@ -1,10 +1,13 @@
 import { GraphqlResponseError } from '@octokit/graphql'
 import type { MyReview, Pr, PrListKind, ReviewState } from '@shared/types'
 import { authorFeedback, type RawAuthorFields } from './authorPhase'
+import { decisionsField } from './feedbackFields'
 import { github, timeoutRequest, type GithubClient } from './client'
 import { MY_REVIEW_WINDOW } from './phase'
 
 export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError' | 'hidden'>
+
+const AUTHORED = '@include(if: $authored)'
 
 const PR_FIELDS = `
   fragment PrFields on PullRequest {
@@ -19,9 +22,7 @@ const PR_FIELDS = `
       nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
     }
     reviewDecision @include(if: $authored)
-    latestOpinionatedReviews(first: 50, writersOnly: true) @include(if: $authored) {
-      nodes { state author { login } }
-    }
+    ${decisionsField(AUTHORED)}
     reviewThreads(first: 100) @include(if: $authored) {
       nodes { isResolved comments(last: 1) { nodes { author { login } reactionGroups { viewerHasReacted } } } }
     }

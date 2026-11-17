@@ -1,6 +1,7 @@
 import { isSamePr, type PrRef, type ReviewThread, type ThreadResolution } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { github, GITHUB_TIMEOUT_MS, timeoutRequest, type GithubClient } from './client'
+import { sameLogin } from './logins'
 import { fetchNodes } from './queries'
 
 const THREADS_QUERY = `
@@ -33,8 +34,6 @@ export type ThreadLookup = { kind: 'own'; thread: ReviewThread } | { kind: 'not_
 
 const NOT_FOUND_ERROR = 'Review thread not found'
 const NOT_OWN_ERROR = 'Not a review thread you started on this PR'
-
-export const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 export function lookupThread(node: RawThread | null, viewer: string, pr: PrRef): ThreadLookup {
   if (!node) return { kind: 'not_found' }

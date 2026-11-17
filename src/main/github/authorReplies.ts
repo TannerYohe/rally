@@ -1,7 +1,8 @@
 import type { FeedbackItem, PrRef } from '@shared/types'
 import type { CloneSource } from '../git/prClone'
 import { github, pullParams, timeoutRequest } from './client'
-import { resolveThread, sameLogin } from './threads'
+import { sameLogin } from './logins'
+import { resolveThread } from './threads'
 
 /** Returns a PR comment body that answers a review body or PR comment and links it, which marks it acknowledged. */
 export function conversationReplyBody(item: Pick<FeedbackItem, 'author' | 'url'> & { kind: 'review' | 'comment' }, body: string): string {

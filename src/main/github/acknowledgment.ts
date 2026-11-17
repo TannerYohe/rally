@@ -1,4 +1,4 @@
-import { sameLogin } from './threads'
+import { sameLogin } from './logins'
 
 export interface RawReactionGroup {
   viewerHasReacted: boolean

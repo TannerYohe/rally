@@ -48,13 +48,23 @@ function useDiff(sessionId: string, reloadKey: string, load: (sessionId: string)
   return state
 }
 
-/** Shows a loaded diff, its loading error, or a warning that it was cut off. */
+/** Describes what a diff leaves out, cut off past its limit or shown only as binary, or returns null when it shows everything. */
+function hiddenChangesWarning({ truncated, binaryFiles }: DiffResult): string | null {
+  const notes = [
+    truncated && TRUNCATED_NOTE,
+    binaryFiles.length > 0 && `${plural(binaryFiles.length, 'file')} show only as binary: ${binaryFiles.join(', ')}.`,
+  ].filter(Boolean)
+  return notes.length > 0 ? notes.join(' ') : null
+}
+
+/** Shows a loaded diff, its loading error, or a warning about what it leaves out. */
 function DiffSection({ loaded, what }: { loaded: LoadedDiff; what: string }) {
   if (loaded.error) return <p className="text-sm text-rose-300">Couldn't read the {what}: {loaded.error}</p>
+  const warning = hiddenChangesWarning(loaded)
   return (
     <>
       <DiffView diff={loaded.diff} />
-      {loaded.truncated && <p className="text-xs text-amber-300">{TRUNCATED_NOTE}</p>}
+      {warning && <p className="text-xs text-amber-300">{warning}</p>}
     </>
   )
 }
@@ -75,17 +85,17 @@ function changesSummary(session: AuthorSession): ReactNode {
 
 type ChangesActionProps = Pick<Props, 'session' | 'disabled' | 'onPush' | 'onDiscardUncommitted' | 'onCommitUncommitted'> & {
   committable: string[]
-  uncommittedTruncated: boolean
-  commitsTruncated: boolean
+  uncommittedWarning: string | null
+  commitsWarning: string | null
 }
 
 /** Shows the Changes tab's actions: the commit form while files are committable, and Push while the commits can go. */
-function ChangesAction({ session, committable, uncommittedTruncated, commitsTruncated, disabled, onPush, onDiscardUncommitted, onCommitUncommitted }: ChangesActionProps) {
+function ChangesAction({ session, committable, uncommittedWarning, commitsWarning, disabled, onPush, onDiscardUncommitted, onCommitUncommitted }: ChangesActionProps) {
   const [commitMessage, setCommitMessage] = useState('')
   const [committing, setCommitting] = useState(false)
   const busy = disabled || committing
   const commit = async () => {
-    if (uncommittedTruncated && !window.confirm(`${TRUNCATED_NOTE} Commit anyway?`)) return
+    if (uncommittedWarning && !window.confirm(`${uncommittedWarning} Commit anyway?`)) return
     setCommitting(true)
     try {
       if (await onCommitUncommitted(commitMessage)) setCommitMessage('')
@@ -122,7 +132,7 @@ function ChangesAction({ session, committable, uncommittedTruncated, commitsTrun
         <button
           className={committable.length > 0 ? SECONDARY_BUTTON_CLASS : `${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
           disabled={busy}
-          onClick={() => (!commitsTruncated || window.confirm(`${TRUNCATED_NOTE} Push anyway?`)) && onPush()}
+          onClick={() => (!commitsWarning || window.confirm(`${commitsWarning} Push anyway?`)) && onPush()}
         >
           Push to GitHub
         </button>
@@ -167,8 +177,8 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
             <ChangesAction
               session={session}
               committable={committable}
-              uncommittedTruncated={pending.truncated}
-              commitsTruncated={committed.truncated}
+              uncommittedWarning={hiddenChangesWarning(pending)}
+              commitsWarning={hiddenChangesWarning(committed)}
               disabled={disabled}
               onPush={onPush}
               onDiscardUncommitted={onDiscardUncommitted}

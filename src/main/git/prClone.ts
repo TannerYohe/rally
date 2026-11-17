@@ -154,22 +154,26 @@ const DIFF_DISPLAY_FLAGS = ['--no-color', '--text', '--src-prefix=a/', '--dst-pr
 /** Runs `git diff` with core.quotePath off so non-ASCII paths keep plain headers. */
 const DISPLAY_DIFF_COMMAND = ['-c', 'core.quotePath=false', 'diff', ...DIFF_DISPLAY_FLAGS]
 
-/** Replaces the body of each file whose diff holds a NUL byte with a one-line binary notice. */
-function collapseBinaryFiles(diff: string): string {
-  return diff
-    .split(/(?=^diff --git )/m)
-    .map((section) => {
-      if (!section.includes('\0')) return section
-      const firstHunk = section.search(/^@@/m)
-      return `${firstHunk === -1 ? section : section.slice(0, firstHunk)}Binary files differ\n`
-    })
-    .join('')
+const BINARY_FILE_HEADER = /^diff --git a\/.+? b\/(.+)$/
+
+/** Replaces the body of each file whose diff holds a NUL byte with a one-line binary notice, and lists those files. */
+function collapseBinaryFiles(diff: string): { diff: string; binaryFiles: string[] } {
+  const binaryFiles: string[] = []
+  const sections = diff.split(/(?<=^|\n)(?=diff --git )/).map((section) => {
+    if (!section.includes('\0')) return section
+    const header = section.slice(0, section.indexOf('\n'))
+    binaryFiles.push(header.match(BINARY_FILE_HEADER)?.[1] ?? header)
+    const firstHunk = section.search(/(?<=^|\n)@@/)
+    return `${firstHunk === -1 ? section : section.slice(0, firstHunk)}Binary files differ\n`
+  })
+  return { diff: sections.join(''), binaryFiles }
 }
 
 /** Collapses binary files and cuts the diff off at MAX_DIFF_CHARS. */
 function displayDiff(raw: string): DiffResult {
-  const diff = collapseBinaryFiles(raw)
-  return diff.length > MAX_DIFF_CHARS ? { diff: diff.slice(0, MAX_DIFF_CHARS), truncated: true } : { diff, truncated: false }
+  const { diff, binaryFiles } = collapseBinaryFiles(raw)
+  const truncated = diff.length > MAX_DIFF_CHARS
+  return { diff: truncated ? diff.slice(0, MAX_DIFF_CHARS) : diff, truncated, binaryFiles }
 }
 
 /** Returns the unified diff of the clone's unpushed commits for display. */

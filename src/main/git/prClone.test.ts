@@ -222,13 +222,25 @@ describe('prClone', () => {
     expect(committed).toContain('diff --git a/café.txt b/café.txt')
   })
 
+  it('lists a text file with a NUL byte as binary and splits files only at real line starts', async () => {
+    const clone = await cloneBranch(join(root, 'session22'), source)
+    writeFileSync(join(clone.path, 'sneaky.ts'), 'const a = 1\n// \0\nconst b = 2\n')
+    writeFileSync(join(clone.path, 'tricky.txt'), 'one\rdiff --git a/x b/x\n')
+
+    const { diff, binaryFiles } = await uncommittedDiff(clone)
+    expect(binaryFiles).toEqual(['sneaky.ts'])
+    expect(diff).toContain('+one\rdiff --git a/x b/x')
+    expect(diff.split('\n').filter((line) => line.startsWith('diff --git '))).toHaveLength(2)
+  })
+
   it('shows a binary file as one line so the files after it still fit', async () => {
     const clone = await cloneBranch(join(root, 'session21'), source)
     writeFileSync(join(clone.path, 'blob.bin'), Buffer.concat([Buffer.from([0]), Buffer.alloc(500_000, 0x41)]))
     writeFileSync(join(clone.path, 'note.txt'), 'note\n')
 
-    const { diff, truncated } = await uncommittedDiff(clone)
+    const { diff, truncated, binaryFiles } = await uncommittedDiff(clone)
     expect(truncated).toBe(false)
+    expect(binaryFiles).toEqual(['blob.bin'])
     expect(diff).toContain('diff --git a/blob.bin b/blob.bin')
     expect(diff).toContain('Binary files differ')
     expect(diff).not.toContain('AAAA')

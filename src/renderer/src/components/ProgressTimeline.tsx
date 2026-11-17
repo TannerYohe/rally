@@ -47,6 +47,14 @@ function Entry({ entry }: { entry: TimelineEntry }) {
       )
     case 'denied':
       return <div className="text-sm text-rose-300">⛔ Blocked: {entry.label}</div>
+    case 'warning':
+      return (
+        <div className="flex items-center gap-2 text-sm text-amber-300" title={entry.detail}>
+          <span>⚠</span>
+          <span>{entry.label}</span>
+          {entry.detail && <span className="truncate font-mono text-xs text-amber-200/70">{entry.detail.split('\n')[0]}</span>}
+        </div>
+      )
     case 'result':
       return (
         <div className={`text-xs ${entry.ok ? 'text-ink-500' : 'text-rose-300'}`}>

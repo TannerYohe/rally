@@ -11,10 +11,14 @@ interface PhaseInput {
   myReviews: MyReview[]
 }
 
+export function countsAsReview(review: MyReview, states = COUNTED_STATES): boolean {
+  return states.has(review.state) && review.submittedAt !== null && !review.replyOnly
+}
+
 export function latestSubmittedReview(reviews: MyReview[], states = COUNTED_STATES): MyReview | null {
-  const submitted = reviews.filter((r) => states.has(r.state) && r.submittedAt)
-  submitted.sort((a, b) => a.submittedAt!.localeCompare(b.submittedAt!))
-  return submitted.filter((r) => !r.replyOnly).at(-1) ?? null
+  const counted = reviews.filter((r) => countsAsReview(r, states))
+  counted.sort((a, b) => a.submittedAt!.localeCompare(b.submittedAt!))
+  return counted.at(-1) ?? null
 }
 
 function headChangedSince(review: MyReview, pr: PhaseInput): boolean {

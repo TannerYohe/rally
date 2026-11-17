@@ -88,6 +88,21 @@ describe('fetchPr', () => {
     expect(pr.myReviews.slice(1).every((r) => r.replyOnly)).toBe(true)
   })
 
+  it('keeps paging when the window holds only replies and reviews that do not count', async () => {
+    const pending = { id: 'PRR_pending', databaseId: 8, state: 'PENDING', submittedAt: null, body: '', commit: { oid: 'head' } }
+    const dismissed = { id: 'PRR_dismissed', databaseId: 9, state: 'DISMISSED', submittedAt: '2026-11-04T12:00:00Z', body: 'x', commit: { oid: 'old' } }
+    const real = { id: 'PRR_real', databaseId: 7, state: 'COMMENTED', submittedAt: '2026-11-04T00:00:00Z', body: 'nits', commit: { oid: 'old' } }
+    const replies = [replyReview(1), replyReview(2)]
+    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr([dismissed, ...replies, pending], { hasPreviousPage: true, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(commentsFor(replies))
+    graphql.mockResolvedValueOnce({ node: { reviews: { pageInfo: { hasPreviousPage: false, startCursor: 'c0' }, nodes: [real] } } })
+
+    const pr = await fetchPr('acme', 'api', 12)
+
+    expect(graphql.mock.calls[2][1]).toMatchObject({ before: 'c1' })
+    expect(pr.myReviews.map((r) => r.databaseId)).toEqual([7, 9, 1001, 1002, 8])
+  })
+
   it('does not page back when the window holds a real review', async () => {
     const reviews = [{ id: 'PRR_real', databaseId: 7, state: 'APPROVED', submittedAt: '2026-11-04T00:00:00Z', body: '', commit: { oid: 'old' } }, replyReview(1)]
     graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(reviews, { hasPreviousPage: true, startCursor: 'c1' }) } })

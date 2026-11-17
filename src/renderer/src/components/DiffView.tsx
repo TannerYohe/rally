@@ -1,6 +1,6 @@
 import { diffLineKind, splitDiffFiles, type DiffLineKind } from '../lib/diff'
 
-const LINE_STYLES: Record<DiffLineKind, string> = {
+export const LINE_STYLES: Record<DiffLineKind, string> = {
   hunk: 'text-secondary-300/80',
   add: 'bg-emerald-500/10 text-emerald-200',
   remove: 'bg-rose-500/10 text-rose-200',

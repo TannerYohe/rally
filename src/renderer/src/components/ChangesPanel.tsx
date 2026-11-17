@@ -1,12 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { canPush, cloneChangeCount, committableFiles, shortSha } from '@shared/authorSession'
+import { canPush, cloneChangeCount, committableFiles, normalizedDescription, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF, MAX_DIFF_CHARS } from '@shared/diff'
-import type { AuthorSession, DiffResult } from '@shared/types'
+import type { AuthorSession, DescriptionDraft, DiffResult, PrDescription } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { NO_CHANGES_MESSAGE } from '../lib/authorView'
 import { age, fullTime, plural } from '../lib/format'
+import { lineDiff } from '../lib/lineDiff'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
-import { DiffView } from './DiffView'
+import { BodyTextarea } from './BodyTextarea'
+import { DiffView, LINE_STYLES } from './DiffView'
 
 const TRUNCATED_NOTE = `This diff is cut off at ${MAX_DIFF_CHARS.toLocaleString('en-US')} characters, so it leaves out some changes.`
 
@@ -15,6 +17,9 @@ const MERGE_BUTTON_CLASS = 'rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-a
 interface Props {
   session: AuthorSession
   disabled: boolean
+  descriptionEdit: PrDescription | null
+  onDescriptionEdit(edit: PrDescription | null): void
+  onDiscardDescription(): void
   onPush(): void
   onResolveConflicts(): void
   onAbortMerge(): void
@@ -128,7 +133,7 @@ function ChangesAction({ session, committable, uncommittedWarning, commitsWarnin
           </button>
         </form>
       )}
-      {canPush(session) && (
+      {session.commits.length > 0 && canPush(session) && (
         <button
           className={committable.length > 0 ? SECONDARY_BUTTON_CLASS : `${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
           disabled={busy}
@@ -141,11 +146,113 @@ function ChangesAction({ session, committable, uncommittedWarning, commitsWarnin
   )
 }
 
+const LINE_PREFIX = { add: '+', remove: '-', context: ' ' } as const
+
+/** Shows how a description update changes the title and body, line by line. */
+function DescriptionDiff({ base, next }: { base: PrDescription; next: PrDescription }) {
+  const before = normalizedDescription(base)
+  const after = normalizedDescription(next)
+  return (
+    <div className="space-y-2">
+      {before.title !== after.title && (
+        <div className="space-y-0.5 rounded-lg border border-white/5 bg-ink-950 px-3 py-2 text-sm">
+          <div className="text-rose-200 line-through decoration-rose-400/60">{before.title}</div>
+          <div className="text-emerald-200">{after.title}</div>
+        </div>
+      )}
+      {before.body === after.body ? (
+        <p className="text-xs text-ink-500">The description body is unchanged.</p>
+      ) : (
+        <pre className="overflow-x-auto rounded-lg border border-white/5 bg-ink-950 py-1 text-xs leading-5">
+          {lineDiff(before.body, after.body).map((line, index) => (
+            <div key={index} className={`whitespace-pre-wrap px-3 ${LINE_STYLES[line.kind]}`}>
+              {LINE_PREFIX[line.kind]} {line.text}
+            </div>
+          ))}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+interface DescriptionUpdateProps {
+  draft: DescriptionDraft
+  edit: PrDescription | null
+  disabled: boolean
+  canPush: boolean
+  pushesWithCommits: boolean
+  onEdit(edit: PrDescription | null): void
+  onDiscard(): void
+  onPush(): void
+}
+
+/** Shows the description update Claude proposed, lets the author edit it, and pushes it on its own when there are no commits to push. */
+function DescriptionUpdate({ draft, edit, disabled, canPush, pushesWithCommits, onEdit, onDiscard, onPush }: DescriptionUpdateProps) {
+  const [editing, setEditing] = useState(false)
+  const next = edit ?? draft
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="text-sm font-semibold">
+          PR description update
+          <span className="ml-2 text-xs font-normal text-ink-500" title={fullTime(draft.at)}>
+            {edit ? 'edited by you' : `proposed ${age(draft.at)} ago`}
+          </span>
+        </h3>
+        <div className="ml-auto flex gap-2">
+          <button className={SECONDARY_BUTTON_CLASS} disabled={disabled} onClick={() => setEditing(!editing)}>
+            {editing ? 'Show changes' : 'Edit'}
+          </button>
+          {edit && (
+            <button className={SECONDARY_BUTTON_CLASS} disabled={disabled} onClick={() => onEdit(null)}>
+              Undo edits
+            </button>
+          )}
+          <button className={SECONDARY_BUTTON_CLASS} disabled={disabled} onClick={onDiscard}>
+            Discard
+          </button>
+          {!pushesWithCommits && (
+            <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={disabled || !canPush || !next.title.trim()} onClick={onPush}>
+              Update on GitHub
+            </button>
+          )}
+        </div>
+      </div>
+      {pushesWithCommits && <p className="text-xs text-ink-400">Push to GitHub updates the description after it pushes the commits.</p>}
+      {editing ? (
+        <div className="space-y-2">
+          <input
+            className="w-full rounded-md border border-ink-800 bg-ink-950 px-2 py-1 text-sm text-ink-100"
+            placeholder="PR title"
+            value={next.title}
+            disabled={disabled}
+            onChange={(event) => onEdit({ title: event.target.value, body: next.body })}
+          />
+          <BodyTextarea value={next.body} disabled={disabled} placeholder="PR description" onChange={(body) => onEdit({ title: next.title, body })} />
+        </div>
+      ) : (
+        <DescriptionDiff base={draft.base} next={next} />
+      )}
+    </div>
+  )
+}
+
 const loadCommitsDiff = (sessionId: string) => window.rally.getAuthorDiff(sessionId)
 const loadUncommittedDiff = (sessionId: string) => window.rally.getUncommittedDiff(sessionId)
 
-export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge, onDiscardUncommitted, onCommitUncommitted }: Props) {
-  const { commits, lastPush, mergeConflicts } = session
+export function ChangesPanel({
+  session,
+  disabled,
+  descriptionEdit,
+  onDescriptionEdit,
+  onDiscardDescription,
+  onPush,
+  onResolveConflicts,
+  onAbortMerge,
+  onDiscardUncommitted,
+  onCommitUncommitted,
+}: Props) {
+  const { commits, lastPush, mergeConflicts, description, descriptionUpdatedAt } = session
   const committable = committableFiles(session)
   const commitsReloadKey = commits.map((c) => c.oid).join(',')
   const uncommittedReloadKey = committable.length > 0 ? `${session.status}:${committable.join('\n')}` : ''
@@ -211,12 +318,30 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
           )}
         </div>
       ) : (
-        <p className="py-6 text-center text-sm text-ink-500">{NO_CHANGES_MESSAGE}</p>
+        !description && <p className="py-6 text-center text-sm text-ink-500">{NO_CHANGES_MESSAGE}</p>
+      )}
+
+      {description && (
+        <DescriptionUpdate
+          draft={description}
+          edit={descriptionEdit}
+          disabled={disabled}
+          canPush={canPush(session)}
+          pushesWithCommits={commits.length > 0}
+          onEdit={onDescriptionEdit}
+          onDiscard={onDiscardDescription}
+          onPush={onPush}
+        />
       )}
 
       {lastPush && (
         <p className="text-xs text-ink-500" title={fullTime(lastPush.at)}>
           Last pushed {plural(lastPush.commits.length, 'commit')} {age(lastPush.at)} ago, head <span className="font-mono">{shortSha(lastPush.oid)}</span>.
+        </p>
+      )}
+      {descriptionUpdatedAt && (
+        <p className="text-xs text-ink-500" title={fullTime(descriptionUpdatedAt)}>
+          Last updated the PR description {age(descriptionUpdatedAt)} ago.
         </p>
       )}
     </div>

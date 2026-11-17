@@ -74,7 +74,7 @@ Hidden PRs leave the main list and the phase counts and collect in a collapsed *
 
 ### Phases
 
-In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads. A reply-only review that Rally submitted still counts, since it is a review of the PR. Rally keeps the ids of the reviews it submits in `rally-reviews.json`, so this holds after a follow-up review or **Start over** replaces the session. If your last 20 reviews are all thread replies, the latest reply counts, since an earlier real review is out of view.
+In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads. A reply-only review that Rally submitted still counts, since it is a review of the PR. Rally keeps the ids of the reviews it submits in `rally-reviews.json`, so this holds after a follow-up review or **Start over** replaces the session. Rally reads your reviews 20 at a time, newest first, and when a page holds only thread replies it reads older pages until it finds a real review, up to 10 pages (200 reviews). If none turns up, the PR counts as unreviewed.
 
 | Phase | Rule |
 |---|---|

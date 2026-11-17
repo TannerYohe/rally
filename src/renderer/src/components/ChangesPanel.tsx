@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { shortSha } from '@shared/authorSession'
 import type { AuthorSession } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { age, fullTime } from '../lib/format'
-import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 import { DiffView } from './DiffView'
 
 const MERGE_BUTTON_CLASS = 'rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-amber-500/30 hover:bg-amber-500/25 disabled:opacity-40'
@@ -15,6 +15,7 @@ interface Props {
   onResolveConflicts(): void
   onAbortMerge(): void
   onDiscardUncommitted(): void
+  onCommitUncommitted(message: string): Promise<boolean>
 }
 
 function useCloneDiff(session: AuthorSession): { diff: string; error: string | null } {
@@ -37,9 +38,26 @@ function useCloneDiff(session: AuthorSession): { diff: string; error: string | n
   return state
 }
 
-export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge, onDiscardUncommitted }: Props) {
+/** Describes what the clone holds that GitHub doesn't: uncommitted files, unpushed commits, or both. */
+function changesSummary({ commits, uncommitted, clone }: AuthorSession): ReactNode {
+  const parts = [
+    uncommitted.length > 0 && `${uncommitted.length} uncommitted file(s)`,
+    commits.length > 0 && `${commits.length} unpushed commit(s)`,
+  ].filter(Boolean)
+  return (
+    <>
+      {parts.join(' and ')} on <span className="font-mono">{clone?.branch}</span>
+    </>
+  )
+}
+
+export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge, onDiscardUncommitted, onCommitUncommitted }: Props) {
   const { diff, error } = useCloneDiff(session)
   const { commits, uncommitted, lastPush, mergeConflicts, clone } = session
+  const [commitMessage, setCommitMessage] = useState('')
+  const commit = async () => {
+    if (await onCommitUncommitted(commitMessage)) setCommitMessage('')
+  }
 
   return (
     <div className="space-y-4">
@@ -59,36 +77,61 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
           </div>
         </div>
       )}
-      {uncommitted.length > 0 && mergeConflicts.length === 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-amber-950/50 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/20">
-          <span title={uncommitted.join('\n')}>
-            {uncommitted.length} changed file(s) in the clone aren't part of a committed fix, so they won't be pushed, and Rally can't merge new commits from GitHub over them.
-          </span>
-          <button className={`${MERGE_BUTTON_CLASS} ml-auto`} disabled={disabled} onClick={onDiscardUncommitted}>
-            Discard uncommitted changes
-          </button>
-        </div>
-      )}
-
-      {commits.length > 0 ? (
+      {commits.length > 0 || uncommitted.length > 0 ? (
         <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <h3 className="text-sm font-semibold">
-              {commits.length} unpushed commit(s) on <span className="font-mono">{clone?.branch}</span>
-            </h3>
-            <button className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`} disabled={disabled} onClick={onPush}>
-              Push to GitHub
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-sm font-semibold">{changesSummary(session)}</h3>
+            {mergeConflicts.length > 0 ? null : uncommitted.length > 0 ? (
+              <form
+                className="ml-auto flex min-w-96 flex-1 justify-end gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void commit()
+                }}
+              >
+                <input
+                  className="min-w-48 flex-1 rounded-md border border-ink-800 bg-ink-950 px-2 py-1 text-sm text-ink-100"
+                  placeholder="Commit message"
+                  value={commitMessage}
+                  disabled={disabled}
+                  onChange={(event) => setCommitMessage(event.target.value)}
+                />
+                <button type="button" className={SECONDARY_BUTTON_CLASS} disabled={disabled} onClick={onDiscardUncommitted}>
+                  Discard
+                </button>
+                <button type="submit" className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={disabled || !commitMessage.trim()}>
+                  Commit {uncommitted.length} file{uncommitted.length === 1 ? '' : 's'}
+                </button>
+              </form>
+            ) : (
+              <button className={`${PRIMARY_BUTTON_CLASS} ml-auto px-3 py-1.5 text-sm`} disabled={disabled} onClick={onPush}>
+                Push to GitHub
+              </button>
+            )}
           </div>
-          <ul className="space-y-1 text-sm">
-            {commits.map((commit) => (
-              <li key={commit.oid} className="flex gap-2">
-                <span className="font-mono text-ink-500">{shortSha(commit.oid)}</span>
-                <span className="text-ink-200">{commit.subject}</span>
-              </li>
-            ))}
-          </ul>
-          {error ? <p className="text-sm text-rose-300">Couldn't read the diff: {error}</p> : <DiffView diff={diff} />}
+          {uncommitted.length > 0 && mergeConflicts.length === 0 && (
+            <div className="space-y-1">
+              <p className="text-xs text-ink-400">Not committed yet, so not pushed. Commit them to push, or discard them.</p>
+              <ul className="space-y-0.5 font-mono text-xs text-amber-200">
+                {uncommitted.map((path) => (
+                  <li key={path}>{path}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {commits.length > 0 && (
+            <>
+              <ul className="space-y-1 text-sm">
+                {commits.map((commit) => (
+                  <li key={commit.oid} className="flex gap-2">
+                    <span className="font-mono text-ink-500">{shortSha(commit.oid)}</span>
+                    <span className="text-ink-200">{commit.subject}</span>
+                  </li>
+                ))}
+              </ul>
+              {error ? <p className="text-sm text-rose-300">Couldn't read the diff: {error}</p> : <DiffView diff={diff} />}
+            </>
+          )}
         </div>
       ) : (
         <p className="py-6 text-center text-sm text-ink-500">No unpushed commits. Pick Fix on a comment to have Claude change the code.</p>

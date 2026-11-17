@@ -26,7 +26,7 @@ export class MergeConflictError extends Error {
 
 export class UncommittedChangesError extends Error {
   constructor(readonly files: string[]) {
-    super(`Discard the ${files.length} uncommitted change(s) in the Changes tab before Rally merges the branch's new commits from GitHub.`)
+    super(`Commit or discard the ${files.length} uncommitted change(s) in the Changes tab before Rally merges the branch's new commits from GitHub.`)
     this.name = 'UncommittedChangesError'
   }
 }

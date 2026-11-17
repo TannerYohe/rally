@@ -125,7 +125,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const badges: Record<AuthorTab, ReactNode> = {
     feedback: openRows.length > 0 && <TabCount count={openRows.length} />,
     activity: busy && <BusyDot className="h-2 w-2 bg-primary-400" />,
-    changes: session && session.commits.length > 0 && <TabCount count={session.commits.length} />,
+    changes: session && session.commits.length + session.uncommitted.length > 0 && <TabCount count={session.commits.length + session.uncommitted.length} />,
     report: session?.selfReview && (
       <span className="max-w-48 truncate text-xs font-normal text-ink-400" title={session.selfReview.verdict}>
         {session.selfReview.verdict}
@@ -135,7 +135,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const empty: Record<AuthorTab, boolean> = {
     feedback: rows.length === 0,
     activity: !session || session.timeline.length === 0,
-    changes: !session || (session.commits.length === 0 && !session.lastPush),
+    changes: !session || (session.commits.length === 0 && session.uncommitted.length === 0 && !session.lastPush),
     report: !session?.selfReview,
   }
 
@@ -213,6 +213,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             onDiscardUncommitted={() =>
               window.confirm(`Discard ${session.uncommitted.length} uncommitted change(s) in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
             }
+            onCommitUncommitted={(message) => run(() => window.rally.commitUncommitted(session.id, message))}
           />
         ) : (
           <EmptyTab>No changes yet. Pick Fix on a comment to have Claude change the code.</EmptyTab>

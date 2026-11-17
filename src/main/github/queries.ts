@@ -8,7 +8,8 @@ export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 's
 const REVIEW_PAGE_SIZE = 20
 const MAX_REVIEW_PAGES = 10
 const REVIEW_FIELDS = 'id databaseId state submittedAt body commit { oid }'
-const REVIEW_PAGE = `pageInfo { hasPreviousPage startCursor } nodes { ${REVIEW_FIELDS} }`
+const REVIEW_PAGE_INFO = 'pageInfo { hasPreviousPage startCursor }'
+const REVIEW_PAGE = `${REVIEW_PAGE_INFO} nodes { ${REVIEW_FIELDS} }`
 const REVIEW_COMMENTS = 'comments(first: 20) { nodes { replyTo { id } } }'
 
 const PR_FIELDS = `
@@ -48,7 +49,7 @@ const OLDER_REVIEWS_QUERY = `
     node(id: $id) {
       ... on PullRequest {
         reviews(author: $viewer, last: ${REVIEW_PAGE_SIZE}, before: $before) {
-          pageInfo { hasPreviousPage startCursor }
+          ${REVIEW_PAGE_INFO}
           nodes { ${REVIEW_FIELDS} ${REVIEW_COMMENTS} }
         }
       }

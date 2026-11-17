@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   fetchCloneSource: vi.fn(),
   postAuthorReply: vi.fn(),
   resolveFeedbackThread: vi.fn(),
+  fetchDescription: vi.fn(),
+  updateDescription: vi.fn(),
   cloneBranch: vi.fn(),
   syncClone: vi.fn(),
   localCommits: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock('../github/authorReplies', () => ({
   postAuthorReply: mocks.postAuthorReply,
   resolveFeedbackThread: mocks.resolveFeedbackThread,
 }))
+vi.mock('../github/prDescription', () => ({ fetchDescription: mocks.fetchDescription, updateDescription: mocks.updateDescription }))
 vi.mock('../git/prClone', async (importOriginal) => ({
   MergeConflictError: (await importOriginal<typeof import('../git/prClone')>()).MergeConflictError,
   UncommittedChangesError: (await importOriginal<typeof import('../git/prClone')>()).UncommittedChangesError,
@@ -79,6 +82,7 @@ vi.mock('./modelOptions', () => ({ reviewModelOptions: () => ({}) }))
 vi.mock('./timeline', () => ({ reduceTimeline: (timeline: unknown) => timeline, closeOpenEntries: (timeline: unknown) => timeline }))
 vi.mock('./authorTools', () => ({
   PUBLISH_RESPONSES_TOOL: 'mcp__rally__publish_responses',
+  PUBLISH_DESCRIPTION_TOOL: 'mcp__rally__publish_description',
   createAuthorServer: (handlers: AuthorToolHandlers) => {
     mocks.handlers = handlers
     return {}
@@ -154,6 +158,14 @@ mocks.stored = [
     responses: { T1: response('T1', 'Done'), 'self-1': response('self-1', '', { action: 'push_back', summary: 'Intended' }) },
     selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }] },
   }),
+  stored(60, { description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' } }),
+  stored(61, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' },
+  }),
+  stored(62, { description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' } }),
+  stored(63),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
 ]
 
@@ -185,6 +197,8 @@ beforeEach(() => {
     mocks.discardUncommitted,
     mocks.requestReview,
     mocks.acknowledgeFeedbackItem,
+    mocks.fetchDescription,
+    mocks.updateDescription,
   ])
     mock.mockReset()
   mocks.fetchApprovers.mockResolvedValue([])
@@ -601,6 +615,52 @@ describe('self-review', () => {
 
   it('maps draft comments to findings', () => {
     expect(findingsFromDrafts(drafts, 'now')[0]).toMatchObject({ path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
+  })
+})
+
+describe('description updates', () => {
+  it('saves a proposed description with GitHub\'s current one as its base', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body\r\n' })
+    finishTurn()
+    await authorSessions.feedback(session(63).id, 'update the description')
+    await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
+
+    expect(await mocks.handlers!.onDescription({ title: 'Fix', body: 'Old body\n' })).toContain('nothing to update')
+    expect(session(63).description).toBeNull()
+    expect(await mocks.handlers!.onDescription({ title: ' Fix the bug ', body: 'New body\n' })).toContain('saved')
+    expect(session(63).description).toMatchObject({ title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body\r\n' } })
+    expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: true })
+  })
+
+  it('updates GitHub with the author\'s edit and clears the draft', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    await authorSessions.push('author-60', { title: 'Fix the bug ', body: 'Edited body' })
+    expect(mocks.updateDescription).toHaveBeenCalledWith(pr(60), { title: 'Fix the bug', body: 'Edited body' })
+    expect(session(60)).toMatchObject({ status: 'awaiting_feedback', description: null, descriptionUpdatedAt: expect.any(String) })
+    expect(mocks.pushClone).not.toHaveBeenCalled()
+    expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 60)
+  })
+
+  it('pushes commits before updating the description', async () => {
+    const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: CLONE })
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    mocks.updateDescription.mockImplementation(async () => expect(mocks.pushClone).toHaveBeenCalled())
+    await authorSessions.push('author-61')
+    expect(mocks.updateDescription).toHaveBeenCalledWith(pr(61), { title: 'Fix the bug', body: 'New body' })
+    expect(session(61)).toMatchObject({ status: 'awaiting_feedback', commits: [], description: null })
+  })
+
+  it('refuses to overwrite a description that changed on GitHub, keeping the draft', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Someone edited this' })
+    await expect(authorSessions.push('author-62')).rejects.toThrow('changed on GitHub')
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(session(62)).toMatchObject({ status: 'error', description: { title: 'Fix the bug' } })
+
+    await expect(authorSessions.push('author-62', { title: ' ', body: 'x' })).rejects.toThrow("title can't be empty")
+    authorSessions.discardDescription('author-62')
+    expect(session(62).description).toBeNull()
+    await expect(authorSessions.push('author-62')).rejects.toThrow('no commits or description update')
   })
 })
 

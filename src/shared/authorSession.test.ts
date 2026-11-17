@@ -1,13 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { canPush, cloneChangeCount, committableFiles, handledFindingIds, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
+import {
+  canPush,
+  cloneChangeCount,
+  committableFiles,
+  handledFindingIds,
+  hasPendingWork,
+  hasUnsharedWork,
+  itemLocation,
+  pendingChangeCount,
+  pendingReplies,
+  sameDescription,
+} from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
 const response = (itemId: string, reply: string, at?: string) => itemResponse(itemId, reply, at ? { at } : {})
 const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem(id, { kind })
 
-function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, 'status' | 'commits' | 'uncommitted' | 'responses' | 'posted' | 'items'> {
-  return { status: 'awaiting_feedback', commits: [], uncommitted: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), ...overrides }
+type WorkFields = 'status' | 'commits' | 'uncommitted' | 'responses' | 'posted' | 'items' | 'description'
+
+const DESCRIPTION = { title: 'New', body: 'Body', base: { title: 'Old', body: '' }, at: '2026-11-02T00:00:00Z' }
+
+function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, WorkFields> {
+  return { status: 'awaiting_feedback', commits: [], uncommitted: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), description: null, ...overrides }
 }
 
 describe('pendingReplies', () => {
@@ -65,11 +80,12 @@ describe('hasPendingWork', () => {
 })
 
 describe('hasUnsharedWork', () => {
-  it('ignores the last turn status and counts only uncommitted edits, unpushed commits, and unposted replies', () => {
+  it('ignores the last turn status and counts only uncommitted edits, unpushed commits, unposted replies, and a description update', () => {
     expect(hasUnsharedWork(session({ status: 'error' }))).toBe(false)
     expect(hasUnsharedWork(session({ uncommitted: ['a.ts'] }))).toBe(true)
     expect(hasUnsharedWork(session({ commits: [{ oid: 'a', subject: 'fix' }] }))).toBe(true)
     expect(hasUnsharedWork(session({ responses: { a: response('a', 'Done') } }))).toBe(true)
+    expect(hasUnsharedWork(session({ description: DESCRIPTION }))).toBe(true)
   })
 })
 
@@ -84,10 +100,27 @@ describe('itemLocation', () => {
 describe('canPush', () => {
   const commits = [{ oid: 'a', subject: 'fix' }]
 
-  it('is true with commits and no open merge, even with uncommitted files', () => {
-    expect(canPush({ commits, mergeConflicts: [] })).toBe(true)
-    expect(canPush({ commits: [], mergeConflicts: [] })).toBe(false)
-    expect(canPush({ commits, mergeConflicts: ['a.ts'] })).toBe(false)
+  it('is true with commits or a description update and no open merge, even with uncommitted files', () => {
+    expect(canPush({ commits, mergeConflicts: [], description: null })).toBe(true)
+    expect(canPush({ commits: [], mergeConflicts: [], description: DESCRIPTION })).toBe(true)
+    expect(canPush({ commits: [], mergeConflicts: [], description: null })).toBe(false)
+    expect(canPush({ commits, mergeConflicts: ['a.ts'], description: DESCRIPTION })).toBe(false)
+  })
+})
+
+describe('pendingChangeCount', () => {
+  it('counts committable files, unpushed commits, and a description update', () => {
+    const commits = [{ oid: 'a', subject: 'fix' }]
+    expect(pendingChangeCount({ commits, uncommitted: ['a.ts'], mergeConflicts: [], description: DESCRIPTION })).toBe(3)
+    expect(pendingChangeCount({ commits: [], uncommitted: [], mergeConflicts: [], description: null })).toBe(0)
+  })
+})
+
+describe('sameDescription', () => {
+  it('ignores CRLF line endings and outer whitespace', () => {
+    expect(sameDescription({ title: ' Fix ', body: 'a\r\nb\r\n' }, { title: 'Fix', body: 'a\nb' })).toBe(true)
+    expect(sameDescription({ title: 'Fix', body: 'a' }, { title: 'Fix', body: 'b' })).toBe(false)
+    expect(sameDescription({ title: 'Fix', body: 'a' }, { title: 'Fix it', body: 'a' })).toBe(false)
   })
 })
 

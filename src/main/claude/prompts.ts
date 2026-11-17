@@ -1,6 +1,6 @@
 import { COMMIT_PLACEHOLDER, itemLocation } from '@shared/authorSession'
 import { DEFAULT_CONFIG, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneInfo, type FeedbackItem, type FeedbackItemKind, type PrRef } from '@shared/types'
-import { PUBLISH_RESPONSES_TOOL } from './authorTools'
+import { PUBLISH_DESCRIPTION_TOOL, PUBLISH_RESPONSES_TOOL } from './authorTools'
 import { PUBLISH_DRAFTS_TOOL } from './rallyTools'
 
 const SHELL_AND_QUESTION_NOTES = `- Shell variables do not carry over between Bash calls, and Rally only treats $WORK as a temp path in the command that assigns it with mktemp. In every later command, use the absolute $WORK path from the clone step.
@@ -27,7 +27,8 @@ export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The
 - After handling the items, call ${PUBLISH_RESPONSES_TOOL} once with an entry for every item in the request. Each later turn that changes an item's result, call it again for that item.
 - Replies post under the author's name. Write them in the first person as the author, plain and brief, with no greeting or sign-off.
 - When asked to run a review skill on this PR, it is a self-review. Publish its result with ${PUBLISH_DRAFTS_TOOL} as the skill instructs. Rally keeps self-review findings private and offers them to the author as items to fix.
-- Never post to GitHub, resolve review threads, or push. Rally does those itself.
+- The PR's title and description should match its code. When a fix or a message changes something they state, or adds something reviewers need to know, call ${PUBLISH_DESCRIPTION_TOOL} with the complete proposed title and description, keeping their structure, template sections, and voice. Read the current ones with \`gh pr view <url> --json title,body\`. Rally shows the user the change and updates GitHub when they push.
+- Never post to GitHub, edit the PR, resolve review threads, or push. Rally does those itself.
 ${SHELL_AND_QUESTION_NOTES}`
 
 export function reviewPrompt(pr: PrRef, skill: string): string {

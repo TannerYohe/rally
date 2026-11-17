@@ -1,4 +1,4 @@
-import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, SessionCore } from './types'
+import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, PrDescription, SessionCore } from './types'
 
 /** Where a fix reply names its commit; Rally replaces it with the short sha once it commits. */
 export const COMMIT_PLACEHOLDER = '{commit}'
@@ -20,6 +20,8 @@ export function newAuthorSession(core: SessionCore): AuthorSession {
     mergeConflicts: [],
     reviewersToReRequest: [],
     lastReRequest: null,
+    description: null,
+    descriptionUpdatedAt: null,
   }
 }
 
@@ -39,14 +41,14 @@ export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'poste
   )
 }
 
-type WorkState = Pick<AuthorSession, 'commits' | 'uncommitted' | 'responses' | 'posted' | 'items'>
+type WorkState = Pick<AuthorSession, 'commits' | 'uncommitted' | 'responses' | 'posted' | 'items' | 'description'>
 
-/** Returns whether the session holds work GitHub doesn't have yet: uncommitted edits, unpushed commits, or unposted replies. */
+/** Returns whether the session holds work GitHub doesn't have yet: uncommitted edits, unpushed commits, unposted replies, or a description update. */
 export function hasUnsharedWork(session: WorkState): boolean {
-  return session.uncommitted.length > 0 || session.commits.length > 0 || pendingReplies(session).length > 0
+  return session.uncommitted.length > 0 || session.commits.length > 0 || pendingReplies(session).length > 0 || session.description !== null
 }
 
-/** Returns whether the session has a running turn, an error, uncommitted edits, unpushed commits, or unposted replies. */
+/** Returns whether the session has a running turn, an error, or work GitHub doesn't have yet. */
 export function hasPendingWork(session: WorkState & Pick<AuthorSession, 'status'>): boolean {
   return session.status !== 'awaiting_feedback' || hasUnsharedWork(session)
 }
@@ -61,9 +63,24 @@ export function cloneChangeCount(session: Pick<AuthorSession, 'commits' | 'uncom
   return session.commits.length + committableFiles(session).length
 }
 
-/** Returns whether the clone has commits to push and no merge open. */
-export function canPush(session: Pick<AuthorSession, 'commits' | 'mergeConflicts'>): boolean {
-  return session.commits.length > 0 && session.mergeConflicts.length === 0
+/** Returns how many changes Push would send to GitHub or leaves behind: committable files, unpushed commits, and a description update. */
+export function pendingChangeCount(session: Pick<AuthorSession, 'commits' | 'uncommitted' | 'mergeConflicts' | 'description'>): number {
+  return cloneChangeCount(session) + (session.description ? 1 : 0)
+}
+
+/** Returns whether there are commits or a description update to push, and no merge open. */
+export function canPush(session: Pick<AuthorSession, 'commits' | 'mergeConflicts' | 'description'>): boolean {
+  return (session.commits.length > 0 || session.description !== null) && session.mergeConflicts.length === 0
+}
+
+/** Returns the description with line endings normalized and outer whitespace trimmed, so GitHub's CRLF bodies compare equal to Claude's. */
+export function normalizedDescription(description: PrDescription): PrDescription {
+  return { title: description.title.trim(), body: description.body.replaceAll('\r\n', '\n').trim() }
+}
+
+export function sameDescription(a: PrDescription, b: PrDescription): boolean {
+  const [left, right] = [normalizedDescription(a), normalizedDescription(b)]
+  return left.title === right.title && left.body === right.body
 }
 
 export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {

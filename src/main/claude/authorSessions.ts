@@ -1,18 +1,30 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import {
+  canReplyTo,
+  COMMIT_PLACEHOLDER,
+  hasPendingWork,
+  hasUnsharedWork,
+  newAuthorSession,
+  normalizedDescription,
+  PUSH_BEFORE_POSTING_ERROR,
+  sameDescription,
+  shortSha,
+} from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
   type ActionRequest,
   type AuthorSession,
   type CloneInfo,
+  type DescriptionDraft,
   type DiffResult,
   type Drafts,
   type FeedbackItem,
   type ItemResponse,
   type PostedReply,
+  type PrDescription,
   type PrRef,
   type ReplyPost,
   type TurnMode,
@@ -41,6 +53,7 @@ import { github } from '../github/client'
 import { uniqueLogins } from '../github/logins'
 import { fetchApprovers, isRejectedRequest, repliedReviewers, requestReview, reviewersReady } from '../github/reviewRequests'
 import { fetchCloneSource, postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
+import { fetchDescription, updateDescription } from '../github/prDescription'
 import { authoredPrList, type SessionState } from '../prList'
 import { authorSessionsDir, configFile } from '../store'
 import { createAuthorServer, type PublishedResponse } from './authorTools'
@@ -55,6 +68,10 @@ const TURN_DID_NOT_FINISH_ERROR = `The turn didn't finish, so Rally didn't commi
 const CLONE_LOST_ERROR = `Rally's clone of this PR is gone, probably cleared from the temp folder, and its unpushed commits with it. Start over to clone again.`
 const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp folder, and its uncommitted edits with it."
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
+const NOTHING_TO_PUSH_ERROR = 'There are no commits or description update to push.'
+const EMPTY_TITLE_ERROR = "The PR title can't be empty."
+const DESCRIPTION_CHANGED_ERROR =
+  'The PR title or description changed on GitHub since Claude proposed this update, so Rally left it alone. Ask Claude to update the description again, or discard this update.'
 
 /** Marks fixes waiting on a commit as not committed, for a turn that didn't finish. */
 function withoutPendingCommits(responses: Record<string, ItemResponse>): Record<string, ItemResponse> {
@@ -69,6 +86,8 @@ function restoreAuthorSession(stored: AuthorSession): AuthorSession {
     reviewersToReRequest: stored.reviewersToReRequest ?? [],
     lastReRequest: stored.lastReRequest ?? null,
     mergeConflicts: stored.mergeConflicts ?? [],
+    description: stored.description ?? null,
+    descriptionUpdatedAt: stored.descriptionUpdatedAt ?? null,
   }
   switch (session.status) {
     case 'running':
@@ -183,37 +202,93 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     return uncommittedDiff(clone)
   }
 
-  async push(sessionId: string): Promise<void> {
+  /** Pushes unpushed commits, then applies the description update, using the author's edit of it when given. */
+  async push(sessionId: string, descriptionEdit: PrDescription | null = null): Promise<void> {
     this.assertIdle(sessionId)
-    const { clone, pr } = this.byId(sessionId)
-    if (!clone) throw new Error('There are no commits to push.')
-    if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
-    this.assertCloneFolder(sessionId)
+    const { clone, pr, commits, description, mergeConflicts } = this.byId(sessionId)
+    if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
+    if (commits.length === 0 && !description) throw new Error(NOTHING_TO_PUSH_ERROR)
+    if (description && !(descriptionEdit ?? description).title.trim()) throw new Error(EMPTY_TITLE_ERROR)
+    if (commits.length > 0) {
+      if (!clone) throw new Error(CLONE_LOST_ERROR)
+      this.assertCloneFolder(sessionId)
+    }
     let conflicts: string[] = []
-    await this.whilePublishing(sessionId, async () => {
-      this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
-      try {
-        const integrated = await integrateRemote(clone)
-        this.patch(sessionId, (s) => ({ clone: integrated.clone, responses: rewriteCommits(s.responses, integrated.rewritten) }), true)
-        const { push: lastPush, clone: pushed } = await pushClone(integrated.clone, now())
-        this.patch(sessionId, () => ({ status: 'awaiting_feedback', lastPush, clone: pushed, commits: [] }), true)
-      } catch (error) {
-        await this.refreshClone(sessionId)
-        if (error instanceof UncommittedChangesError) {
-          this.patch(sessionId, () => ({ status: 'awaiting_feedback' }), true)
-          throw error
+    let pushed = false
+    try {
+      await this.whilePublishing(sessionId, async () => {
+        this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
+        if (clone && commits.length > 0) {
+          conflicts = await this.pushCommits(sessionId, clone)
+          pushed = conflicts.length === 0
         }
-        if (!(error instanceof MergeConflictError)) {
-          console.error('Pushing author commits failed', { pr: pr.url, error })
-          this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
-          throw error
+        if (conflicts.length === 0 && description) {
+          await this.publishDescription(sessionId, description, descriptionEdit)
+          pushed = true
         }
-        conflicts = error.files
-        this.patch(sessionId, () => ({ status: 'awaiting_feedback', mergeConflicts: conflicts }), true)
+        this.patch(sessionId, () => ({ status: 'awaiting_feedback' }), true)
+      })
+    } finally {
+      if (pushed) this.refreshPr(pr)
+    }
+    if (conflicts.length > 0) void this.runTurn(sessionId, mergeConflictPrompt(clone!, conflicts), 'resolve_merge')
+  }
+
+  /** Merges or replays GitHub's new commits into the clone and pushes, returning the files a conflicting merge left for Claude. */
+  private async pushCommits(sessionId: string, clone: CloneInfo): Promise<string[]> {
+    try {
+      const integrated = await integrateRemote(clone)
+      this.patch(sessionId, (s) => ({ clone: integrated.clone, responses: rewriteCommits(s.responses, integrated.rewritten) }), true)
+      const { push: lastPush, clone: pushed } = await pushClone(integrated.clone, now())
+      this.patch(sessionId, () => ({ lastPush, clone: pushed, commits: [] }), true)
+      return []
+    } catch (error) {
+      await this.refreshClone(sessionId)
+      if (error instanceof UncommittedChangesError) {
+        this.patch(sessionId, () => ({ status: 'awaiting_feedback' }), true)
+        throw error
       }
-    })
-    if (conflicts.length > 0) void this.runTurn(sessionId, mergeConflictPrompt(clone, conflicts), 'resolve_merge')
-    else this.refreshPr(pr)
+      if (!(error instanceof MergeConflictError)) {
+        console.error('Pushing author commits failed', { pr: this.byId(sessionId).pr.url, error })
+        this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
+        throw error
+      }
+      this.patch(sessionId, () => ({ mergeConflicts: error.files }), true)
+      return error.files
+    }
+  }
+
+  /** Updates the PR's title and description on GitHub, refusing when they changed there since Claude proposed the update. */
+  private async publishDescription(sessionId: string, draft: DescriptionDraft, edit: PrDescription | null): Promise<void> {
+    const { pr } = this.byId(sessionId)
+    try {
+      const current = await fetchDescription(pr)
+      if (current.title !== draft.base.title || current.body !== draft.base.body) throw new Error(DESCRIPTION_CHANGED_ERROR)
+      const next = edit ?? draft
+      await updateDescription(pr, { title: next.title.trim(), body: next.body })
+    } catch (error) {
+      console.error('Updating the PR description failed', { pr: pr.url, error })
+      this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
+      throw error
+    }
+    this.patch(sessionId, () => ({ description: null, descriptionUpdatedAt: now() }), true)
+  }
+
+  /** Saves the title and description Claude proposed, with GitHub's current ones as the base, or drops the draft when they already match. */
+  private async receiveDescription(sessionId: string, proposed: PrDescription): Promise<string> {
+    const current = await fetchDescription(this.byId(sessionId).pr)
+    if (sameDescription(proposed, current)) {
+      this.patch(sessionId, () => ({ description: null }), true)
+      return 'The proposed title and description match GitHub, so there is nothing to update.'
+    }
+    const description: DescriptionDraft = { ...normalizedDescription(proposed), base: current, at: now() }
+    this.patch(sessionId, () => ({ description }), true)
+    return 'Rally saved the proposed title and description. The user reviews them and updates GitHub when they push.'
+  }
+
+  discardDescription(sessionId: string): void {
+    this.assertIdle(sessionId)
+    this.patch(sessionId, () => ({ description: null }), true)
   }
 
   /** Returns whether the clone's folder is gone, forgetting the uncommitted edits that went with it and noting them in the log and the timeline. */
@@ -358,8 +433,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   /**
-   * Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a running turn,
-   * uncommitted edits, unpushed commits, unposted replies, an open merge, or queued re-requests. A failed or cancelled last turn doesn't count.
+   * Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a running turn, uncommitted edits,
+   * unpushed commits, unposted replies, a description update, an open merge, or queued re-requests. A failed or cancelled last turn doesn't count.
    */
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
@@ -394,6 +469,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
           true,
         )
       },
+      onDescription: (proposed) => this.receiveDescription(sessionId, proposed),
       onSelfReview: (drafts) => {
         const selfReview = { verdict: drafts.verdict, reportMarkdown: drafts.reportMarkdown, findings: findingsFromDrafts(drafts, now()) }
         this.patch(

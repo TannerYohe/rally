@@ -30,6 +30,7 @@ export function removeSessionDir(sessionId: string): void {
 export interface TurnSetup {
   systemPromptAppend: string
   mcpServer: McpSdkServerConfigWithInstance
+  readOnlyGitRepos?: string[]
 }
 
 /** Persists one Claude session per PR and runs its turns through the Agent SDK under Rally's tool policy. */
@@ -122,7 +123,10 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     this.dirty.clear()
   }
 
-  protected finishTurn(sessionId: string, resultOk: boolean): void | Promise<void> {
+  /** Runs after every turn, whether it succeeded, failed, or was cancelled, while the session still counts as busy. */
+  protected async turnEnded(_sessionId: string, _succeeded: boolean): Promise<void> {}
+
+  private finishTurn(sessionId: string, resultOk: boolean): void {
     this.patchCore(
       sessionId,
       () => (resultOk ? { status: 'awaiting_feedback' } : { status: 'error', error: 'The Claude turn ended with an error.' }),
@@ -148,8 +152,9 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     const cwd = sessionDir(sessionId)
     mkdirSync(cwd, { recursive: true })
 
+    const setup = this.turnSetup(sessionId)
     const decide = (toolName: string, input: unknown) =>
-      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd })
+      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd, readOnlyGitRepos: setup.readOnlyGitRepos })
 
     const preToolUse: HookCallback = async (input) => {
       if (input.hook_event_name !== 'PreToolUse') return {}
@@ -172,8 +177,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
       return decision.allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: decision.reason }
     }
 
-    const setup = this.turnSetup(sessionId)
-
+    let failure: unknown = null
     try {
       const stream = query({
         prompt,
@@ -198,11 +202,20 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
         if (message.type === 'result') resultOk = message.subtype === 'success' && !message.is_error
         this.updateTimeline(sessionId, (timeline) => reduceTimeline(timeline, message, now()))
       }
-      await this.finishTurn(sessionId, resultOk)
     } catch (error) {
-      const cancelled = controller.signal.aborted
-      this.patchCore(sessionId, () => ({ status: cancelled ? 'cancelled' : 'error', error: cancelled ? null : errorMessage(error) }), true)
+      failure = error
+    }
+    try {
+      await this.turnEnded(sessionId, failure === null && resultOk)
+    } catch (error) {
+      console.error('Finishing a turn failed', { sessionId, error })
+      failure ??= error
     } finally {
+      if (failure === null) this.finishTurn(sessionId, resultOk)
+      else {
+        const cancelled = controller.signal.aborted
+        this.patchCore(sessionId, () => ({ status: cancelled ? 'cancelled' : 'error', error: cancelled ? null : errorMessage(failure) }), true)
+      }
       this.controllers.delete(sessionId)
       this.patchCore(sessionId, (s) => ({ timeline: closeOpenEntries(s.timeline) }))
       this.flush()

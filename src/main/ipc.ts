@@ -71,7 +71,7 @@ export function registerIpc(): void {
     authorSessions.postReplies(id, replies, reRequestReviews),
   )
   ipcMain.handle(IPC.discardAuthorReply, (_event, id: string, itemId: string) => authorSessions.discardReply(id, itemId))
-  ipcMain.handle(IPC.dismissFinding, (_event, id: string, itemId: string) => authorSessions.dismissFinding(id, itemId))
+  ipcMain.handle(IPC.clearFindings, (_event, id: string, itemIds: string[]) => authorSessions.clearFindings(id, itemIds))
   ipcMain.handle(IPC.discardAuthorSession, (_event, id: string) => authorSessions.discard(id))
   ipcMain.handle(IPC.getAppInfo, () => appInfo())
   ipcMain.handle(IPC.getUpdateState, () => updater.get())

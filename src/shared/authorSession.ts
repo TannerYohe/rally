@@ -70,6 +70,16 @@ export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {
   return item.kind !== 'finding'
 }
 
+/** Returns whether Claude finished an action on a self-review finding, so the author can resolve it. */
+export function isFindingHandled(response: ItemResponse | null | undefined): boolean {
+  return response !== null && response !== undefined && !response.pendingCommit
+}
+
+/** Returns the ids of the self-review findings Claude finished an action on. */
+export function handledFindingIds(session: Pick<AuthorSession, 'selfReview' | 'responses'>): string[] {
+  return (session.selfReview?.findings ?? []).filter((finding) => isFindingHandled(session.responses[finding.id])).map((finding) => finding.id)
+}
+
 export function itemLocation(item: Pick<FeedbackItem, 'path' | 'line' | 'kind'>): string {
   if (item.path) return item.line === null ? item.path : `${item.path}:${item.line}`
   switch (item.kind) {

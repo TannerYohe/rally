@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canPush, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
+import { canPush, cloneChangeCount, committableFiles, handledFindingIds, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
@@ -36,6 +36,19 @@ describe('pendingReplies on findings', () => {
     const s = session({ items: [item('self-1', 'finding')], responses: { 'self-1': response('self-1', 'Fixed in abc') } })
     expect(pendingReplies(s)).toEqual([])
     expect(hasPendingWork(s)).toBe(false)
+  })
+})
+
+describe('handledFindingIds', () => {
+  it('lists findings Claude answered, leaving out ones without a response or still waiting on a commit', () => {
+    const findings = ['self-1', 'self-2', 'self-3'].map((id) => item(id, 'finding'))
+    const responses = {
+      'self-1': itemResponse('self-1', '', { action: 'push_back' }),
+      'self-2': itemResponse('self-2', '', { action: 'fix', pendingCommit: true }),
+      T1: itemResponse('T1', 'Done'),
+    }
+    expect(handledFindingIds({ selfReview: { verdict: '', reportMarkdown: '', findings }, responses })).toEqual(['self-1'])
+    expect(handledFindingIds({ selfReview: null, responses })).toEqual([])
   })
 })
 

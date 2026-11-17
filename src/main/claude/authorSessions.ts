@@ -342,13 +342,19 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }, true)
   }
 
-  dismissFinding(sessionId: string, itemId: string): void {
+  /** Removes self-review findings and their responses, whether dismissed before any action or resolved after one. */
+  clearFindings(sessionId: string, itemIds: string[]): void {
     this.assertIdle(sessionId)
-    this.patch(sessionId, (s) => {
-      const { [itemId]: _dropped, ...responses } = s.responses
-      const selfReview = s.selfReview && { ...s.selfReview, findings: s.selfReview.findings.filter((f) => f.id !== itemId) }
-      return { responses, selfReview }
-    }, true)
+    const cleared = new Set(itemIds.filter(isFindingId))
+    this.patch(
+      sessionId,
+      (s) => ({
+        items: s.items.filter((item) => !cleared.has(item.id)),
+        responses: Object.fromEntries(Object.entries(s.responses).filter(([itemId]) => !cleared.has(itemId))),
+        selfReview: s.selfReview && { ...s.selfReview, findings: s.selfReview.findings.filter((finding) => !cleared.has(finding.id)) },
+      }),
+      true,
+    )
   }
 
   /**

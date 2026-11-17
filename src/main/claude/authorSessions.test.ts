@@ -149,6 +149,11 @@ mocks.stored = [
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
     selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }] },
   }),
+  stored(32, {
+    items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }],
+    responses: { T1: response('T1', 'Done'), 'self-1': response('self-1', '', { action: 'push_back', summary: 'Intended' }) },
+    selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }] },
+  }),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
 ]
 
@@ -563,15 +568,25 @@ describe('self-review', () => {
     comments: [{ id: '1', kind: 'inline', path: 'a.ts', line: 4, startLine: null, side: 'RIGHT', severity: 'high', body: 'Null check', replyToCommentId: null }],
   }
 
-  it('turns published drafts into private findings that can be dismissed', async () => {
+  it('turns published drafts into private findings that can be cleared', async () => {
     finishTurn(() => mocks.handlers!.onSelfReview(drafts))
     await authorSessions.selfReview(pr(30))
     await vi.waitFor(() => expect(session(30).status).toBe('awaiting_feedback'))
     expect(mocks.query.mock.calls[0][0].prompt).toBe('/review-pr https://github.com/acme/api/pull/30')
     expect(session(30).selfReview).toMatchObject({ verdict: 'Minor changes', findings: [{ id: 'self-1', kind: 'finding', severity: 'high' }] })
 
-    authorSessions.dismissFinding(session(30).id, 'self-1')
+    expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ active: false, openFindings: 1 })
+
+    authorSessions.clearFindings(session(30).id, ['self-1'])
     expect(session(30).selfReview?.findings).toEqual([])
+    expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ openFindings: 0 })
+  })
+
+  it('resolves handled findings with their responses, leaving reviewer comments alone', () => {
+    authorSessions.clearFindings(session(32).id, ['self-1', 'T1'])
+    expect(session(32).items.map((i) => i.id)).toEqual(['T1', 'self-2'])
+    expect(Object.keys(session(32).responses)).toEqual(['T1'])
+    expect(session(32).selfReview?.findings.map((f) => f.id)).toEqual(['self-2'])
   })
 
   it('drops the earlier self-review findings and their responses when a new one publishes', async () => {

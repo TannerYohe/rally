@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { canPush, cloneChangeCount, committableFiles, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
+import { canPush, cloneChangeCount, committableFiles, handledFindingIds, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
@@ -66,6 +66,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const changeCount = session ? cloneChangeCount(session) : 0
   const leftBehind = session ? committableFiles(session).length : 0
   const repliesLabel = plural(posts.length, 'reply', 'replies')
+  const handledFindings = session ? handledFindingIds(session) : []
 
   const runActions = () =>
     run(async () => {
@@ -92,6 +93,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
       feedback.reload()
     })
   }
+  const clearFindings = (itemIds: string[]) => session && run(() => window.rally.clearFindings(session.id, itemIds))
   const acknowledge = (itemId: string) =>
     run(async () => {
       await window.rally.acknowledgeFeedback(prRef, itemId)
@@ -119,7 +121,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
         onReplyEdit={(body) => setReplyEdits(({ [id]: _removed, ...rest }) => (body === undefined ? rest : { ...rest, [id]: body }))}
         onResolve={(value) => setResolve((current) => ({ ...current, [id]: value }))}
         onDropReply={() => session && run(() => window.rally.discardAuthorReply(session.id, id))}
-        onDismiss={() => session && run(() => window.rally.dismissFinding(session.id, id))}
+        onClearFinding={() => clearFindings([id])}
         onAcknowledge={() => acknowledge(id)}
       />
     )
@@ -272,6 +274,14 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             )}
             <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy || postBlocked !== null} onClick={postReplies}>
               Post {repliesLabel}
+            </button>
+          </div>
+        )}
+        {handledFindings.length > 0 && (
+          <div className="flex items-center justify-end gap-3 rounded-xl bg-ink-900/60 px-4 py-3 ring-1 ring-white/5">
+            <span className="mr-auto text-xs text-ink-400">Claude handled {plural(handledFindings.length, 'self-review finding')}. Resolve them once you've checked the results.</span>
+            <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={() => clearFindings(handledFindings)}>
+              Resolve {plural(handledFindings.length, 'finding')}
             </button>
           </div>
         )}

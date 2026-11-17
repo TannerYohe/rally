@@ -60,7 +60,7 @@ export interface RallyApi {
   commitUncommitted(sessionId: string, message: string): Promise<void>
   postAuthorReplies(sessionId: string, replies: ReplyPost[], reRequestReviews: boolean): Promise<void>
   discardAuthorReply(sessionId: string, itemId: string): Promise<void>
-  dismissFinding(sessionId: string, itemId: string): Promise<void>
+  clearFindings(sessionId: string, itemIds: string[]): Promise<void>
   discardAuthorSession(sessionId: string): Promise<void>
   onAuthorSessionChanged(listener: (session: AuthorSession) => void): () => void
   getAppInfo(): Promise<AppInfo>
@@ -107,7 +107,7 @@ export const IPC = {
   commitUncommitted: 'author:commit-uncommitted',
   postAuthorReplies: 'author:post-replies',
   discardAuthorReply: 'author:discard-reply',
-  dismissFinding: 'author:dismiss-finding',
+  clearFindings: 'author:clear-findings',
   discardAuthorSession: 'author:discard',
   authorSessionChanged: 'author:changed',
   getAppInfo: 'app:info',

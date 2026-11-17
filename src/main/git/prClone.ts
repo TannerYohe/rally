@@ -142,7 +142,7 @@ export async function uncommittedPaths(clone: CloneInfo): Promise<string[]> {
 
 /** Returns the unified diff of the clone's unpushed commits, cut off at MAX_DIFF_CHARS. */
 export async function cloneDiff(clone: CloneInfo): Promise<string> {
-  const diff = await git(clone.path, ['diff', `origin/${clone.branch}...HEAD`])
+  const diff = await git(clone.path, ['diff', `${syncedRef(clone)}...HEAD`])
   return diff.length > MAX_DIFF_CHARS ? `${diff.slice(0, MAX_DIFF_CHARS)}\n… diff truncated` : diff
 }
 
@@ -195,7 +195,7 @@ export async function concludeMerge(clone: CloneInfo, files: string[]): Promise<
 async function replayOntoRemote(clone: CloneInfo): Promise<Record<string, string>> {
   const before = await commitList(clone, ['--no-merges'])
   try {
-    await git(clone.path, ['rebase', '--empty=keep', '--onto', remoteRef(clone), syncedRef(clone)])
+    await git(clone.path, ['rebase', '--empty=keep', '--reapply-cherry-picks', '--onto', remoteRef(clone), syncedRef(clone)])
   } catch {
     await git(clone.path, ['rebase', '--abort']).catch(() => {})
     throw new ForcePushConflictError(clone.branch)
@@ -204,31 +204,41 @@ async function replayOntoRemote(clone: CloneInfo): Promise<Record<string, string
   return Object.fromEntries(before.map((commit, index) => [commit.oid, after[index]?.oid ?? commit.oid]))
 }
 
-export interface PushResult {
-  push: PushRecord
+export interface IntegrateResult {
   clone: CloneInfo
   /** Old sha to new sha for commits Rally replayed onto a force-pushed branch. */
   rewritten: Record<string, string>
+}
+
+export interface PushResult {
+  push: PushRecord
+  clone: CloneInfo
 }
 
 export async function abortMerge(clone: CloneInfo): Promise<void> {
   await git(clone.path, ['merge', '--abort'])
 }
 
-/** Pushes the clone's commits to the head branch without force. Commits that landed on GitHub since are merged in first; after a force push, Rally's commits are replayed on top instead. */
-export async function pushClone(clone: CloneInfo, at: string): Promise<PushResult> {
-  if ((await localCommits(clone)).length === 0) throw new Error('There are no commits to push.')
+/**
+ * Fetches the head branch and brings commits that landed on GitHub into the clone: merged in, or after a force push, with Rally's commits replayed on top.
+ * The returned clone records GitHub's head as synced, so save it before pushing in case the push fails.
+ */
+export async function integrateRemote(clone: CloneInfo): Promise<IntegrateResult> {
   await fetchBranch(clone)
-  let rewritten: Record<string, string> = {}
-  if (!(await isAncestor(clone, remoteRef(clone)))) {
-    const leftovers = await uncommittedPaths(clone)
-    if (leftovers.length > 0) throw new UncommittedChangesError(leftovers)
-    const forcePushed = clone.syncedHead !== undefined && !(await isAncestor(clone, clone.syncedHead, remoteRef(clone)))
-    if (forcePushed) rewritten = await replayOntoRemote(clone)
-    else await mergeRemote(clone)
-  }
+  if (await isAncestor(clone, remoteRef(clone))) return { clone, rewritten: {} }
+  const leftovers = await uncommittedPaths(clone)
+  if (leftovers.length > 0) throw new UncommittedChangesError(leftovers)
+  const forcePushed = clone.syncedHead !== undefined && !(await isAncestor(clone, clone.syncedHead, remoteRef(clone)))
+  const rewritten = forcePushed ? await replayOntoRemote(clone) : {}
+  if (!forcePushed) await mergeRemote(clone)
+  return { clone: { ...clone, syncedHead: await revParse(clone.path, remoteRef(clone)) }, rewritten }
+}
+
+/** Pushes the clone's commits to the head branch without force; run integrateRemote first so GitHub's commits are already in. */
+export async function pushClone(clone: CloneInfo, at: string): Promise<PushResult> {
   const commits = await commitList({ ...clone, syncedHead: undefined }, [])
+  if (commits.length === 0) throw new Error('There are no commits to push.')
   const oid = await revParse(clone.path, 'HEAD')
   await git(clone.path, ['push', 'origin', `HEAD:refs/heads/${clone.branch}`], NETWORK_TIMEOUT_MS)
-  return { push: { at, oid, commits }, clone: { ...clone, syncedHead: oid }, rewritten }
+  return { push: { at, oid, commits }, clone: { ...clone, syncedHead: oid } }
 }

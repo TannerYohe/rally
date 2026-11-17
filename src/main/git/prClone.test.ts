@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { CloneInfo } from '@shared/types'
 import {
   abortMerge,
   cloneBranch,
@@ -11,6 +12,7 @@ import {
   concludeMerge,
   discardUncommitted,
   ForcePushConflictError,
+  integrateRemote,
   localCommits,
   MergeConflictError,
   pushClone,
@@ -41,6 +43,12 @@ function commitFile(cwd: string, name: string, content: string): void {
   writeFileSync(join(cwd, name), content)
   git(cwd, 'add', name)
   git(cwd, 'commit', '-m', `change ${name}`)
+}
+
+/** Brings GitHub's commits in, then pushes, as Push does. */
+async function syncAndPush(clone: CloneInfo, at: string) {
+  const integrated = await integrateRemote(clone)
+  return { ...(await pushClone(integrated.clone, at)), rewritten: integrated.rewritten }
 }
 
 const source = { headUrl: `file://${remote}`, branch: 'feature', baseUrl: `file://${remote}`, baseBranch: 'main' }
@@ -78,7 +86,7 @@ describe('prClone', () => {
     expect(await uncommittedPaths(clone)).toEqual(['loose.txt'])
     expect(await cloneDiff(clone)).toContain('+three')
 
-    const pushed = await pushClone(clone, AT)
+    const pushed = await syncAndPush(clone, AT)
     expect(pushed).toEqual({ push: { at: AT, oid: commits[0].oid, commits }, clone: { ...clone, syncedHead: commits[0].oid }, rewritten: {} })
     expect(git(root, '--git-dir', remote, 'rev-parse', 'feature').trim()).toBe(commits[0].oid)
     expect(git(clone.path, 'rev-parse', 'origin/feature').trim()).toBe(commits[0].oid)
@@ -89,10 +97,10 @@ describe('prClone', () => {
     const clone = await cloneBranch(join(root, 'session3'), source)
     const other = await cloneBranch(join(root, 'session4'), source)
     commitFile(other.path, 'd.txt', 'four\n')
-    const theirs = await pushClone(other, AT)
+    const theirs = await syncAndPush(other, AT)
 
     commitFile(clone.path, 'e.txt', 'five\n')
-    const pushed = await pushClone(clone, AT)
+    const pushed = await syncAndPush(clone, AT)
     expect(git(root, '--git-dir', remote, 'rev-parse', 'feature').trim()).toBe(pushed.push.oid)
     expect(git(clone.path, 'log', '-1', '--format=%P').trim().split(' ')).toContain(theirs.push.oid)
   })
@@ -101,17 +109,17 @@ describe('prClone', () => {
     const clone = await cloneBranch(join(root, 'session11'), source)
     const other = await cloneBranch(join(root, 'session12'), source)
     commitFile(other.path, 'b.txt', 'theirs\n')
-    await pushClone(other, AT)
+    await syncAndPush(other, AT)
     commitFile(clone.path, 'b.txt', 'mine\n')
 
-    const conflict = await pushClone(clone, AT).catch((error: unknown) => error)
+    const conflict = await syncAndPush(clone, AT).catch((error: unknown) => error)
     expect(conflict).toBeInstanceOf(MergeConflictError)
     expect((conflict as MergeConflictError).files).toEqual(['b.txt'])
     await expect(concludeMerge(clone, ['b.txt'])).rejects.toThrow('Conflict markers remain in b.txt')
 
     writeFileSync(join(clone.path, 'b.txt'), 'both\n')
     await concludeMerge(clone, ['b.txt'])
-    const pushed = await pushClone(clone, AT)
+    const pushed = await syncAndPush(clone, AT)
     expect(git(root, '--git-dir', remote, 'show', `${pushed.push.oid}:b.txt`)).toBe('both\n')
   })
 
@@ -119,9 +127,9 @@ describe('prClone', () => {
     const clone = await cloneBranch(join(root, 'session13'), source)
     const other = await cloneBranch(join(root, 'session14'), source)
     commitFile(other.path, 'a.txt', 'theirs\n')
-    await pushClone(other, AT)
+    await syncAndPush(other, AT)
     commitFile(clone.path, 'a.txt', 'mine\n')
-    await pushClone(clone, AT).catch(() => {})
+    await syncAndPush(clone, AT).catch(() => {})
 
     await abortMerge(clone)
     expect(await uncommittedPaths(clone)).toEqual([])
@@ -145,7 +153,7 @@ describe('prClone', () => {
     const clone = await cloneBranch(join(root, 'session5'), source)
     const other = await cloneBranch(join(root, 'session6'), source)
     commitFile(other.path, 'f.txt', 'six\n')
-    const { push } = await pushClone(other, AT)
+    const { push } = await syncAndPush(other, AT)
 
     const synced = await syncClone(clone)
     expect(git(clone.path, 'rev-parse', 'HEAD').trim()).toBe(push.oid)
@@ -157,7 +165,7 @@ describe('prClone', () => {
     const other = await cloneBranch(join(root, 'session8'), source)
     commitFile(clone.path, 'mine.txt', 'mine\n')
     commitFile(other.path, 'theirs.txt', 'theirs\n')
-    await pushClone(other, AT)
+    await syncAndPush(other, AT)
     await syncClone(clone)
 
     const diff = await cloneDiff(clone)
@@ -171,7 +179,7 @@ describe('prClone', () => {
     commitFile(clone.path, 'kept.txt', 'kept\n')
     const [local] = await localCommits(clone)
     commitFile(other.path, 'moved.txt', 'moved\n')
-    await pushClone(other, AT)
+    await syncAndPush(other, AT)
 
     await syncClone(clone)
     expect(git(clone.path, 'rev-parse', 'HEAD').trim()).toBe(local.oid)
@@ -210,7 +218,7 @@ describe('prClone', () => {
       const before = git(clone.path, 'rev-parse', 'HEAD').trim()
       const other = await cloneBranch(join(root, 'edits-sync-other'), source)
       commitFile(other.path, 'h.txt', 'h\n')
-      await pushClone(other, AT)
+      await syncAndPush(other, AT)
       writeFileSync(join(clone.path, 'a.txt'), 'half-done\n')
 
       await syncClone(clone)
@@ -226,12 +234,43 @@ describe('prClone', () => {
       const head = await forcePush('k.txt')
 
       expect((await localCommits(clone)).map((c) => c.oid)).toEqual([mine.oid])
-      const result = await pushClone(clone, AT)
+      const result = await syncAndPush(clone, AT)
       const replayed = result.rewritten[mine.oid]
       expect(replayed).not.toBe(mine.oid)
       expect(git(clone.path, 'log', '-1', '--format=%P', replayed).trim()).toBe(head)
       expect(git(root, '--git-dir', remote, 'rev-parse', forced.branch).trim()).toBe(replayed)
       expect(result.clone.syncedHead).toBe(replayed)
+    })
+
+    it('diffs only commits Rally made after the branch was force-pushed', async () => {
+      const { forced, forcePush } = await forcedBranch()
+      const clone = await cloneBranch(join(root, 'force-diff'), forced)
+      commitFile(clone.path, 'ours.txt', 'ours\n')
+      await forcePush('theirs-forced.txt')
+      git(clone.path, 'fetch', 'origin')
+      const diff = await cloneDiff(clone)
+      expect(diff).toContain('ours.txt')
+      expect(diff).not.toContain('theirs-forced.txt')
+    })
+
+    it('pairs old and new shas when the force-pushed head already contains one of the replayed commits', async () => {
+      const { forced } = await forcedBranch()
+      const clone = await cloneBranch(join(root, 'force-cherry'), forced)
+      commitFile(clone.path, 'first.txt', 'first\n')
+      commitFile(clone.path, 'second.txt', 'second\n')
+      const [second, first] = await localCommits(clone)
+      const other = await cloneBranch(join(root, 'force-cherry-other'), forced)
+      git(other.path, 'commit', '--amend', '-m', 'rewritten')
+      git(other.path, 'fetch', clone.path, 'HEAD')
+      git(other.path, 'cherry-pick', first.oid)
+      git(other.path, 'push', '--force', 'origin', `HEAD:refs/heads/${forced.branch}`)
+
+      const { rewritten } = await syncAndPush(clone, AT)
+      expect(Object.keys(rewritten).sort()).toEqual([first.oid, second.oid].sort())
+      expect(git(clone.path, 'log', '-1', '--format=%s', rewritten[second.oid]).trim()).toBe('change second.txt')
+      expect(git(clone.path, 'log', '-1', '--format=%s', rewritten[first.oid]).trim()).toBe('change first.txt')
+      expect(rewritten[first.oid]).not.toBe(first.oid)
+      expect(git(clone.path, 'log', '-1', '--format=%P', rewritten[second.oid]).trim()).toBe(rewritten[first.oid])
     })
 
     it('refuses and restores the clone when the replay conflicts', async () => {
@@ -241,7 +280,7 @@ describe('prClone', () => {
       const before = git(clone.path, 'rev-parse', 'HEAD').trim()
       await forcePush('m.txt')
 
-      await expect(pushClone(clone, AT)).rejects.toBeInstanceOf(ForcePushConflictError)
+      await expect(syncAndPush(clone, AT)).rejects.toBeInstanceOf(ForcePushConflictError)
       expect(git(clone.path, 'rev-parse', 'HEAD').trim()).toBe(before)
       expect(await uncommittedPaths(clone)).toEqual([])
     })
@@ -252,16 +291,28 @@ describe('prClone', () => {
     const other = await cloneBranch(join(root, 'leftovers-other'), source)
     commitFile(clone.path, 'n.txt', 'n\n')
     commitFile(other.path, 'a.txt', 'remote\n')
-    await pushClone(other, AT)
+    await syncAndPush(other, AT)
     writeFileSync(join(clone.path, 'a.txt'), 'leftover\n')
     writeFileSync(join(clone.path, 'stray.txt'), 'stray\n')
 
-    const refused = await pushClone(clone, AT).catch((error: unknown) => error)
+    const refused = await syncAndPush(clone, AT).catch((error: unknown) => error)
     expect(refused).toBeInstanceOf(UncommittedChangesError)
     expect((refused as UncommittedChangesError).files.sort()).toEqual(['a.txt', 'stray.txt'])
 
     await discardUncommitted(clone)
     expect(await uncommittedPaths(clone)).toEqual([])
-    await pushClone(clone, AT)
+    await syncAndPush(clone, AT)
+  })
+
+  it('records the synced head and replayed shas from integrating, before any push', async () => {
+    const clone = await cloneBranch(join(root, 'integrate-only'), source)
+    const other = await cloneBranch(join(root, 'integrate-only-other'), source)
+    commitFile(clone.path, 'p.txt', 'p\n')
+    commitFile(other.path, 'q.txt', 'q\n')
+    const { push } = await syncAndPush(other, AT)
+
+    const integrated = await integrateRemote(clone)
+    expect(integrated.clone.syncedHead).toBe(push.oid)
+    expect((await localCommits(integrated.clone)).map((c) => c.subject)).toEqual([expect.stringContaining('Merge'), 'change p.txt'])
   })
 })

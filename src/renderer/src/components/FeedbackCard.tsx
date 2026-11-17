@@ -18,7 +18,7 @@ const VERDICT_STYLES: Record<ResponseVerdict, string> = {
   unclear: 'bg-ink-500/20 text-ink-300',
 }
 
-const FINDING_ACTIONS: ResponseAction[] = ['investigate', 'fix']
+const FINDING_ACTIONS: ResponseAction[] = ['investigate', 'fix', 'push_back']
 
 const VISIBLE_COMMENTS = 3
 

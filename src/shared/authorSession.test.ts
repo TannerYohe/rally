@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canPush, cloneChangeCount, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
+import { canPush, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
@@ -71,16 +71,24 @@ describe('itemLocation', () => {
 describe('canPush', () => {
   const commits = [{ oid: 'a', subject: 'fix' }]
 
-  it('is true only with commits, nothing uncommitted, and no open merge', () => {
-    expect(canPush({ commits, uncommitted: [], mergeConflicts: [] })).toBe(true)
-    expect(canPush({ commits: [], uncommitted: [], mergeConflicts: [] })).toBe(false)
-    expect(canPush({ commits, uncommitted: ['a.ts'], mergeConflicts: [] })).toBe(false)
-    expect(canPush({ commits, uncommitted: [], mergeConflicts: ['a.ts'] })).toBe(false)
+  it('is true with commits and no open merge, even with uncommitted files', () => {
+    expect(canPush({ commits, mergeConflicts: [] })).toBe(true)
+    expect(canPush({ commits: [], mergeConflicts: [] })).toBe(false)
+    expect(canPush({ commits, mergeConflicts: ['a.ts'] })).toBe(false)
+  })
+})
+
+describe('committableFiles', () => {
+  it('lists uncommitted files except while a merge is open', () => {
+    expect(committableFiles({ uncommitted: ['a.ts'], mergeConflicts: [] })).toEqual(['a.ts'])
+    expect(committableFiles({ uncommitted: ['a.ts', 'merged.ts'], mergeConflicts: ['a.ts'] })).toEqual([])
   })
 })
 
 describe('cloneChangeCount', () => {
-  it('adds uncommitted files and unpushed commits', () => {
-    expect(cloneChangeCount({ commits: [{ oid: 'a', subject: 'fix' }], uncommitted: ['a.ts', 'b.ts'] })).toBe(3)
+  it('adds committable files and unpushed commits', () => {
+    const commits = [{ oid: 'a', subject: 'fix' }]
+    expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'b.ts'], mergeConflicts: [] })).toBe(3)
+    expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'merged.ts'], mergeConflicts: ['a.ts'] })).toBe(1)
   })
 })

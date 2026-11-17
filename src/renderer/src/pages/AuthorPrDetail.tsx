@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { canPush, cloneChangeCount, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
+import { canPush, cloneChangeCount, committableFiles, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
@@ -64,6 +64,8 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const unpushed = session?.commits.length ?? 0
   const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null
   const changeCount = session ? cloneChangeCount(session) : 0
+  const leftBehind = session ? committableFiles(session).length : 0
+  const repliesLabel = plural(posts.length, 'reply', 'replies')
 
   const runActions = () =>
     run(async () => {
@@ -82,7 +84,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const selfReview = () => run(async () => onSession(await window.rally.startSelfReview(prRef)))
   const push = () => session && run(() => window.rally.pushAuthorCommits(session.id))
   const postReplies = () => {
-    if (!session || !window.confirm(`Post ${posts.length} repl${posts.length === 1 ? 'y' : 'ies'} to GitHub as you?`)) return
+    if (!session || !window.confirm(`Post ${repliesLabel} to GitHub as you?`)) return
     void run(async () => {
       await window.rally.postAuthorReplies(session.id, posts, reRequestReviews)
       setReplyEdits({})
@@ -212,7 +214,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
             onDiscardUncommitted={() =>
-              window.confirm(`Discard ${session.uncommitted.length} uncommitted change(s) in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
+              window.confirm(`Discard ${plural(session.uncommitted.length, 'uncommitted file')} in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
             }
             onCommitUncommitted={(message) => run(() => window.rally.commitUncommitted(session.id, message))}
           />
@@ -239,7 +241,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
           }
           disabled={busy}
           canSend={canRunPrimary}
-          sendLabel={requests.length > 0 ? `Run ${requests.length} action${requests.length === 1 ? '' : 's'}` : 'Send to Claude'}
+          sendLabel={requests.length > 0 ? `Run ${plural(requests.length, 'action')}` : 'Send to Claude'}
           onChange={setMessage}
           onSend={() => void primary()}
         />
@@ -259,14 +261,17 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
                   Review changes
                 </button>
                 {session && canPush(session) && (
-                  <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
-                    Push {plural(unpushed, 'commit')}
-                  </button>
+                  <>
+                    {leftBehind > 0 && <span className="text-xs text-amber-300">Push leaves out {plural(leftBehind, 'uncommitted file')}.</span>}
+                    <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
+                      Push {plural(unpushed, 'commit')}
+                    </button>
+                  </>
                 )}
               </>
             )}
             <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy || postBlocked !== null} onClick={postReplies}>
-              Post {posts.length} repl{posts.length === 1 ? 'y' : 'ies'}
+              Post {repliesLabel}
             </button>
           </div>
         )}

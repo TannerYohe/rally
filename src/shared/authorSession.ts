@@ -51,14 +51,19 @@ export function hasPendingWork(session: WorkState & Pick<AuthorSession, 'status'
   return session.status !== 'awaiting_feedback' || hasUnsharedWork(session)
 }
 
-/** Returns how many uncommitted files and unpushed commits the clone holds that GitHub doesn't. */
-export function cloneChangeCount(session: Pick<AuthorSession, 'commits' | 'uncommitted'>): number {
-  return session.commits.length + session.uncommitted.length
+/** Returns the uncommitted files the author can commit, or none while a merge is open and git also lists the files it staged. */
+export function committableFiles(session: Pick<AuthorSession, 'uncommitted' | 'mergeConflicts'>): string[] {
+  return session.mergeConflicts.length > 0 ? [] : session.uncommitted
 }
 
-/** Returns whether the clone has commits to push with nothing left uncommitted and no merge open. */
-export function canPush(session: Pick<AuthorSession, 'commits' | 'uncommitted' | 'mergeConflicts'>): boolean {
-  return session.commits.length > 0 && session.uncommitted.length === 0 && session.mergeConflicts.length === 0
+/** Returns how many committable files and unpushed commits the clone holds that GitHub doesn't. */
+export function cloneChangeCount(session: Pick<AuthorSession, 'commits' | 'uncommitted' | 'mergeConflicts'>): number {
+  return session.commits.length + committableFiles(session).length
+}
+
+/** Returns whether the clone has commits to push and no merge open; uncommitted files stay behind. */
+export function canPush(session: Pick<AuthorSession, 'commits' | 'mergeConflicts'>): boolean {
+  return session.commits.length > 0 && session.mergeConflicts.length === 0
 }
 
 export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {

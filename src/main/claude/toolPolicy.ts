@@ -106,7 +106,7 @@ const READ_ONLY_GIT_COMMANDS = new Set([
 ])
 
 const READ_ONLY_REPO_REASON =
-  'Rally commits and merges in this clone itself. Edit the files, then list them with a commit message in publish_responses.'
+  'Rally commits and merges in this clone itself. For a fix item, list the files you changed with a commit message in publish_responses; otherwise say which files you changed, and the user commits them from the Changes tab.'
 
 const GH_API_VALUE_FLAGS = new Set([
   '-X', '--method', '-H', '--header', '-f', '-F', '--field', '--raw-field', '--input', '-q', '--jq', '-t', '--template',

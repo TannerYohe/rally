@@ -1,7 +1,5 @@
 import type { MyReview, Phase } from '@shared/types'
 
-export const MY_REVIEW_WINDOW = 20
-
 const COUNTED_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'])
 const DECISION_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED'])
 
@@ -16,9 +14,7 @@ interface PhaseInput {
 export function latestSubmittedReview(reviews: MyReview[], states = COUNTED_STATES): MyReview | null {
   const submitted = reviews.filter((r) => states.has(r.state) && r.submittedAt)
   submitted.sort((a, b) => a.submittedAt!.localeCompare(b.submittedAt!))
-  const counted = submitted.filter((r) => !r.replyOnly)
-  if (counted.length > 0 || reviews.length < MY_REVIEW_WINDOW) return counted.at(-1) ?? null
-  return submitted.at(-1) ?? null
+  return submitted.filter((r) => !r.replyOnly).at(-1) ?? null
 }
 
 function headChangedSince(review: MyReview, pr: PhaseInput): boolean {

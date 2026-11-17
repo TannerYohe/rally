@@ -6,7 +6,7 @@ vi.mock('./client', async (importOriginal) => ({
   github: async () => ({ graphql, login: 'me' }),
 }))
 
-const { fetchPr, isReplyOnly } = await import('./queries')
+const { fetchPr, isReplyOnly, SEARCH_PAGES, searchPrs } = await import('./queries')
 
 const reply = { replyTo: { id: 'c1' } }
 const inline = { replyTo: null }
@@ -89,5 +89,16 @@ describe('fetchPr', () => {
       approvedBy: [],
       truncated: true,
     })
+  })
+
+})
+
+describe('searchPrs', () => {
+  it('pages authored searches in small pages with a timeout', async () => {
+    graphql.mockResolvedValueOnce({ search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } })
+    await searchPrs(['is:pr author:@me'], 'authored')
+    const variables = graphql.mock.calls.at(-1)![1]
+    expect(variables).toMatchObject({ authored: true, pageSize: SEARCH_PAGES.authored.size })
+    expect(variables.request.signal).toBeInstanceOf(AbortSignal)
   })
 })

@@ -30,8 +30,8 @@ const PR_FIELDS = `
 `
 
 const SEARCH_QUERY = `
-  query($q: String!, $viewer: String!, $authored: Boolean!, $cursor: String) {
-    search(query: $q, type: ISSUE, first: 50, after: $cursor) {
+  query($q: String!, $viewer: String!, $authored: Boolean!, $pageSize: Int!, $cursor: String) {
+    search(query: $q, type: ISSUE, first: $pageSize, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes { ... on PullRequest { ...PrFields } }
     }
@@ -52,7 +52,11 @@ const REVIEW_COMMENTS_QUERY = `
   }
 `
 
-const MAX_PAGES = 4
+/** Authored PRs fetch every thread, comment, and review, so they come in small pages to keep each query's rate-limit cost low. */
+export const SEARCH_PAGES: Record<PrListKind, { size: number; max: number }> = {
+  reviewing: { size: 50, max: 4 },
+  authored: { size: 10, max: 10 },
+}
 const MAX_NODE_IDS = 100
 
 interface RawReview {
@@ -189,8 +193,16 @@ export async function searchPrs(queries: string[], kind: PrListKind): Promise<{ 
   const byId = new Map<string, RawPr>()
   for (const q of queries) {
     let cursor: string | null = null
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, { q, viewer: gh.login, authored: isAuthored(kind), cursor })
+    const pages = SEARCH_PAGES[kind]
+    for (let page = 0; page < pages.max; page++) {
+      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, {
+        q,
+        viewer: gh.login,
+        authored: isAuthored(kind),
+        pageSize: pages.size,
+        cursor,
+        request: timeoutRequest(),
+      })
       for (const node of response.search.nodes) {
         if ('id' in node) byId.set(node.id, node as RawPr)
       }
@@ -211,6 +223,7 @@ export async function fetchPr(owner: string, repo: string, number: number, kind:
     number,
     viewer: gh.login,
     authored: isAuthored(kind),
+    request: timeoutRequest(),
   })
   const raw = response.repository.pullRequest
   return toPr(raw, gh.login, await replyOnlyReviewIds(gh, [raw]))

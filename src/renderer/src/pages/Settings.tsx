@@ -7,12 +7,14 @@ import {
   EFFORT_LABELS,
   MODEL_LABELS,
   REVIEW_DONE_SOUND_LABELS,
+  SOUND_CUE_LABELS,
+  soundPlayback,
   type Config,
   type EffortChoice,
   type Health,
   type ModelChoice,
   type ReleaseInfo,
-  type ReviewDoneSound,
+  type SkinId,
   type SoundCue,
   type UpdateState,
 } from '@shared/types'
@@ -297,7 +299,7 @@ function AppearanceSection({ config, onChange }: SectionProps) {
 }
 
 function SoundsSection({ config, onChange }: SectionProps) {
-  const preview = (cue: SoundCue) => playSound({ cue, pack: config.soundPack ?? config.skin, volume: config.soundVolume })
+  const preview = (cue: SoundCue) => playSound(soundPlayback(cue, config))
   return (
     <>
       <SectionHeader title="Sounds">Rally plays a short sound when something changes. Each skin has its own set.</SectionHeader>
@@ -321,50 +323,38 @@ function SoundsSection({ config, onChange }: SectionProps) {
           </span>
         </Row>
         <Row label="Sound set" description="A skin picked here keeps its sounds when you change skins.">
-          <select
-            className={`${FIELD_CLASS} w-56`}
-            value={config.soundPack ?? ''}
-            onChange={(e) => onChange({ ...config, soundPack: e.target.value ? parseSkinId(e.target.value) : null })}
-          >
-            <option value="">Match skin ({SKINS[config.skin].name})</option>
-            {SKIN_IDS.map((id) => (
-              <option key={id} value={id}>
-                {SKINS[id].name}
-              </option>
-            ))}
-          </select>
+          <ChoiceSelect
+            labels={SKIN_NAMES}
+            value={config.soundPack}
+            defaultLabel={`Match skin (${SKINS[config.skin].name})`}
+            onChange={(soundPack) => onChange({ ...config, soundPack })}
+          />
         </Row>
       </Card>
       <Card title="When to play" description="Sounds play only while Rally's window is open.">
-        <Row label="Claude finishes a turn" description="A review, self-review, or response turn ends or errors. Cancelling a turn plays nothing.">
+        <Row label={SOUND_CUE_LABELS.reviewDone} description="A review, self-review, or response turn ends or errors. Cancelling a turn plays nothing.">
           <span className="flex items-center gap-2">
-            <select
-              className={`${FIELD_CLASS} w-56`}
+            <ChoiceSelect
+              labels={REVIEW_DONE_SOUND_LABELS}
               value={config.reviewDoneSound}
-              onChange={(e) => onChange({ ...config, reviewDoneSound: e.target.value as ReviewDoneSound })}
-            >
-              {(Object.keys(REVIEW_DONE_SOUND_LABELS) as ReviewDoneSound[]).map((choice) => (
-                <option key={choice} value={choice}>
-                  {REVIEW_DONE_SOUND_LABELS[choice]}
-                </option>
-              ))}
-            </select>
-            <PreviewButton label="Claude finishes a turn" onClick={() => preview('reviewDone')} />
+              onChange={(reviewDoneSound) => reviewDoneSound && onChange({ ...config, reviewDoneSound })}
+            />
+            <PreviewButton cue="reviewDone" onPlay={preview} />
           </span>
         </Row>
         <Row
-          label="A PR needs your attention"
+          label={SOUND_CUE_LABELS.needsAttention}
           description="A PR you review becomes unreviewed or awaiting re-review, or one of your PRs needs a response. Drafts and hidden PRs stay quiet."
         >
           <span className="flex items-center gap-2">
-            <Switch label="A PR needs your attention" checked={config.attentionSound} onChange={(attentionSound) => onChange({ ...config, attentionSound })} />
-            <PreviewButton label="A PR needs your attention" onClick={() => preview('needsAttention')} />
+            <Switch label={SOUND_CUE_LABELS.needsAttention} checked={config.attentionSound} onChange={(attentionSound) => onChange({ ...config, attentionSound })} />
+            <PreviewButton cue="needsAttention" onPlay={preview} />
           </span>
         </Row>
-        <Row label="A PR is approved" description="You approve a PR you review, in Rally or on GitHub, or a reviewer approves one of your PRs.">
+        <Row label={SOUND_CUE_LABELS.approved} description="You approve a PR you review, in Rally or on GitHub, or a reviewer approves one of your PRs.">
           <span className="flex items-center gap-2">
-            <Switch label="A PR is approved" checked={config.approvedSound} onChange={(approvedSound) => onChange({ ...config, approvedSound })} />
-            <PreviewButton label="A PR is approved" onClick={() => preview('approved')} />
+            <Switch label={SOUND_CUE_LABELS.approved} checked={config.approvedSound} onChange={(approvedSound) => onChange({ ...config, approvedSound })} />
+            <PreviewButton cue="approved" onPlay={preview} />
           </span>
         </Row>
       </Card>
@@ -372,9 +362,17 @@ function SoundsSection({ config, onChange }: SectionProps) {
   )
 }
 
-function PreviewButton({ label, onClick }: { label: string; onClick(): void }) {
+const SKIN_NAMES = Object.fromEntries(SKIN_IDS.map((id) => [id, SKINS[id].name])) as Record<SkinId, string>
+
+function PreviewButton({ cue, onPlay }: { cue: SoundCue; onPlay(cue: SoundCue): void }) {
   return (
-    <button type="button" title="Play" aria-label={`Play: ${label}`} className="rounded-md p-1.5 text-ink-400 hover:bg-white/5 hover:text-ink-100" onClick={onClick}>
+    <button
+      type="button"
+      title="Play"
+      aria-label={`Play: ${SOUND_CUE_LABELS[cue]}`}
+      className="rounded-md p-1.5 text-ink-400 hover:bg-white/5 hover:text-ink-100"
+      onClick={() => onPlay(cue)}
+    >
       <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
         <path d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.8L9.5 4.6A1 1 0 0 0 8 5.5Z" />
       </svg>
@@ -716,17 +714,18 @@ function systemDefault(value: string | null | undefined): string {
   return value ? `System default (${value})` : 'System default'
 }
 
-interface ChoiceSelectProps<T extends ModelChoice | EffortChoice> {
+interface ChoiceSelectProps<T extends string> {
   labels: Record<T, string>
   value: T | null
-  defaultLabel: string
+  /** Label for the empty option, which selects null; omit it when a choice is required. */
+  defaultLabel?: string
   onChange(value: T | null): void
 }
 
-function ChoiceSelect<T extends ModelChoice | EffortChoice>({ labels, value, defaultLabel, onChange }: ChoiceSelectProps<T>) {
+function ChoiceSelect<T extends string>({ labels, value, defaultLabel, onChange }: ChoiceSelectProps<T>) {
   return (
     <select className={`${FIELD_CLASS} w-56`} value={value ?? ''} onChange={(e) => onChange((e.target.value || null) as T | null)}>
-      <option value="">{defaultLabel}</option>
+      {defaultLabel !== undefined && <option value="">{defaultLabel}</option>}
       {(Object.keys(labels) as T[]).map((choice) => (
         <option key={choice} value={choice}>
           {labels[choice]}

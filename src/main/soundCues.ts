@@ -1,4 +1,4 @@
-import type { Config, Phase, Pr, PrListKind, SessionStatus, SoundCue, SoundPlayback } from '@shared/types'
+import { soundPlayback, type Config, type Phase, type Pr, type PrListKind, type SessionStatus, type SoundCue, type SoundPlayback } from '@shared/types'
 
 export const ATTENTION_PHASES: Record<PrListKind, Phase[]> = {
   reviewing: ['unreviewed', 'awaiting_rereview'],
@@ -67,10 +67,6 @@ export function cueEnabled(cue: SoundCue, config: Config): boolean {
     case 'approved':
       return config.approvedSound
   }
-}
-
-export function soundPlayback(cue: SoundCue, config: Config): SoundPlayback {
-  return { cue, pack: config.soundPack ?? config.skin, volume: config.soundVolume }
 }
 
 export class SoundCues {

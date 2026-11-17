@@ -117,6 +117,12 @@ export type SoundCue = 'reviewDone' | 'needsAttention' | 'approved'
 
 export const SOUND_CUES: SoundCue[] = ['reviewDone', 'needsAttention', 'approved']
 
+export const SOUND_CUE_LABELS: Record<SoundCue, string> = {
+  reviewDone: 'Claude finishes a turn',
+  needsAttention: 'A PR needs your attention',
+  approved: 'A PR is approved',
+}
+
 export type ReviewDoneSound = 'each' | 'last' | 'off'
 
 export const REVIEW_DONE_SOUND_LABELS: Record<ReviewDoneSound, string> = {
@@ -168,6 +174,10 @@ export const DEFAULT_CONFIG: Config = {
   reviewDoneSound: 'each',
   attentionSound: true,
   approvedSound: true,
+}
+
+export function soundPlayback(cue: SoundCue, config: Pick<Config, 'skin' | 'soundPack' | 'soundVolume'>): SoundPlayback {
+  return { cue, pack: config.soundPack ?? config.skin, volume: config.soundVolume }
 }
 
 export interface PrListState {

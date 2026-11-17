@@ -24,6 +24,20 @@ export class MergeConflictError extends Error {
   }
 }
 
+export class UncommittedChangesError extends Error {
+  constructor(readonly files: string[]) {
+    super(`Discard the ${files.length} uncommitted change(s) in the Changes tab before Rally merges the branch's new commits from GitHub.`)
+    this.name = 'UncommittedChangesError'
+  }
+}
+
+export class ForcePushConflictError extends Error {
+  constructor(branch: string) {
+    super(`origin/${branch} was force-pushed, and Rally's commits don't apply cleanly on top of it. Start over to drop them.`)
+    this.name = 'ForcePushConflictError'
+  }
+}
+
 const CONFLICT_MARKER = /^(?:<{7}|={7}|>{7})(?: |$)/m
 
 const LOCAL_TIMEOUT_MS = 60_000
@@ -70,23 +84,34 @@ export async function cloneBranch(dir: string, source: CloneSource): Promise<Clo
   const baseRemote = source.baseUrl === source.headUrl ? 'origin' : 'upstream'
   if (baseRemote === 'upstream') await git(path, ['remote', 'add', 'upstream', source.baseUrl])
   await git(path, ['fetch', baseRemote, trackingRefspec(baseRemote, source.baseBranch)], NETWORK_TIMEOUT_MS)
-  return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}` }
+  return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}`, syncedHead: await revParse(path, 'HEAD') }
 }
+
+async function revParse(cwd: string, ref: string): Promise<string> {
+  return (await git(cwd, ['rev-parse', ref])).trim()
+}
+
+const remoteRef = (clone: CloneInfo) => `origin/${clone.branch}`
+
+/** Returns the ref Rally's own commits start after, falling back to the remote branch for clones from before syncedHead existed. */
+const syncedRef = (clone: CloneInfo) => clone.syncedHead ?? remoteRef(clone)
 
 async function fetchBranch(clone: CloneInfo): Promise<void> {
   await git(clone.path, ['fetch', 'origin', trackingRefspec('origin', clone.branch)], NETWORK_TIMEOUT_MS)
 }
 
-/** Fetches the head and base branches, and fast-forwards the clone to GitHub when it has no commits of its own. */
-export async function syncClone(clone: CloneInfo): Promise<void> {
+/** Fetches the head and base branches, and moves the clone to GitHub's head, even after a force push, when it holds no commits or edits of its own. */
+export async function syncClone(clone: CloneInfo): Promise<CloneInfo> {
   await fetchBranch(clone)
   const [baseRemote, ...baseBranch] = clone.baseRef.split('/')
   await git(clone.path, ['fetch', baseRemote, trackingRefspec(baseRemote, baseBranch.join('/'))], NETWORK_TIMEOUT_MS)
-  if ((await localCommits(clone)).length === 0) await git(clone.path, ['reset', '--hard', `origin/${clone.branch}`])
+  if ((await localCommits(clone)).length > 0 || (await uncommittedPaths(clone)).length > 0) return clone
+  await git(clone.path, ['reset', '--hard', remoteRef(clone)])
+  return { ...clone, syncedHead: await revParse(clone.path, 'HEAD') }
 }
 
-export async function localCommits(clone: CloneInfo): Promise<LocalCommit[]> {
-  const out = await git(clone.path, ['log', `--format=%H${FIELD_SEPARATOR}%s`, `origin/${clone.branch}..HEAD`])
+async function commitList(clone: CloneInfo, extra: string[]): Promise<LocalCommit[]> {
+  const out = await git(clone.path, ['log', `--format=%H${FIELD_SEPARATOR}%s`, ...extra, 'HEAD', `^${remoteRef(clone)}`, `^${syncedRef(clone)}`])
   return out
     .split('\n')
     .filter(Boolean)
@@ -94,6 +119,17 @@ export async function localCommits(clone: CloneInfo): Promise<LocalCommit[]> {
       const [oid, subject] = line.split(FIELD_SEPARATOR)
       return { oid, subject: subject ?? '' }
     })
+}
+
+/** Returns the commits Rally made in the clone that GitHub doesn't have, newest first. */
+export function localCommits(clone: CloneInfo): Promise<LocalCommit[]> {
+  return commitList(clone, [])
+}
+
+/** Discards edits in the clone that no commit holds, including new files. */
+export async function discardUncommitted(clone: CloneInfo): Promise<void> {
+  await git(clone.path, ['reset', '--hard', 'HEAD'])
+  await git(clone.path, ['clean', '-fd'])
 }
 
 export async function uncommittedPaths(clone: CloneInfo): Promise<string[]> {
@@ -110,9 +146,9 @@ export async function cloneDiff(clone: CloneInfo): Promise<string> {
   return diff.length > MAX_DIFF_CHARS ? `${diff.slice(0, MAX_DIFF_CHARS)}\n… diff truncated` : diff
 }
 
-async function isAncestor(clone: CloneInfo, ancestor: string): Promise<boolean> {
+async function isAncestor(clone: CloneInfo, ancestor: string, descendant = 'HEAD'): Promise<boolean> {
   try {
-    await git(clone.path, ['merge-base', '--is-ancestor', ancestor, 'HEAD'])
+    await git(clone.path, ['merge-base', '--is-ancestor', ancestor, descendant])
     return true
   } catch (error) {
     if ((error as GitFailure).code === 1) return false
@@ -146,26 +182,53 @@ async function mergeRemote(clone: CloneInfo): Promise<void> {
 }
 
 /** Commits a merge whose conflicts were resolved, refusing while any of the files still has conflict markers. */
-export async function concludeMerge(clone: CloneInfo, files: string[]): Promise<void> {
+export async function concludeMerge(clone: CloneInfo, files: string[]): Promise<CloneInfo> {
   const contents = await Promise.all(files.map(async (file) => [file, await readFile(join(clone.path, file), 'utf8').catch(() => '')] as const))
   const unresolved = contents.filter(([, text]) => CONFLICT_MARKER.test(text)).map(([file]) => file)
   if (unresolved.length > 0) throw new Error(`Conflict markers remain in ${unresolved.join(', ')}.`)
   await git(clone.path, ['add', '-A', '--', ...files])
   await git(clone.path, ['commit', '--no-edit'])
+  return { ...clone, syncedHead: await revParse(clone.path, remoteRef(clone)) }
+}
+
+/** Replays Rally's commits onto a force-pushed branch and returns each rewritten commit's old sha mapped to its new one. */
+async function replayOntoRemote(clone: CloneInfo): Promise<Record<string, string>> {
+  const before = await commitList(clone, ['--no-merges'])
+  try {
+    await git(clone.path, ['rebase', '--empty=keep', '--onto', remoteRef(clone), syncedRef(clone)])
+  } catch {
+    await git(clone.path, ['rebase', '--abort']).catch(() => {})
+    throw new ForcePushConflictError(clone.branch)
+  }
+  const after = await commitList({ ...clone, syncedHead: undefined }, ['--no-merges'])
+  return Object.fromEntries(before.map((commit, index) => [commit.oid, after[index]?.oid ?? commit.oid]))
+}
+
+export interface PushResult {
+  push: PushRecord
+  clone: CloneInfo
+  /** Old sha to new sha for commits Rally replayed onto a force-pushed branch. */
+  rewritten: Record<string, string>
 }
 
 export async function abortMerge(clone: CloneInfo): Promise<void> {
   await git(clone.path, ['merge', '--abort'])
 }
 
-/** Pushes the clone's commits to the head branch without force, first merging in commits that landed on GitHub since. */
-export async function pushClone(clone: CloneInfo, at: string): Promise<PushRecord> {
+/** Pushes the clone's commits to the head branch without force. Commits that landed on GitHub since are merged in first; after a force push, Rally's commits are replayed on top instead. */
+export async function pushClone(clone: CloneInfo, at: string): Promise<PushResult> {
   if ((await localCommits(clone)).length === 0) throw new Error('There are no commits to push.')
   await fetchBranch(clone)
-  if (!(await isAncestor(clone, `origin/${clone.branch}`))) await mergeRemote(clone)
-  const commits = await localCommits(clone)
+  let rewritten: Record<string, string> = {}
+  if (!(await isAncestor(clone, remoteRef(clone)))) {
+    const leftovers = await uncommittedPaths(clone)
+    if (leftovers.length > 0) throw new UncommittedChangesError(leftovers)
+    const forcePushed = clone.syncedHead !== undefined && !(await isAncestor(clone, clone.syncedHead, remoteRef(clone)))
+    if (forcePushed) rewritten = await replayOntoRemote(clone)
+    else await mergeRemote(clone)
+  }
+  const commits = await commitList({ ...clone, syncedHead: undefined }, [])
+  const oid = await revParse(clone.path, 'HEAD')
   await git(clone.path, ['push', 'origin', `HEAD:refs/heads/${clone.branch}`], NETWORK_TIMEOUT_MS)
-  await fetchBranch(clone)
-  const oid = (await git(clone.path, ['rev-parse', 'HEAD'])).trim()
-  return { at, oid, commits }
+  return { push: { at, oid, commits }, clone: { ...clone, syncedHead: oid }, rewritten }
 }

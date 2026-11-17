@@ -392,6 +392,8 @@ export interface CloneInfo {
   path: string
   branch: string
   baseRef: string
+  /** The branch head on GitHub when Rally last synced, merged, or pushed; commits after it are Rally's own. */
+  syncedHead?: string
 }
 
 export interface PushRecord {

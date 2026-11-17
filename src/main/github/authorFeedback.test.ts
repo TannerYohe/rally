@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { feedbackItems, type RawFeedbackComment, type RawFeedbackReview, type RawFeedbackThread } from './authorFeedback'
+import { feedbackItems } from './authorFeedback'
+import type { RawPrComment, RawReviewSummary, RawThread } from './feedbackFields'
 
 const PR = 'https://github.com/acme/api/pull/1'
 
@@ -15,12 +16,24 @@ const threadComment = (login: string, createdAt: string, databaseId = 1, reacted
   reactionGroups: [{ viewerHasReacted: reacted }],
 })
 
-function thread(id: string, overrides: Partial<RawFeedbackThread> = {}, ...comments: ReturnType<typeof threadComment>[]): RawFeedbackThread {
-  return { id, isResolved: false, isOutdated: false, path: 'a.ts', line: 3, originalLine: 2, comments: { nodes: comments }, ...overrides }
+function thread(id: string, overrides: Partial<RawThread> = {}, ...comments: ReturnType<typeof threadComment>[]): RawThread {
+  return {
+    id,
+    isResolved: false,
+    isOutdated: false,
+    path: 'a.ts',
+    line: 3,
+    originalLine: 2,
+    latest: { nodes: comments.slice(-1) },
+    comments: { totalCount: comments.length, nodes: comments },
+    ...overrides,
+  }
 }
 
-const prComment = (id: number, login: string, body: string, kind = 'User'): RawFeedbackComment => ({
+const prComment = (id: number, login: string, body: string, kind = 'User'): RawPrComment => ({
   id: `IC${id}`,
+  databaseId: id,
+  isMinimized: false,
   url: `${PR}#issuecomment-${id}`,
   body,
   createdAt: `2026-11-0${id}T00:00:00Z`,
@@ -28,7 +41,7 @@ const prComment = (id: number, login: string, body: string, kind = 'User'): RawF
   reactionGroups: [],
 })
 
-const review = (id: number, state: string, login: string, body = 'Please fix'): RawFeedbackReview => ({
+const review = (id: number, state: string, login: string, body = 'Please fix'): RawReviewSummary => ({
   id: `R${id}`,
   url: `${PR}#pullrequestreview-${id}`,
   body,
@@ -58,6 +71,16 @@ describe('feedbackItems', () => {
     ])
     expect(items[0]).toMatchObject({ kind: 'thread', author: 'bob', path: 'a.ts', line: 3, replyToCommentId: 11, reactionSubjectId: 'C11' })
     expect(items[1].reactionSubjectId).toBe('C22')
+  })
+
+  it('judges a long thread by its newest comment and shows it after the opening page', () => {
+    const opening = Array.from({ length: 50 }, (_, i) => threadComment(i % 2 ? 'Me' : 'bob', '2026-11-01T00:00:00Z', i + 1))
+    const newest = threadComment('bob', '2026-11-09T00:00:00Z', 99)
+    const long = thread('T1', { latest: { nodes: [newest] }, comments: { totalCount: 51, nodes: opening } })
+    const [item] = feedbackItems([long], [], [], 'me')
+    expect(item).toMatchObject({ answered: false, reactionSubjectId: 'C99', replyToCommentId: 1 })
+    expect(item.comments).toHaveLength(51)
+    expect(item.comments.at(-1)?.url).toBe(newest.url)
   })
 
   it('falls back to the original line on outdated threads', () => {

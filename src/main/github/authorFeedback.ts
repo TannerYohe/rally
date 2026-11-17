@@ -1,74 +1,57 @@
 import type { FeedbackComment, FeedbackItem, FeedbackItemKind, PrRef } from '@shared/types'
-import {
-  isBot,
-  pendingConversation,
-  threadAcknowledged,
-  type RawActor,
-  type RawConversationComment,
-  type RawReviewBody,
-  type RawThreadTail,
-} from './acknowledgment'
+import { isBot, pendingConversation, threadAcknowledged } from './acknowledgment'
 import { github, timeoutRequest } from './client'
+import {
+  prCommentsField,
+  reviewSummariesField,
+  THREAD_COMMENTS_FIELD,
+  threadsField,
+  type RawAuthor,
+  type RawComment,
+  type RawConnection,
+  type RawPrComment,
+  type RawReviewSummary,
+  type RawThread,
+} from './feedbackFields'
 
-const REACTIONS = 'reactionGroups { viewerHasReacted }'
-const AUTHOR = 'author { __typename login avatarUrl(size: 40) }'
+const PAGE_LIMIT = 20
 
-const FEEDBACK_QUERY = `
-  query($owner: String!, $repo: String!, $number: Int!, $cursor: String, $first: Boolean!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        reviewThreads(first: 50, after: $cursor) {
-          pageInfo { hasNextPage endCursor }
-          nodes {
-            id isResolved isOutdated path line originalLine
-            comments(first: 50) { nodes { id databaseId url body createdAt ${AUTHOR} ${REACTIONS} } }
-          }
-        }
-        comments(last: 100) @include(if: $first) { nodes { id url body createdAt isMinimized ${AUTHOR} ${REACTIONS} } }
-        reviews(last: 100) @include(if: $first) { nodes { id url body state submittedAt ${AUTHOR} ${REACTIONS} } }
-      }
-    }
+const pullRequestQuery = (fields: string) => `
+  query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $repo) { pullRequest(number: $number) { ${fields} } }
   }
 `
 
-type WithAvatar<T> = Omit<T, 'author'> & { id: string; author: (RawActor & { avatarUrl: string }) | null }
+const THREADS = threadsField('first: 50, after: $cursor', '', THREAD_COMMENTS_FIELD)
+const PR_COMMENTS = prCommentsField('last: 100, before: $cursor')
+const REVIEWS = reviewSummariesField('last: 100, before: $cursor')
 
-type RawThreadComment = WithAvatar<RawThreadTail & { url: string; body: string; createdAt: string }> & { databaseId: number | null }
-
-export interface RawFeedbackThread {
-  id: string
-  isResolved: boolean
-  isOutdated: boolean
-  path: string
-  line: number | null
-  originalLine: number | null
-  comments: { nodes: RawThreadComment[] }
+interface FeedbackPage {
+  reviewThreads: RawConnection<RawThread>
+  comments: RawConnection<RawPrComment>
+  reviews: RawConnection<RawReviewSummary>
 }
 
-export type RawFeedbackComment = WithAvatar<RawConversationComment>
-
-export type RawFeedbackReview = WithAvatar<RawReviewBody>
-
-interface FeedbackResponse {
-  repository: {
-    pullRequest: {
-      reviewThreads: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: RawFeedbackThread[] }
-      comments?: { nodes: RawFeedbackComment[] }
-      reviews?: { nodes: RawFeedbackReview[] }
-    }
-  }
+interface PageResponse<K extends keyof FeedbackPage> {
+  repository: { pullRequest: Pick<FeedbackPage, K> }
 }
 
-type RawCommentLike = { url: string; body: string; author: (RawActor & { avatarUrl: string }) | null }
-
-function feedbackComment(comment: RawCommentLike, createdAt: string): FeedbackComment {
+function feedbackComment(comment: { url: string; body: string; author: RawAuthor | null }, createdAt: string): FeedbackComment {
   return { author: comment.author?.login ?? null, avatarUrl: comment.author?.avatarUrl ?? null, body: comment.body, createdAt, url: comment.url }
 }
 
-function threadItem(thread: RawFeedbackThread, viewer: string): FeedbackItem | null {
-  const [first] = thread.comments.nodes
-  const last = thread.comments.nodes.at(-1)
-  if (!first || !last) return null
+/** Returns the thread's opening comments plus its newest comment when that falls past the first page. */
+function threadComments(thread: RawThread): RawComment[] {
+  const opening = thread.comments?.nodes ?? []
+  const [newest] = thread.latest.nodes
+  return newest && !opening.some((c) => c.id === newest.id) ? [...opening, newest] : opening
+}
+
+function threadItem(thread: RawThread, viewer: string): FeedbackItem | null {
+  const comments = threadComments(thread)
+  const [first] = comments
+  const [newest] = thread.latest.nodes
+  if (!first || !newest) return null
   return {
     id: thread.id,
     kind: 'thread',
@@ -80,14 +63,14 @@ function threadItem(thread: RawFeedbackThread, viewer: string): FeedbackItem | n
     url: first.url,
     severity: null,
     outdated: thread.isOutdated,
-    answered: threadAcknowledged(last, viewer),
-    comments: thread.comments.nodes.map((c) => feedbackComment(c, c.createdAt)),
+    answered: threadAcknowledged(newest, viewer),
+    comments: comments.map((c) => feedbackComment(c, c.createdAt)),
     replyToCommentId: first.databaseId,
-    reactionSubjectId: last.id,
+    reactionSubjectId: newest.id,
   }
 }
 
-function conversationItem(kind: FeedbackItemKind, node: RawCommentLike & { id: string }, createdAt: string): FeedbackItem {
+function conversationItem(kind: FeedbackItemKind, node: { id: string; url: string; body: string; author: RawAuthor | null }, createdAt: string): FeedbackItem {
   return {
     id: node.id,
     kind,
@@ -109,7 +92,7 @@ function conversationItem(kind: FeedbackItemKind, node: RawCommentLike & { id: s
 const lastActivity = (item: FeedbackItem) => item.comments.at(-1)?.createdAt ?? ''
 
 /** Returns open threads plus unacknowledged PR comments and review bodies, unanswered first, then newest activity first. */
-export function feedbackItems(threads: RawFeedbackThread[], comments: RawFeedbackComment[], reviews: RawFeedbackReview[], viewer: string): FeedbackItem[] {
+export function feedbackItems(threads: RawThread[], comments: RawPrComment[], reviews: RawReviewSummary[], viewer: string): FeedbackItem[] {
   const pending = pendingConversation(comments, reviews, viewer)
   const items = [
     ...threads.filter((t) => !t.isResolved).flatMap((t) => threadItem(t, viewer) ?? []),
@@ -119,29 +102,40 @@ export function feedbackItems(threads: RawFeedbackThread[], comments: RawFeedbac
   return items.sort((a, b) => Number(a.answered) - Number(b.answered) || lastActivity(b).localeCompare(lastActivity(a)))
 }
 
+const pullVariables = (pr: PrRef) => ({ owner: pr.owner, repo: pr.repo, number: pr.number })
+
+const afterCursor = (c: RawConnection<unknown>) => (c.pageInfo.hasNextPage ? (c.pageInfo.endCursor ?? null) : null)
+const beforeCursor = (c: RawConnection<unknown>) => (c.pageInfo.hasPreviousPage ? (c.pageInfo.startCursor ?? null) : null)
+
+/** Follows a connection's cursor from its first page until no pages remain, up to PAGE_LIMIT pages. */
+async function allNodes<T>(
+  first: RawConnection<T>,
+  nextCursor: (page: RawConnection<T>) => string | null,
+  fetchPage: (cursor: string) => Promise<RawConnection<T>>,
+): Promise<T[]> {
+  const nodes = [...first.nodes]
+  let cursor = nextCursor(first)
+  for (let page = 1; cursor && page < PAGE_LIMIT; page++) {
+    const connection = await fetchPage(cursor)
+    nodes.push(...connection.nodes)
+    cursor = nextCursor(connection)
+  }
+  return nodes
+}
+
+/** Returns every open thread and unacknowledged PR comment and review body, paging through each. */
 export async function fetchFeedbackItems(pr: PrRef): Promise<FeedbackItem[]> {
   const gh = await github()
-  const threads: RawFeedbackThread[] = []
-  let comments: RawFeedbackComment[] = []
-  let reviews: RawFeedbackReview[] = []
-  let cursor: string | null = null
-  do {
-    const response: FeedbackResponse = await gh.graphql<FeedbackResponse>(FEEDBACK_QUERY, {
-      owner: pr.owner,
-      repo: pr.repo,
-      number: pr.number,
-      cursor,
-      first: cursor === null,
-      request: timeoutRequest(),
-    })
-    const pull = response.repository.pullRequest
-    threads.push(...pull.reviewThreads.nodes)
-    if (cursor === null) {
-      comments = pull.comments?.nodes ?? []
-      reviews = pull.reviews?.nodes ?? []
-    }
-    cursor = pull.reviewThreads.pageInfo.hasNextPage ? pull.reviewThreads.pageInfo.endCursor : null
-  } while (cursor)
+  const page = async <K extends keyof FeedbackPage>(key: K, fields: string, cursor: string | null) => {
+    const response = await gh.graphql<PageResponse<K>>(pullRequestQuery(fields), { ...pullVariables(pr), cursor, request: timeoutRequest() })
+    return response.repository.pullRequest
+  }
+  const first = await page<keyof FeedbackPage>('reviewThreads', `${THREADS} ${PR_COMMENTS} ${REVIEWS}`, null)
+  const [threads, comments, reviews] = await Promise.all([
+    allNodes(first.reviewThreads, afterCursor, async (cursor) => (await page('reviewThreads', THREADS, cursor)).reviewThreads),
+    allNodes(first.comments, beforeCursor, async (cursor) => (await page('comments', PR_COMMENTS, cursor)).comments),
+    allNodes(first.reviews, beforeCursor, async (cursor) => (await page('reviews', REVIEWS, cursor)).reviews),
+  ])
   return feedbackItems(threads, comments, reviews, gh.login)
 }
 

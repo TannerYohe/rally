@@ -335,7 +335,7 @@ function SoundsSection({ config, onChange }: SectionProps) {
           </select>
         </Row>
       </Card>
-      <Card title="When to play" description="Sounds play while Rally's window is open, even when it's in the background.">
+      <Card title="When to play" description="Sounds play only while Rally's window is open.">
         <Row label="Claude finishes a turn" description="A review turn ends or errors. Cancelling a turn plays nothing.">
           <span className="flex items-center gap-2">
             <select

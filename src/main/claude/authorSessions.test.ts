@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   pushClone: vi.fn(),
   integrateRemote: vi.fn(),
   commitFiles: vi.fn(),
+  commitAll: vi.fn(),
   concludeMerge: vi.fn(),
   abortMerge: vi.fn(),
   discardUncommitted: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   MergeConflictError: (await importOriginal<typeof import('../git/prClone')>()).MergeConflictError,
   CLONE_DIR_NAME: 'repo',
   commitFiles: mocks.commitFiles,
+  commitAll: mocks.commitAll,
   concludeMerge: mocks.concludeMerge,
   abortMerge: mocks.abortMerge,
   discardUncommitted: mocks.discardUncommitted,
@@ -122,6 +124,7 @@ mocks.stored = [
   stored(25, { clone: CLONE, uncommitted: ['a.ts'] }),
   stored(26, { clone: CLONE, mergeConflicts: ['a.ts'] }),
   stored(27, { clone: CLONE, uncommitted: ['a.ts'] }),
+  stored(29, { clone: CLONE, uncommitted: ['a.ts'] }),
   stored(28, { status: 'running', clone: CLONE, responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['a.ts'] }) } }),
   stored(40),
   stored(41, { responses: { T1: response('T1', 'Unposted') }, items: [thread('T1')] }),
@@ -159,6 +162,7 @@ beforeEach(() => {
     mocks.pushClone,
     mocks.integrateRemote,
     mocks.commitFiles,
+    mocks.commitAll,
     mocks.concludeMerge,
     mocks.abortMerge,
     mocks.discardUncommitted,
@@ -309,6 +313,21 @@ describe('push', () => {
     await authorSessions.discardUncommitted('author-25')
     expect(mocks.discardUncommitted).toHaveBeenCalledWith(CLONE)
     expect(session(25).uncommitted).toEqual([])
+  })
+
+  it('commits uncommitted edits with the given message', async () => {
+    mocks.commitAll.mockResolvedValue('def')
+    mocks.localCommits.mockResolvedValue([{ oid: 'def', subject: 'Tidy up' }])
+    await authorSessions.commitUncommitted('author-29', '  Tidy up ')
+    expect(mocks.commitAll).toHaveBeenCalledWith(CLONE, 'Tidy up')
+    expect(session(29)).toMatchObject({ uncommitted: [], commits: [{ oid: 'def', subject: 'Tidy up' }] })
+  })
+
+  it('refuses to commit without a message, while a merge is open, or when nothing changed', async () => {
+    await expect(authorSessions.commitUncommitted('author-25', ' ')).rejects.toThrow('Write a commit message first')
+    await expect(authorSessions.commitUncommitted('author-14', 'Tidy up')).rejects.toThrow('Finish or abort the merge')
+    mocks.commitAll.mockResolvedValue(null)
+    await expect(authorSessions.commitUncommitted('author-25', 'Tidy up')).rejects.toThrow('no changes to commit')
   })
 
   it('keeps the merge open when conflict markers remain', async () => {

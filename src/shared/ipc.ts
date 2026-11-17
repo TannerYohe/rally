@@ -55,6 +55,7 @@ export interface RallyApi {
   resolveMergeConflicts(sessionId: string): Promise<void>
   abortMerge(sessionId: string): Promise<void>
   discardUncommitted(sessionId: string): Promise<void>
+  commitUncommitted(sessionId: string, message: string): Promise<void>
   postAuthorReplies(sessionId: string, replies: ReplyPost[], reRequestReviews: boolean): Promise<void>
   discardAuthorReply(sessionId: string, itemId: string): Promise<void>
   dismissFinding(sessionId: string, itemId: string): Promise<void>
@@ -100,6 +101,7 @@ export const IPC = {
   resolveMergeConflicts: 'author:resolve-conflicts',
   abortMerge: 'author:abort-merge',
   discardUncommitted: 'author:discard-uncommitted',
+  commitUncommitted: 'author:commit-uncommitted',
   postAuthorReplies: 'author:post-replies',
   discardAuthorReply: 'author:discard-reply',
   dismissFinding: 'author:dismiss-finding',

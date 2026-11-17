@@ -21,6 +21,7 @@ import {
   CLONE_DIR_NAME,
   cloneBranch,
   cloneDiff,
+  commitAll,
   commitFiles,
   concludeMerge,
   discardUncommitted,
@@ -215,6 +216,22 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     await this.whilePublishing(sessionId, async () => {
       await discardUncommitted(clone)
       await this.refreshClone(sessionId)
+    })
+  }
+
+  /** Commits every edit in the clone that no fix committed, such as changes Claude made for a free-form message. */
+  async commitUncommitted(sessionId: string, message: string): Promise<void> {
+    this.assertIdle(sessionId)
+    const { clone, mergeConflicts } = this.byId(sessionId)
+    if (!clone) throw new Error('There is nothing to commit.')
+    if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
+    if (!message.trim()) throw new Error('Write a commit message first.')
+    await this.whilePublishing(sessionId, async () => {
+      try {
+        if (!(await commitAll(clone, message.trim()))) throw new Error('The clone has no changes to commit.')
+      } finally {
+        await this.refreshClone(sessionId)
+      }
     })
   }
 

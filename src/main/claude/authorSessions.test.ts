@@ -134,6 +134,11 @@ mocks.stored = [
   stored(8, { reviewersToReRequest: ['carol'] }),
   stored(10, { reviewersToReRequest: ['dan'] }),
   stored(11, { reviewersToReRequest: ['erin', 'frank'] }),
+  stored(31, {
+    items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
+    responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
+    selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }] },
+  }),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
 ]
 
@@ -326,6 +331,16 @@ describe('self-review', () => {
 
     authorSessions.dismissFinding(session(30).id, 'self-1')
     expect(session(30).selfReview?.findings).toEqual([])
+  })
+
+  it('drops the earlier self-review findings and their responses when a new one publishes', async () => {
+    const sessionId = session(31).id
+    finishTurn(() => mocks.handlers!.onSelfReview({ ...drafts, comments: [{ ...drafts.comments[0], body: 'Different problem' }] }))
+    await authorSessions.feedback(sessionId, 'review again')
+    await vi.waitFor(() => expect(session(31).status).toBe('awaiting_feedback'))
+    expect(session(31).items.map((i) => i.id)).toEqual(['T1'])
+    expect(Object.keys(session(31).responses)).toEqual(['T1'])
+    expect(session(31).selfReview?.findings[0]).toMatchObject({ id: 'self-1', comments: [{ body: 'Different problem' }] })
   })
 
   it('maps draft comments to findings', () => {

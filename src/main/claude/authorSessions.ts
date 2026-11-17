@@ -40,10 +40,14 @@ function restoreAuthorSession(stored: AuthorSession): AuthorSession {
   }
 }
 
+const FINDING_ID_PREFIX = 'self-'
+
+const isFindingId = (id: string) => id.startsWith(FINDING_ID_PREFIX)
+
 /** Turns self-review draft comments into private feedback items the author can act on. */
 export function findingsFromDrafts(drafts: Drafts, at: string): FeedbackItem[] {
   return drafts.comments.map((comment) => ({
-    id: `self-${comment.id}`,
+    id: `${FINDING_ID_PREFIX}${comment.id}`,
     kind: 'finding',
     author: null,
     authorIsBot: false,
@@ -217,7 +221,15 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       },
       onSelfReview: (drafts) => {
         const selfReview = { verdict: drafts.verdict, reportMarkdown: drafts.reportMarkdown, findings: findingsFromDrafts(drafts, now()) }
-        this.patch(sessionId, () => ({ selfReview }), true)
+        this.patch(
+          sessionId,
+          (s) => ({
+            selfReview,
+            items: s.items.filter((item) => !isFindingId(item.id)),
+            responses: Object.fromEntries(Object.entries(s.responses).filter(([itemId]) => !isFindingId(itemId))),
+          }),
+          true,
+        )
       },
     })
     return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer }

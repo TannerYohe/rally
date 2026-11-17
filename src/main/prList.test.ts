@@ -239,4 +239,31 @@ describe('prList', () => {
     expect(authoredPrList.get().prs[0].phase).toBe('in_progress')
     expect(mocks.store.authoredPrCacheFile.get().prs).toHaveLength(1)
   })
+
+  it('refreshes each list without touching the files of the other list', async () => {
+    const reviewingFiles = ['prCacheFile', 'summariesFile', 'headsSeenFile', 'hiddenPrsFile', 'rallyReviewsFile'] as const
+    const authoredFiles = ['authoredPrCacheFile', 'authoredSummariesFile', 'authoredHeadsSeenFile', 'authoredHiddenPrsFile'] as const
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ id: 'mine', author: 'me' })] })
+
+    const reviewingWrites = reviewingFiles.map((name) => vi.spyOn(mocks.store[name], 'set'))
+    await authoredPrList.refresh()
+    await vi.waitFor(() => expect(mocks.store.authoredPrCacheFile.get().prs[0]).toMatchObject({ summary: 'A summary' }))
+    for (const write of reviewingWrites) expect(write).not.toHaveBeenCalled()
+    for (const write of reviewingWrites) write.mockRestore()
+
+    const authoredWrites = authoredFiles.map((name) => vi.spyOn(mocks.store[name], 'set'))
+    await prList.refresh()
+    await vi.waitFor(() => expect(mocks.store.prCacheFile.get().prs[0]).toMatchObject({ summary: 'A summary' }))
+    for (const write of authoredWrites) expect(write).not.toHaveBeenCalled()
+    for (const write of authoredWrites) write.mockRestore()
+  })
+
+  it('announces the PRs a full refresh listed', async () => {
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ number: 7 })] })
+    const listener = vi.fn()
+    authoredPrList.on('refreshed', listener)
+    await authoredPrList.refresh()
+    authoredPrList.off('refreshed', listener)
+    expect(listener).toHaveBeenCalledWith(new Set(['acme/api#7']))
+  })
 })

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   localCommits: vi.fn(),
   uncommittedPaths: vi.fn(),
   pushClone: vi.fn(),
+  integrateRemote: vi.fn(),
   commitFiles: vi.fn(),
   concludeMerge: vi.fn(),
   abortMerge: vi.fn(),
@@ -63,6 +64,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   localCommits: mocks.localCommits,
   uncommittedPaths: mocks.uncommittedPaths,
   pushClone: mocks.pushClone,
+  integrateRemote: mocks.integrateRemote,
   cloneDiff: vi.fn(async () => ''),
 }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
@@ -119,12 +121,15 @@ mocks.stored = [
   stored(24, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-missing-clone') }, commits: [{ oid: 'abc', subject: 'fix' }] }),
   stored(25, { clone: CLONE, uncommitted: ['a.ts'] }),
   stored(26, { clone: CLONE, mergeConflicts: ['a.ts'] }),
+  stored(27, { clone: CLONE, uncommitted: ['a.ts'] }),
+  stored(28, { status: 'running', clone: CLONE, responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['a.ts'] }) } }),
   stored(40),
   stored(41, { responses: { T1: response('T1', 'Unposted') }, items: [thread('T1')] }),
   stored(42, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
   stored(43, { clone: CLONE, mergeConflicts: ['a.ts'] }),
   stored(44, { reviewersToReRequest: ['bob'] }),
   stored(45),
+  stored(46, { status: 'cancelled', clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', '') } }),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
@@ -152,6 +157,7 @@ beforeEach(() => {
     mocks.postAuthorReply,
     mocks.resolveFeedbackThread,
     mocks.pushClone,
+    mocks.integrateRemote,
     mocks.commitFiles,
     mocks.concludeMerge,
     mocks.abortMerge,
@@ -161,6 +167,7 @@ beforeEach(() => {
   ])
     mock.mockReset()
   mocks.fetchApprovers.mockResolvedValue([])
+  mocks.integrateRemote.mockImplementation(async (clone) => ({ clone, rewritten: {} }))
   mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'u', branch: 'feature', baseUrl: 'u', baseBranch: 'main' })
   mocks.cloneBranch.mockResolvedValue(CLONE)
   mocks.localCommits.mockResolvedValue([])
@@ -174,6 +181,10 @@ afterAll(() => {
 })
 
 describe('restoring sessions', () => {
+  it('drops pending commits from a turn cut off by quitting', () => {
+    expect(session(28).responses.T1).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining("didn't finish") })
+  })
+
   it('marks interrupted turns and pushes as errors', () => {
     expect(session(1)).toMatchObject({ status: 'error', error: expect.stringContaining('Interrupted') })
     expect(session(2)).toMatchObject({ status: 'error', error: expect.stringContaining('pushing or posting') })
@@ -227,14 +238,14 @@ describe('runActions', () => {
 describe('push', () => {
   it('clears local commits after a push', async () => {
     const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
-    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: { ...CLONE, syncedHead: 'abc' }, rewritten: {} })
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: { ...CLONE, syncedHead: 'abc' } })
     await authorSessions.push('author-3')
     expect(session(3)).toMatchObject({ status: 'awaiting_feedback', commits: [], lastPush, mergeConflicts: [], clone: { syncedHead: 'abc' } })
     expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 3)
   })
 
   it('has Claude resolve a conflicting merge, then commits the merge', async () => {
-    mocks.pushClone.mockRejectedValue(new MergeConflictError('feature', ['a.ts']))
+    mocks.integrateRemote.mockRejectedValue(new MergeConflictError('feature', ['a.ts']))
     mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
     finishTurn()
     await authorSessions.push('author-4')
@@ -253,11 +264,14 @@ describe('push', () => {
     expect(mocks.refreshOne).not.toHaveBeenCalledWith('acme', 'api', 18)
   })
 
-  it('points replies and commits at the new shas after replaying onto a force-pushed branch', async () => {
+  it('saves the replayed shas and synced head before pushing, so a failed push keeps them', async () => {
     const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'bbbbbbb222', commits: [{ oid: 'bbbbbbb222', subject: 'fix' }] }
-    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: { ...CLONE, syncedHead: 'bbbbbbb222' }, rewritten: { aaaaaaa111: 'bbbbbbb222' } })
-    await authorSessions.push('author-19')
+    mocks.integrateRemote.mockResolvedValue({ clone: { ...CLONE, syncedHead: 'new-head' }, rewritten: { aaaaaaa111: 'bbbbbbb222' } })
+    mocks.pushClone.mockRejectedValue(new Error('git push failed: network'))
+    await expect(authorSessions.push('author-19')).rejects.toThrow('network')
     expect(session(19).responses.T1).toMatchObject({ commits: ['bbbbbbb222'], reply: 'Fixed in bbbbbbb.' })
+    expect(session(19).clone?.syncedHead).toBe('new-head')
+    expect(mocks.pushClone).toHaveBeenCalledWith({ ...CLONE, syncedHead: 'new-head' }, expect.any(String))
   })
 
   it('refuses to push or clone again when the clone holding unpushed commits is gone', async () => {
@@ -272,6 +286,16 @@ describe('push', () => {
     await authorSessions.abortMerge('author-26')
     expect(mocks.abortMerge).toHaveBeenCalledWith(CLONE)
     expect(session(26)).toMatchObject({ mergeConflicts: [], status: 'awaiting_feedback' })
+  })
+
+  it('refuses to start a turn while discarding or aborting is under way', async () => {
+    let finish: () => void = () => {}
+    mocks.discardUncommitted.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
+    mocks.uncommittedPaths.mockResolvedValue([])
+    const discarding = authorSessions.discardUncommitted('author-27')
+    await expect(authorSessions.feedback('author-27', 'go')).rejects.toThrow('already posting')
+    finish()
+    await discarding
   })
 
   it('refuses a self-review or a message while a merge is open', async () => {
@@ -481,7 +505,7 @@ describe('self-review', () => {
 })
 
 describe('pruneUnlisted', () => {
-  const own = [40, 41, 42, 43, 44, 45].map((n) => `acme/api#${n}`)
+  const own = [40, 41, 42, 43, 44, 45, 46].map((n) => `acme/api#${n}`)
   const othersListed = () => new Set(mocks.stored.map((st) => st.prKey).filter((key) => !own.includes(key)))
 
   it('removes sessions with no work left for PRs that left the list, with their session folders', async () => {
@@ -497,6 +521,7 @@ describe('pruneUnlisted', () => {
     authorSessions.pruneUnlisted(othersListed())
 
     expect(authorSessions.getByPr('acme/api#40')).toBeNull()
+    expect(authorSessions.getByPr('acme/api#46')).toBeNull()
     await vi.waitFor(() => expect(existsSync(dir40)).toBe(false))
     expect(authorSessions.getByPr('acme/api#41')).not.toBeNull()
     expect(authorSessions.getByPr('acme/api#42')).not.toBeNull()

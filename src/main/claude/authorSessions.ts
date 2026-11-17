@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, newAuthorSession, pendingReplies, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import {
   prKey,
   type ActionRequest,
@@ -26,6 +26,7 @@ import {
   discardUncommitted,
   localCommits,
   MergeConflictError,
+  integrateRemote,
   pushClone,
   syncClone,
   uncommittedPaths,
@@ -49,6 +50,13 @@ const TURN_DID_NOT_FINISH_ERROR = `The turn didn't finish, so Rally didn't commi
 const CLONE_LOST_ERROR = `Rally's clone of this PR is gone, probably cleared from the temp folder, and its unpushed commits with it. Start over to clone again.`
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
+/** Marks fixes waiting on a commit as not committed, for a turn that didn't finish. */
+function withoutPendingCommits(responses: Record<string, ItemResponse>): Record<string, ItemResponse> {
+  return Object.fromEntries(
+    Object.entries(responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError: TURN_DID_NOT_FINISH_ERROR } : r]),
+  )
+}
+
 function restoreAuthorSession(stored: AuthorSession): AuthorSession {
   const session = {
     ...stored,
@@ -58,7 +66,7 @@ function restoreAuthorSession(stored: AuthorSession): AuthorSession {
   }
   switch (session.status) {
     case 'running':
-      return { ...session, status: 'error', error: INTERRUPTED_TURN_ERROR }
+      return { ...session, status: 'error', error: INTERRUPTED_TURN_ERROR, responses: withoutPendingCommits(session.responses) }
     case 'submitting':
       return { ...session, status: 'error', error: INTERRUPTED_PUBLISH_ERROR }
     default:
@@ -131,21 +139,20 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (requests.length === 0) throw new Error('Pick an action for at least one comment.')
     const session = this.ensure(pr)
     this.assertCanStartTurn(session.id)
-    this.publishing.add(session.id)
-    try {
-      const items = [...(await fetchFeedbackItems(pr)), ...(session.selfReview?.findings ?? [])]
-      const available = new Set(items.map((item) => item.id))
-      if (requests.some((request) => !available.has(request.itemId))) throw new Error(STALE_ITEMS_ERROR)
-      const requested = new Set(requests.map((request) => request.itemId))
-      this.patch(session.id, (s) => ({ status: 'running', error: null, items: mergeItems(s.items, items.filter((i) => requested.has(i.id))) }), true)
-      const clone = await this.prepareClone(session.id)
-      void this.runTurn(session.id, authorActionsPrompt(pr, clone, items, requests, note), 'respond')
-    } catch (error) {
-      if (this.byId(session.id).status === 'running') this.patch(session.id, () => ({ status: 'error', error: errorMessage(error) }), true)
-      throw error
-    } finally {
-      this.publishing.delete(session.id)
-    }
+    await this.whilePublishing(session.id, async () => {
+      try {
+        const items = [...(await fetchFeedbackItems(pr)), ...(session.selfReview?.findings ?? [])]
+        const available = new Set(items.map((item) => item.id))
+        if (requests.some((request) => !available.has(request.itemId))) throw new Error(STALE_ITEMS_ERROR)
+        const requested = new Set(requests.map((request) => request.itemId))
+        this.patch(session.id, (s) => ({ status: 'running', error: null, items: mergeItems(s.items, items.filter((i) => requested.has(i.id))) }), true)
+        const clone = await this.prepareClone(session.id)
+        void this.runTurn(session.id, authorActionsPrompt(pr, clone, items, requests, note), 'respond')
+      } catch (error) {
+        if (this.byId(session.id).status === 'running') this.patch(session.id, () => ({ status: 'error', error: errorMessage(error) }), true)
+        throw error
+      }
+    })
     return this.byId(session.id)
   }
 
@@ -167,24 +174,25 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (!clone) throw new Error('There are no commits to push.')
     if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
     this.assertCloneExists(sessionId)
-    this.publishing.add(sessionId)
-    this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
     let conflicts: string[] = []
-    try {
-      const { push: lastPush, clone: pushed, rewritten } = await pushClone(clone, now())
-      this.patch(sessionId, (s) => ({ status: 'awaiting_feedback', lastPush, clone: pushed, commits: [], responses: rewriteCommits(s.responses, rewritten) }), true)
-    } catch (error) {
-      await this.refreshClone(sessionId)
-      if (!(error instanceof MergeConflictError)) {
-        console.error('Pushing author commits failed', { pr: pr.url, error })
-        this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
-        throw error
+    await this.whilePublishing(sessionId, async () => {
+      this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
+      try {
+        const integrated = await integrateRemote(clone)
+        this.patch(sessionId, (s) => ({ clone: integrated.clone, responses: rewriteCommits(s.responses, integrated.rewritten) }), true)
+        const { push: lastPush, clone: pushed } = await pushClone(integrated.clone, now())
+        this.patch(sessionId, () => ({ status: 'awaiting_feedback', lastPush, clone: pushed, commits: [] }), true)
+      } catch (error) {
+        await this.refreshClone(sessionId)
+        if (!(error instanceof MergeConflictError)) {
+          console.error('Pushing author commits failed', { pr: pr.url, error })
+          this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
+          throw error
+        }
+        conflicts = error.files
+        this.patch(sessionId, () => ({ status: 'awaiting_feedback', mergeConflicts: conflicts }), true)
       }
-      conflicts = error.files
-      this.patch(sessionId, () => ({ status: 'awaiting_feedback', mergeConflicts: conflicts }), true)
-    } finally {
-      this.publishing.delete(sessionId)
-    }
+    })
     if (conflicts.length > 0) void this.runTurn(sessionId, mergeConflictPrompt(clone, conflicts), 'resolve_merge')
     else this.refreshPr(pr)
   }
@@ -204,8 +212,10 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const { clone, mergeConflicts } = this.byId(sessionId)
     if (!clone) throw new Error('There is nothing to discard.')
     if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
-    await discardUncommitted(clone)
-    await this.refreshClone(sessionId)
+    await this.whilePublishing(sessionId, async () => {
+      await discardUncommitted(clone)
+      await this.refreshClone(sessionId)
+    })
   }
 
   /** Starts a Claude turn to resolve the conflicts left by merging the remote branch. */
@@ -220,9 +230,11 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.assertIdle(sessionId)
     const { clone } = this.byId(sessionId)
     if (!clone) throw new Error('There is no merge to abort.')
-    await abortMerge(clone)
-    this.patch(sessionId, () => ({ mergeConflicts: [], error: null, status: 'awaiting_feedback' }), true)
-    await this.refreshClone(sessionId)
+    await this.whilePublishing(sessionId, async () => {
+      await abortMerge(clone)
+      this.patch(sessionId, () => ({ mergeConflicts: [], error: null, status: 'awaiting_feedback' }), true)
+      await this.refreshClone(sessionId)
+    })
   }
 
   async postReplies(sessionId: string, posts: ReplyPost[], reRequestReviews: boolean): Promise<void> {
@@ -238,24 +250,24 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       throw new Error(`A reply still has ${COMMIT_PLACEHOLDER} because Rally had nothing to commit for it. Edit the reply first.`)
     }
 
-    this.publishing.add(sessionId)
-    this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
     let failures = 0
     const answered: FeedbackItem[] = []
-    try {
-      for (const post of replies) {
-        const posted = await this.postReply(session.pr, items.get(post.itemId)!, post)
-        if (posted.error) failures++
-        else answered.push(items.get(post.itemId)!)
-        this.patch(sessionId, (s) => ({ posted: { ...s.posted, [post.itemId]: posted } }), true)
+    await this.whilePublishing(sessionId, async () => {
+      this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
+      try {
+        for (const post of replies) {
+          const posted = await this.postReply(session.pr, items.get(post.itemId)!, post)
+          if (posted.error) failures++
+          else answered.push(items.get(post.itemId)!)
+          this.patch(sessionId, (s) => ({ posted: { ...s.posted, [post.itemId]: posted } }), true)
+        }
+        if (reRequestReviews) this.queueReRequests(sessionId, repliedReviewers(answered, (await github()).login))
+        await this.settleReRequests(sessionId)
+      } finally {
+        const error = failures > 0 ? `${failures} of ${replies.length} replies failed to post.` : null
+        this.patch(sessionId, () => ({ status: error ? 'error' : 'awaiting_feedback', error }), true)
       }
-      if (reRequestReviews) this.queueReRequests(sessionId, repliedReviewers(answered, (await github()).login))
-      await this.settleReRequests(sessionId)
-    } finally {
-      this.publishing.delete(sessionId)
-      const error = failures > 0 ? `${failures} of ${replies.length} replies failed to post.` : null
-      this.patch(sessionId, () => ({ status: error ? 'error' : 'awaiting_feedback', error }), true)
-    }
+    })
     this.refreshPr(session.pr)
   }
 
@@ -284,11 +296,15 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }, true)
   }
 
-  /** Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a turn, commits, replies, a merge, or queued re-requests. */
+  /**
+   * Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a running turn,
+   * unpushed commits, unposted replies, an open merge, or queued re-requests. A failed or cancelled last turn doesn't count.
+   */
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
       if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
-      if (hasPendingWork(session) || session.mergeConflicts.length > 0 || session.reviewersToReRequest.length > 0) continue
+      const hasWork = session.commits.length > 0 || pendingReplies(session).length > 0 || session.mergeConflicts.length > 0
+      if (hasWork || session.reviewersToReRequest.length > 0) continue
       console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId: session.id })
       this.remove(session)
     }
@@ -355,15 +371,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   private dropPendingCommits(sessionId: string): void {
-    this.patch(
-      sessionId,
-      (s) => ({
-        responses: Object.fromEntries(
-          Object.entries(s.responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError: TURN_DID_NOT_FINISH_ERROR } : r]),
-        ),
-      }),
-      true,
-    )
+    this.patch(sessionId, (s) => ({ responses: withoutPendingCommits(s.responses) }), true)
   }
 
   /** Commits each fix's listed files in its own commit and puts the short sha into its reply; one fix failing to commit doesn't stop the rest. */

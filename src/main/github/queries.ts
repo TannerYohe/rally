@@ -1,9 +1,12 @@
 import { GraphqlResponseError } from '@octokit/graphql'
 import type { MyReview, Pr, ReviewState } from '@shared/types'
 import { github, timeoutRequest, type GithubClient } from './client'
-import { MY_REVIEW_WINDOW } from './phase'
 
 export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError' | 'hidden'>
+
+const REVIEW_PAGE_SIZE = 20
+const MAX_REVIEW_PAGES = 10
+const REVIEW_PAGE = `pageInfo { hasPreviousPage startCursor } nodes { id databaseId state submittedAt body commit { oid } }`
 
 const PR_FIELDS = `
   fragment PrFields on PullRequest {
@@ -13,7 +16,7 @@ const PR_FIELDS = `
     repository { name owner { login } }
     files(first: 100) { nodes { path } }
     reviewRequests(first: 50) { nodes { requestedReviewer { ... on User { login } } } }
-    reviews(author: $viewer, last: ${MY_REVIEW_WINDOW}) { nodes { id databaseId state submittedAt body commit { oid } } }
+    reviews(author: $viewer, last: ${REVIEW_PAGE_SIZE}) { ${REVIEW_PAGE} }
     timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
       nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
     }
@@ -35,6 +38,12 @@ const SINGLE_QUERY = `
     repository(owner: $owner, name: $repo) { pullRequest(number: $number) { ...PrFields } }
   }
   ${PR_FIELDS}
+`
+
+const OLDER_REVIEWS_QUERY = `
+  query($id: ID!, $viewer: String!, $before: String!) {
+    node(id: $id) { ... on PullRequest { reviews(author: $viewer, last: ${REVIEW_PAGE_SIZE}, before: $before) { ${REVIEW_PAGE} } } }
+  }
 `
 
 const REVIEW_COMMENTS_QUERY = `
@@ -59,6 +68,11 @@ interface ReviewComment {
   replyTo: { id: string } | null
 }
 
+interface ReviewPage {
+  pageInfo: { hasPreviousPage: boolean; startCursor: string | null }
+  nodes: RawReview[]
+}
+
 type ReviewCommentsNode = { id: string; comments: { nodes: ReviewComment[] } }
 
 interface RawPr {
@@ -80,7 +94,7 @@ interface RawPr {
   repository: { name: string; owner: { login: string } }
   files: { nodes: { path: string }[] } | null
   reviewRequests: { nodes: { requestedReviewer: { login?: string } | null }[] }
-  reviews: { nodes: RawReview[] }
+  reviews: ReviewPage
   timelineItems: { nodes: { createdAt: string; afterCommit: { oid: string } | null }[] }
 }
 
@@ -109,14 +123,50 @@ export async function fetchNodes<T>(gh: GithubClient, query: string, ids: string
   return nodes
 }
 
-async function replyOnlyReviewIds(gh: GithubClient, prs: RawPr[]): Promise<Set<string>> {
-  const candidates = prs.flatMap((pr) => pr.reviews.nodes.filter(mightBeReplyOnly))
+async function replyOnlyReviewIds(gh: GithubClient, reviews: RawReview[]): Promise<Set<string>> {
+  const candidates = reviews.filter(mightBeReplyOnly)
   const nodes = await fetchNodes<ReviewCommentsNode>(gh, REVIEW_COMMENTS_QUERY, candidates.map((r) => r.id))
   const replyOnly = new Set<string>()
   nodes.forEach((node, index) => {
     if (node && isReplyOnly(candidates[index], node.comments.nodes)) replyOnly.add(node.id)
   })
   return replyOnly
+}
+
+function toMyReview(review: RawReview, replyOnly: Set<string>): MyReview {
+  return {
+    databaseId: review.databaseId,
+    state: review.state,
+    submittedAt: review.submittedAt,
+    commitOid: review.commit?.oid ?? null,
+    replyOnly: replyOnly.has(review.id),
+  }
+}
+
+function allReplies(reviews: RawReview[], replyOnly: Set<string>): boolean {
+  return reviews.every((r) => replyOnly.has(r.id))
+}
+
+async function myReviewsOf(gh: GithubClient, raws: RawPr[]): Promise<MyReview[][]> {
+  const replyOnly = await replyOnlyReviewIds(gh, raws.flatMap((raw) => raw.reviews.nodes))
+  const result: MyReview[][] = []
+  for (const raw of raws) {
+    const reviews = [...raw.reviews.nodes]
+    let page = raw.reviews.pageInfo
+    for (let pages = 1; pages < MAX_REVIEW_PAGES && page.hasPreviousPage && page.startCursor && allReplies(reviews, replyOnly); pages++) {
+      const response = await gh.graphql<{ node: { reviews: ReviewPage } }>(OLDER_REVIEWS_QUERY, {
+        id: raw.id,
+        viewer: gh.login,
+        before: page.startCursor,
+      })
+      const older = response.node.reviews
+      for (const id of await replyOnlyReviewIds(gh, older.nodes)) replyOnly.add(id)
+      reviews.unshift(...older.nodes)
+      page = older.pageInfo
+    }
+    result.push(reviews.map((r) => toMyReview(r, replyOnly)))
+  }
+  return result
 }
 
 function forcePushedToHeadAt(raw: RawPr): string | null {
@@ -128,14 +178,7 @@ interface SearchResponse {
   search: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawPr | Record<string, never>)[] }
 }
 
-function toPr(raw: RawPr, viewer: string, replyOnly: Set<string>): GithubPr {
-  const myReviews: MyReview[] = raw.reviews.nodes.map((r) => ({
-    databaseId: r.databaseId,
-    state: r.state,
-    submittedAt: r.submittedAt,
-    commitOid: r.commit?.oid ?? null,
-    replyOnly: replyOnly.has(r.id),
-  }))
+function toPr(raw: RawPr, viewer: string, myReviews: MyReview[]): GithubPr {
   const reviewRequestedFromMe = raw.reviewRequests.nodes.some(
     (n) => n.requestedReviewer?.login?.toLowerCase() === viewer.toLowerCase(),
   )
@@ -180,8 +223,8 @@ export async function searchPrs(queries: string[]): Promise<{ viewer: string; pr
     }
   }
   const raws = [...byId.values()]
-  const replyOnly = await replyOnlyReviewIds(gh, raws)
-  return { viewer: gh.login, prs: raws.map((raw) => toPr(raw, gh.login, replyOnly)) }
+  const myReviews = await myReviewsOf(gh, raws)
+  return { viewer: gh.login, prs: raws.map((raw, index) => toPr(raw, gh.login, myReviews[index])) }
 }
 
 export async function fetchPr(owner: string, repo: string, number: number): Promise<GithubPr> {
@@ -193,5 +236,6 @@ export async function fetchPr(owner: string, repo: string, number: number): Prom
     viewer: gh.login,
   })
   const raw = response.repository.pullRequest
-  return toPr(raw, gh.login, await replyOnlyReviewIds(gh, [raw]))
+  const [myReviews] = await myReviewsOf(gh, [raw])
+  return toPr(raw, gh.login, myReviews)
 }

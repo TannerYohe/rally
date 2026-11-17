@@ -9,6 +9,8 @@ export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
 export interface PolicyContext {
   cwd: string
+  /** Repos where Rally owns commits and merges, so only git commands that read are allowed. */
+  readOnlyGitRepos?: string[]
 }
 
 interface ShellState {
@@ -96,6 +98,15 @@ const GIT_WORKTREE_COMMANDS = new Set([
   'add', 'am', 'apply', 'checkout', 'cherry-pick', 'clean', 'commit', 'merge', 'mv', 'pull', 'rebase', 'reset', 'restore',
   'revert', 'rm', 'stash', 'switch',
 ])
+
+const READ_ONLY_GIT_COMMANDS = new Set([
+  'status', 'diff', 'log', 'show', 'blame', 'annotate', 'grep', 'ls-files', 'ls-tree', 'rev-parse', 'rev-list', 'merge-base',
+  'cat-file', 'describe', 'shortlog', 'diff-tree', 'range-diff', 'name-rev', 'for-each-ref', 'show-ref', 'check-ignore', 'help',
+  'version',
+])
+
+const READ_ONLY_REPO_REASON =
+  'Rally commits and merges in this clone itself. Edit the files, then list them with a commit message in publish_responses.'
 
 const GH_API_VALUE_FLAGS = new Set([
   '-X', '--method', '-H', '--header', '-f', '-F', '--field', '--raw-field', '--input', '-q', '--jq', '-t', '--template',
@@ -203,9 +214,9 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   const operands = args.filter((a) => !a.startsWith('-'))
   switch (program) {
     case 'gh':
-      return decideGh(args, state)
+      return decideGh(args, state, context)
     case 'git':
-      return decideGit(args, state)
+      return decideGit(args, state, context)
     case 'curl':
       return decideRequest(program, args, CURL_METHOD_FLAGS, CURL_BODY_FLAGS)
     case 'wget':
@@ -388,7 +399,16 @@ function isTempPath(word: string, state: ShellState): boolean {
   return TEMP_ROOTS.some((root) => real.startsWith(root + sep))
 }
 
-function decideGit(args: string[], state: ShellState): ToolDecision {
+function isInReadOnlyRepo(dir: string | null, context: PolicyContext): boolean {
+  if (!dir) return false
+  const real = realPath(dir)
+  return (context.readOnlyGitRepos ?? []).some((repo) => {
+    const root = realPath(repo)
+    return real === root || real.startsWith(root + sep)
+  })
+}
+
+function decideGit(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
   let repoDir = state.cwd
   let index = 0
   while (index < args.length && args[index].startsWith('-')) {
@@ -400,6 +420,7 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
   }
   const [subcommand, ...rest] = args.slice(index)
   if (subcommand === 'push') return deny('git push is not permitted in Rally.')
+  if (isInReadOnlyRepo(repoDir, context) && !READ_ONLY_GIT_COMMANDS.has(subcommand)) return deny(READ_ONLY_REPO_REASON)
   if (subcommand === 'config' && rest.some((a) => a === '--global' || a === '--system')) {
     if (!rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return deny('Rally does not change your global git config.')
   }
@@ -409,8 +430,9 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
   return ALLOW
 }
 
-function decideGh(args: string[], state: ShellState): ToolDecision {
+function decideGh(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
   if (args[0] === 'api') return decideGhApi(args.slice(1))
+  if (args[1] === 'checkout' && isInReadOnlyRepo(state.cwd, context)) return deny(READ_ONLY_REPO_REASON)
   if (args[1] === 'checkout' && !(state.cwd && isTempPath(state.cwd, state))) {
     return deny('Rally only runs `gh pr checkout` in repos under the temp directory.')
   }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { repliedReviewers, reviewersReady, uniqueLogins } from './reviewRequests'
+import { uniqueLogins } from './logins'
+import { repliedReviewers, reviewersReady } from './reviewRequests'
 
 describe('repliedReviewers', () => {
-  it('keeps each person once and skips bots and findings', () => {
+  it('keeps each person once and skips me, bots, and findings', () => {
     expect(
       repliedReviewers([
         { kind: 'thread', author: 'bob', authorIsBot: false },
@@ -10,7 +11,8 @@ describe('repliedReviewers', () => {
         { kind: 'review', author: 'carol', authorIsBot: false },
         { kind: 'thread', author: 'github-advanced-security', authorIsBot: true },
         { kind: 'finding', author: null, authorIsBot: false },
-      ]),
+        { kind: 'thread', author: 'Me', authorIsBot: false },
+      ], 'me'),
     ).toEqual(['bob', 'carol'])
   })
 })
@@ -21,12 +23,12 @@ describe('reviewersReady', () => {
       { author: 'bob', answered: true },
       { author: 'carol', answered: false },
     ]
-    expect(reviewersReady(['bob', 'Carol'], open, [])).toEqual({ ready: ['bob'], waiting: ['Carol'], approved: [] })
+    expect(reviewersReady(['bob', 'Carol'], open, [], 'me')).toEqual({ ready: ['bob'], waiting: ['Carol'], skipped: [] })
   })
 
-  it('skips reviewers who already approved, whether or not they are still owed a response', () => {
+  it('skips me and reviewers who already approved, whether or not they are still owed a response', () => {
     const open = [{ author: 'carol', answered: false }]
-    expect(reviewersReady(['bob', 'carol', 'dan'], open, ['Bob', 'carol'])).toEqual({ ready: ['dan'], waiting: [], approved: ['bob', 'carol'] })
+    expect(reviewersReady(['bob', 'carol', 'dan', 'me'], open, ['Bob', 'carol'], 'Me')).toEqual({ ready: ['dan'], waiting: [], skipped: ['bob', 'carol', 'me'] })
   })
 })
 

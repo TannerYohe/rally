@@ -302,16 +302,12 @@ function ReRequestStatus({ session }: { session: AuthorSession }) {
   const logins = (list: string[]) => list.map((login) => `@${login}`).join(', ')
   return (
     <div className="flex flex-wrap justify-end gap-x-3 text-xs">
-      {lastReRequest &&
-        (lastReRequest.error ? (
-          <span className="text-rose-300">
-            Couldn't re-request review from {logins(lastReRequest.reviewers)}: {lastReRequest.error}
-          </span>
-        ) : (
-          <span className="text-emerald-300" title={fullTime(lastReRequest.at)}>
-            Re-requested review from {logins(lastReRequest.reviewers)} {age(lastReRequest.at)} ago
-          </span>
-        ))}
+      {lastReRequest && lastReRequest.reviewers.length > 0 && (
+        <span className="text-emerald-300" title={fullTime(lastReRequest.at)}>
+          Re-requested review from {logins(lastReRequest.reviewers)} {age(lastReRequest.at)} ago
+        </span>
+      )}
+      {lastReRequest?.error && <span className="text-rose-300">Re-requesting review failed: {lastReRequest.error}</span>}
       {reviewersToReRequest.length > 0 && (
         <span className="text-ink-400">Will re-request {logins(reviewersToReRequest)} once their remaining comments are answered.</span>
       )}

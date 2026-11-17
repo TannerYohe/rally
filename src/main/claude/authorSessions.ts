@@ -16,7 +16,8 @@ import {
 import { errorMessage } from '@shared/errors'
 import { cloneBranch, cloneDiff, localCommits, pushClone, RemoteMovedError, syncClone, uncommittedPaths } from '../git/prClone'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
-import { fetchApprovers, repliedReviewers, requestReviews, reviewersReady, uniqueLogins } from '../github/reviewRequests'
+import { uniqueLogins } from '../github/logins'
+import { fetchApprovers, isRejectedRequest, repliedReviewers, requestReview, reviewersReady } from '../github/reviewRequests'
 import { fetchCloneSource, postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
 import { authoredPrList, type SessionState } from '../prList'
 import { authorSessionsDir, configFile } from '../store'
@@ -164,7 +165,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         else answered.push(items.get(post.itemId)!)
         this.patch(sessionId, (s) => ({ posted: { ...s.posted, [post.itemId]: posted } }), true)
       }
-      if (reRequestReviews) this.queueReRequests(sessionId, repliedReviewers(answered))
+      if (reRequestReviews) this.queueReRequests(sessionId, repliedReviewers(answered, this.viewer()))
       await this.settleReRequests(sessionId)
     } finally {
       this.publishing.delete(sessionId)
@@ -330,20 +331,40 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.patch(sessionId, (s) => ({ reviewersToReRequest: uniqueLogins([...s.reviewersToReRequest, ...reviewers]) }), true)
   }
 
+  private viewer(): string {
+    return authoredPrList.get().viewer ?? ''
+  }
+
+  /** Re-requests each queued reviewer with nothing left unanswered, one at a time so GitHub rejecting one doesn't hold back the rest. */
   private async settleReRequests(sessionId: string): Promise<void> {
     const { pr, reviewersToReRequest } = this.byId(sessionId)
     if (reviewersToReRequest.length === 0) return
-    let ready: string[] = []
+    let split
     try {
       const [items, approvers] = await Promise.all([fetchFeedbackItems(pr), fetchApprovers(pr)])
-      const split = reviewersReady(reviewersToReRequest, items, approvers)
-      ready = split.ready
-      if (ready.length > 0) await requestReviews(pr, ready)
-      this.patch(sessionId, () => ({ reviewersToReRequest: split.waiting }), true)
-      if (ready.length > 0) this.patch(sessionId, () => ({ lastReRequest: { at: now(), reviewers: ready, error: null } }), true)
+      split = reviewersReady(reviewersToReRequest, items, approvers, this.viewer())
     } catch (error) {
-      console.error('Re-requesting reviews failed', { pr: pr.url, reviewers: ready, error })
-      this.patch(sessionId, () => ({ lastReRequest: { at: now(), reviewers: ready, error: errorMessage(error) } }), true)
+      console.error('Checking reviewers to re-request failed', { pr: pr.url, error })
+      this.patch(sessionId, () => ({ lastReRequest: { at: now(), reviewers: [], error: errorMessage(error) } }), true)
+      return
+    }
+    const requested: string[] = []
+    const retry: string[] = []
+    const failures: string[] = []
+    for (const login of split.ready) {
+      try {
+        await requestReview(pr, login)
+        requested.push(login)
+      } catch (error) {
+        console.error('Re-requesting a review failed', { pr: pr.url, reviewer: login, error })
+        failures.push(`@${login}: ${errorMessage(error)}`)
+        if (!isRejectedRequest(error)) retry.push(login)
+      }
+    }
+    this.patch(sessionId, () => ({ reviewersToReRequest: [...split.waiting, ...retry] }), true)
+    if (requested.length > 0 || failures.length > 0) {
+      const lastReRequest = { at: now(), reviewers: requested, error: failures.length > 0 ? failures.join('; ') : null }
+      this.patch(sessionId, () => ({ lastReRequest }), true)
     }
   }
 

@@ -70,7 +70,7 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   fetchFeedbackItems: vi.fn(),
   acknowledgeFeedbackItem: vi.fn(),
-  requestReviews: vi.fn(),
+  requestReview: vi.fn(),
   fetchApprovers: vi.fn(),
   fetchCloneSource: vi.fn(),
   postAuthorReply: vi.fn(),
@@ -88,11 +88,11 @@ vi.mock('../store', () => ({
   configFile: { get: () => ({ reviewSkill: 'review-pr' }) },
   authorSessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
 }))
-vi.mock('../prList', () => ({ authoredPrList: { refreshOne: mocks.refreshOne } }))
+vi.mock('../prList', () => ({ authoredPrList: { refreshOne: mocks.refreshOne, get: () => ({ viewer: 'me' }) } }))
 vi.mock('../github/authorFeedback', () => ({ fetchFeedbackItems: mocks.fetchFeedbackItems, acknowledgeFeedbackItem: mocks.acknowledgeFeedbackItem }))
 vi.mock('../github/reviewRequests', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../github/reviewRequests')>()),
-  requestReviews: mocks.requestReviews,
+  requestReview: mocks.requestReview,
   fetchApprovers: mocks.fetchApprovers,
 }))
 vi.mock('../github/authorReplies', () => ({
@@ -132,7 +132,13 @@ mocks.stored = [
     responses: { T1: response('T1', 'Done'), T2: response('T2', 'Yes'), B1: response('B1', 'False positive') },
   }),
   stored(8, { reviewersToReRequest: ['carol'] }),
-  stored(10, { reviewersToReRequest: ['dan'] }),
+  stored(9, {}),
+  stored(10, { reviewersToReRequest: ['dan', 'gina'] }),
+  stored(12, {
+    items: [thread('T1'), { ...thread('M1'), author: 'me' }],
+    responses: { T1: response('T1', 'Done'), M1: response('M1', 'Following up on my own note') },
+  }),
+  stored(13, { items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
   stored(11, { reviewersToReRequest: ['erin', 'frank'] }),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
@@ -161,7 +167,7 @@ beforeEach(() => {
     mocks.postAuthorReply,
     mocks.resolveFeedbackThread,
     mocks.pushClone,
-    mocks.requestReviews,
+    mocks.requestReview,
     mocks.acknowledgeFeedbackItem,
   ])
     mock.mockReset()
@@ -260,54 +266,78 @@ describe('postReplies', () => {
 })
 
 describe('re-requesting reviews', () => {
+  const answered = (id: string, author: string) => ({ ...thread(id), author, answered: true })
+
   it('re-requests people I replied to once none of their comments are left unanswered', async () => {
     mocks.postAuthorReply.mockResolvedValue('https://github.com/acme/api/pull/7#r')
-    mocks.fetchFeedbackItems.mockResolvedValue([
-      { ...thread('T1'), answered: true },
-      { ...thread('T2'), author: 'carol', answered: true },
-      { ...thread('T3'), author: 'carol', answered: false },
-    ])
+    mocks.fetchFeedbackItems.mockResolvedValue([answered('T1', 'bob'), answered('T2', 'carol'), { ...thread('T3'), author: 'carol', answered: false }])
     await authorSessions.postReplies(
       'author-7',
       ['T1', 'T2', 'B1'].map((itemId) => ({ itemId, body: 'reply', resolve: false })),
       true,
     )
-    expect(mocks.requestReviews).toHaveBeenCalledWith(pr(7), ['bob'])
+    expect(mocks.requestReview.mock.calls).toEqual([[pr(7), 'bob']])
     expect(session(7)).toMatchObject({ reviewersToReRequest: ['carol'], lastReRequest: { reviewers: ['bob'], error: null } })
   })
 
-  it('leaves the queue alone when posting without re-requesting', async () => {
-    mocks.postAuthorReply.mockResolvedValue('https://github.com/acme/api/pull/7#r')
-    await authorSessions.postReplies('author-7', [{ itemId: 'T1', body: 'again', resolve: false }], false)
-    expect(mocks.requestReviews).toHaveBeenCalledTimes(0)
+  it('never queues me when I reply in a thread I started', async () => {
+    mocks.postAuthorReply.mockResolvedValue('https://github.com/acme/api/pull/12#r')
+    mocks.fetchFeedbackItems.mockResolvedValue([answered('T1', 'bob'), answered('M1', 'me')])
+    await authorSessions.postReplies(
+      'author-12',
+      ['T1', 'M1'].map((itemId) => ({ itemId, body: 'reply', resolve: false })),
+      true,
+    )
+    expect(mocks.requestReview.mock.calls).toEqual([[pr(12), 'bob']])
+    expect(session(12).reviewersToReRequest).toEqual([])
   })
 
-  it('re-requests a queued reviewer when an acknowledgment answers their last comment, but never queues one itself', async () => {
-    mocks.fetchFeedbackItems.mockResolvedValue([{ ...thread('T3'), author: 'carol', answered: true }])
+  it('queues and requests nothing when posting without re-requesting', async () => {
+    mocks.postAuthorReply.mockResolvedValue('https://github.com/acme/api/pull/13#r')
+    mocks.fetchFeedbackItems.mockResolvedValue([answered('T1', 'bob')])
+    await authorSessions.postReplies('author-13', [{ itemId: 'T1', body: 'Done', resolve: false }], false)
+    expect(mocks.requestReview).not.toHaveBeenCalled()
+    expect(session(13)).toMatchObject({ reviewersToReRequest: [], lastReRequest: null, posted: { T1: { error: null } } })
+  })
+
+  it('re-requests a queued reviewer when an acknowledgment answers their last comment', async () => {
+    mocks.fetchFeedbackItems.mockResolvedValue([answered('T3', 'carol')])
     await authorSessions.acknowledge(pr(8), 'T3')
     expect(mocks.acknowledgeFeedbackItem).toHaveBeenCalledWith(pr(8), 'T3')
-    expect(mocks.requestReviews).toHaveBeenCalledWith(pr(8), ['carol'])
+    expect(mocks.requestReview.mock.calls).toEqual([[pr(8), 'carol']])
     expect(session(8).reviewersToReRequest).toEqual([])
+  })
 
+  it('never queues anyone from an acknowledgment alone', async () => {
+    mocks.fetchFeedbackItems.mockResolvedValue([answered('T9', 'bob')])
     await authorSessions.acknowledge(pr(9), 'T9')
-    expect(mocks.requestReviews).toHaveBeenCalledTimes(1)
+    expect(mocks.acknowledgeFeedbackItem).toHaveBeenCalledWith(pr(9), 'T9')
+    expect(mocks.requestReview).not.toHaveBeenCalled()
+    expect(session(9)).toMatchObject({ reviewersToReRequest: [], lastReRequest: null })
   })
 
   it('drops reviewers who already approved instead of re-requesting them', async () => {
     mocks.fetchFeedbackItems.mockResolvedValue([])
     mocks.fetchApprovers.mockResolvedValue(['Erin'])
     await authorSessions.acknowledge(pr(11), 'T5')
-    expect(mocks.requestReviews).toHaveBeenCalledWith(pr(11), ['frank'])
+    expect(mocks.requestReview.mock.calls).toEqual([[pr(11), 'frank']])
     expect(session(11).reviewersToReRequest).toEqual([])
   })
 
-  it('records a failed re-request and keeps the reviewer queued', async () => {
+  it('drops a reviewer GitHub rejects, keeps one that failed for another reason, and still requests the rest', async () => {
     mocks.fetchFeedbackItems.mockResolvedValue([])
-    mocks.requestReviews.mockRejectedValue(new Error('Reviews may only be requested from collaborators'))
+    mocks.requestReview.mockImplementation(async (_pr, login: string) => {
+      if (login === 'dan') throw Object.assign(new Error('Reviews may only be requested from collaborators'), { status: 422 })
+      throw new Error('socket hang up')
+    })
     await authorSessions.acknowledge(pr(10), 'T4')
+    expect(mocks.requestReview.mock.calls).toEqual([
+      [pr(10), 'dan'],
+      [pr(10), 'gina'],
+    ])
     expect(session(10)).toMatchObject({
-      reviewersToReRequest: ['dan'],
-      lastReRequest: { reviewers: ['dan'], error: 'Reviews may only be requested from collaborators' },
+      reviewersToReRequest: ['gina'],
+      lastReRequest: { reviewers: [], error: '@dan: Reviews may only be requested from collaborators; @gina: socket hang up' },
     })
   })
 })

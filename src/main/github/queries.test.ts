@@ -118,4 +118,32 @@ describe('fetchPr', () => {
     expect(graphql).toHaveBeenCalledTimes(2)
     expect(pr.myReviews).toHaveLength(2)
   })
+
+  it('keeps the reviews fetched so far when an older page fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const newest = [replyReview(1), replyReview(2)]
+    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(commentsFor(newest))
+    graphql.mockRejectedValueOnce(new Error('socket hang up'))
+
+    const pr = await fetchPr('acme', 'api', 12)
+
+    expect(pr.myReviews.map((r) => r.databaseId)).toEqual([1001, 1002])
+    expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ pr: 'https://github.com/acme/api/pull/12' }))
+    warn.mockRestore()
+  })
+
+  it('keeps the reviews fetched so far when the PR is gone on an older page', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const newest = [replyReview(1)]
+    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(commentsFor(newest))
+    graphql.mockResolvedValueOnce({ node: null })
+
+    const pr = await fetchPr('acme', 'api', 12)
+
+    expect(pr.myReviews.map((r) => r.databaseId)).toEqual([1001])
+    expect(warn).toHaveBeenCalledWith(expect.any(String), { pr: 'https://github.com/acme/api/pull/12' })
+    warn.mockRestore()
+  })
 })

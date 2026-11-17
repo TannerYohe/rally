@@ -158,18 +158,25 @@ function toMyReview(review: RawReview, replyOnly: boolean): MyReview {
   }
 }
 
+async function fetchOlderReviews(gh: GithubClient, raw: RawPr, before: string): Promise<OlderReviewPage | null> {
+  try {
+    const response = await gh.graphql<{ node: { reviews: OlderReviewPage } | null }>(OLDER_REVIEWS_QUERY, { id: raw.id, viewer: gh.login, before })
+    if (response.node) return response.node.reviews
+    console.warn('GitHub returned no PR for an older reviews page', { pr: raw.url })
+  } catch (error) {
+    console.warn('Fetching an older page of my reviews failed', { pr: raw.url, error })
+  }
+  return null
+}
+
 async function olderReviewsUntilCounted(gh: GithubClient, raw: RawPr, newest: MyReview[]): Promise<MyReview[]> {
   let reviews = newest
   let page = raw.reviews.pageInfo
   for (let pages = 1; pages < MAX_REVIEW_PAGES; pages++) {
     if (reviews.some((r) => countsAsReview(r))) break
     if (!page.hasPreviousPage || !page.startCursor) break
-    const response = await gh.graphql<{ node: { reviews: OlderReviewPage } }>(OLDER_REVIEWS_QUERY, {
-      id: raw.id,
-      viewer: gh.login,
-      before: page.startCursor,
-    })
-    const older = response.node.reviews
+    const older = await fetchOlderReviews(gh, raw, page.startCursor)
+    if (!older) break
     reviews = [...older.nodes.map((r) => toMyReview(r, isReplyOnly(r, r.comments.nodes))), ...reviews]
     page = older.pageInfo
   }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { automaticReviewTab, emptyReviewTabs, INITIAL_REVIEW_TAB_STATE, reviewTabForKey, reviewTabReducer, selectedReviewTab, type ReviewTabState } from './reviewTabs'
+import { automaticReviewTab, emptyReviewTabs, INITIAL_REVIEW_TAB_STATE, REVIEW_TABS, reviewTabReducer, selectedReviewTab, type ReviewTabState } from './reviewTabs'
+import { tabForKey } from './tabs'
+
+const reviewTabForKey = (tab: (typeof REVIEW_TABS)[number], key: string) => tabForKey(REVIEW_TABS, tab, key)
 
 describe('automaticReviewTab', () => {
   it('shows Activity while Claude is working', () => {
@@ -25,7 +28,7 @@ describe('selectedReviewTab', () => {
   })
 })
 
-describe('reviewTabForKey', () => {
+describe('tabForKey', () => {
   it('moves right and left, wrapping at the ends', () => {
     expect(reviewTabForKey('activity', 'ArrowRight')).toBe('report')
     expect(reviewTabForKey('drafts', 'ArrowRight')).toBe('activity')

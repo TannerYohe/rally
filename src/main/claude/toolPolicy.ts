@@ -113,7 +113,7 @@ const WGET_METHOD_FLAGS = ['--method']
 const WGET_BODY_FLAGS = ['--post-data', '--post-file', '--body-data', '--body-file']
 const READ_METHODS = new Set(['GET', 'HEAD'])
 
-const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts the drafts itself when the user clicks Post and submit.'
+const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and replies itself when the user asks.'
 
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
 

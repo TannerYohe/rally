@@ -1,6 +1,6 @@
 import { isSamePr, type PrRef, type ReviewThread, type ThreadResolution } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { github, GITHUB_TIMEOUT_MS, timeoutRequest } from './client'
+import { github, GITHUB_TIMEOUT_MS, timeoutRequest, type GithubClient } from './client'
 import { fetchNodes } from './queries'
 
 const THREADS_QUERY = `
@@ -59,6 +59,10 @@ export async function fetchOwnThreads(pr: PrRef, threadIds: string[]): Promise<R
   return [...lookups.values()].flatMap((lookup) => (lookup.kind === 'own' ? [lookup.thread] : []))
 }
 
+export async function resolveThread(gh: GithubClient, threadId: string): Promise<void> {
+  await gh.graphql(RESOLVE_MUTATION, { threadId, request: timeoutRequest() })
+}
+
 export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise<Omit<ThreadResolution, 'at'>> {
   const gh = await github()
   const lookups = await lookupThreads(pr, threadIds)
@@ -73,7 +77,7 @@ export async function resolveOwnThreads(pr: PrRef, threadIds: string[]): Promise
     else if (lookup.thread.isResolved) result.resolved.push(threadId)
     else {
       try {
-        await gh.graphql(RESOLVE_MUTATION, { threadId, request: timeoutRequest() })
+        await resolveThread(gh, threadId)
         result.resolved.push(threadId)
       } catch (error) {
         fail(threadId, errorMessage(error))

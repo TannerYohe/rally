@@ -17,17 +17,18 @@ function toggleValue(values: string[], value: string): string[] {
 interface Props {
   prs: Pr[]
   filters: PrFilters
+  showAuthors: boolean
   onChange(filters: PrFilters): void
 }
 
-export function FilterPanel({ prs, filters, onChange }: Props) {
+export function FilterPanel({ prs, filters, showAuthors, onChange }: Props) {
   const avatars = new Map(prs.map((pr) => [pr.author, pr.authorAvatarUrl]))
   const authors = filterOptions(prs, (pr) => pr.author, filters.authors)
   const repos = filterOptions(prs, repoName, filters.repos)
 
   return (
     <div className="space-y-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
-      <FilterRow label="Author">
+      {showAuthors && <FilterRow label="Author">
         {authors.map(({ value, count }) => {
           const selected = filters.authors.includes(value)
           return (
@@ -42,7 +43,7 @@ export function FilterPanel({ prs, filters, onChange }: Props) {
             </button>
           )
         })}
-      </FilterRow>
+      </FilterRow>}
 
       <FilterRow label="Repo">
         {repos.map(({ value, count }) => {

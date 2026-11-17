@@ -2,10 +2,13 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { graphql } from '@octokit/graphql'
 import { Octokit } from '@octokit/rest'
+import type { PrRef } from '@shared/types'
 
 const run = promisify(execFile)
 
 export const GITHUB_TIMEOUT_MS = 15_000
+
+export const pullParams = (pr: PrRef) => ({ owner: pr.owner, repo: pr.repo, pull_number: pr.number })
 
 export const timeoutRequest = (timeoutMs = GITHUB_TIMEOUT_MS) => ({ signal: AbortSignal.timeout(timeoutMs) })
 

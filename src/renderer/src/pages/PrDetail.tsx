@@ -1,19 +1,15 @@
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
 import { Markdown } from '../components/Markdown'
-import { Avatar } from '../components/Avatar'
 import { BusyDot } from '../components/BusyDot'
-import { DiffStat } from '../components/DiffStat'
-import { HideControls } from '../components/HideControls'
-import { PhaseBadge } from '../components/PhaseBadge'
-import { RepoChip } from '../components/RepoChip'
+import { PrHeader } from '../components/PrHeader'
 import { ProgressTimeline } from '../components/ProgressTimeline'
-import { ReviewTabBar, ReviewTabPanel } from '../components/ReviewTabBar'
+import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
 import { SubmitBar } from '../components/SubmitBar'
 import {
   EMPTY_COMMENT_REVIEW_ERROR,
@@ -28,8 +24,8 @@ import {
 import { age, clockTime, fullTime } from '../lib/format'
 import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastSuccessfulTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
-import { emptyReviewTabs, type ReviewTab } from '../lib/reviewTabs'
-import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { emptyReviewTabs, REVIEW_TAB_LABELS, REVIEW_TABS, type ReviewTab } from '../lib/reviewTabs'
+import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 
 export function PrDetail() {
   const params = useParams()
@@ -37,7 +33,7 @@ export function PrDetail() {
   const repo = params.repo!
   const number = Number(params.number)
   const key = prKey(owner, repo, number)
-  const { prs } = usePrs()
+  const { prs } = usePrs('reviewing')
   const pr = prs.find((p) => p.owner === owner && p.repo === repo && p.number === number)
   const [session, setSession] = useSession(key)
   const url = pr?.url ?? `https://github.com/${owner}/${repo}/pull/${number}`
@@ -50,56 +46,7 @@ export function PrDetail() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <div>
-        <Link to="/" className="text-xs text-ink-500 hover:text-ink-300">
-          ← All PRs
-        </Link>
-        <div className="mt-3 flex items-start gap-4">
-          {pr && <Avatar login={pr.author} url={pr.authorAvatarUrl} ringClass={PHASE_THEME[pr.phase].ring} />}
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex items-start gap-3">
-              <h1 className="min-w-0 flex-1 text-xl font-semibold">{pr?.title ?? key}</h1>
-              {pr && <PhaseBadge phase={pr.phase} />}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-400">
-              <RepoChip repo={repo} number={number} />
-              {pr && (
-                <>
-                  <span>
-                    by <span className="text-ink-200">{pr.author}</span>
-                  </span>
-                  <span>opened {age(pr.createdAt)} ago</span>
-                  <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
-                </>
-              )}
-              <a className="text-primary-400 hover:text-primary-300" href={url} target="_blank" rel="noreferrer">
-                Open on GitHub ↗
-              </a>
-              {pr && <HideControls pr={pr} className="ml-auto" />}
-            </div>
-          </div>
-        </div>
-        {pr?.summary && (
-          <p className="mt-4 rounded-lg bg-secondary-500/5 px-4 py-3 text-sm text-ink-300 ring-1 ring-secondary-500/20">
-            <span className="mr-2 text-secondary-400">✦</span>
-            {pr.summary}
-          </p>
-        )}
-      </div>
-
-      {pr && (
-        <details className="rounded-xl border border-white/5 bg-ink-900/40 p-4">
-          <summary className="cursor-pointer text-sm font-semibold">Description and files</summary>
-          <div className="mt-3 space-y-4">
-            <Markdown>{pr.body || '_No description._'}</Markdown>
-            <ul className="space-y-0.5 font-mono text-xs text-ink-400">
-              {pr.files.map((file) => (
-                <li key={file}>{file}</li>
-              ))}
-            </ul>
-          </div>
-        </details>
-      )}
+      <PrHeader list="reviewing" pr={pr} title={key} repo={repo} number={number} url={url} />
 
       {session ? (
         <ReviewPanel
@@ -281,15 +228,15 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         </div>
       )}
 
-      <ReviewTabBar tab={reviewTab.tab} badges={tabBadges} empty={emptyTabs} onSelect={reviewTab.select} />
+      <TabBar name="Review" tabs={REVIEW_TABS} labels={REVIEW_TAB_LABELS} tab={reviewTab.tab} badges={tabBadges} empty={emptyTabs} onSelect={reviewTab.select} />
 
-      <ReviewTabPanel id="activity" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="activity" tab={reviewTab.tab}>
         <div ref={reviewTab.activityRef}>
           <ProgressTimeline timeline={session.timeline} />
         </div>
-      </ReviewTabPanel>
+      </TabPanel>
 
-      <ReviewTabPanel id="report" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="report" tab={reviewTab.tab}>
         {emptyTabs.report ? (
           <EmptyTab>Claude hasn't published a report yet.</EmptyTab>
         ) : (
@@ -303,9 +250,9 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             </div>
           )
         )}
-      </ReviewTabPanel>
+      </TabPanel>
 
-      <ReviewTabPanel id="threads" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="threads" tab={reviewTab.tab}>
         {emptyTabs.threads ? (
           <EmptyTab>No earlier comments. Threads appear in follow-up reviews.</EmptyTab>
         ) : (
@@ -316,9 +263,9 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             submitted={submitted}
           />
         )}
-      </ReviewTabPanel>
+      </TabPanel>
 
-      <ReviewTabPanel id="drafts" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="drafts" tab={reviewTab.tab}>
         <div className="space-y-2">
           {emptyTabs.drafts ? (
             <EmptyTab>{hasDrafts ? 'No draft comments.' : "Claude hasn't drafted any comments yet."}</EmptyTab>
@@ -336,7 +283,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             <ReviewBodyEditor original={drafts.summaryBody} edit={summaryEdit} disabled={busy || submitted} onEdit={setSummaryEdit} />
           )}
         </div>
-      </ReviewTabPanel>
+      </TabPanel>
 
       {!submitted && (
         <div className="space-y-3">
@@ -372,12 +319,4 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       )}
     </section>
   )
-}
-
-function TabCount({ count }: { count: number }) {
-  return <span className="rounded-full bg-white/10 px-1.5 text-xs font-normal text-ink-200">{count}</span>
-}
-
-function EmptyTab({ children }: { children: ReactNode }) {
-  return <p className="py-6 text-center text-sm text-ink-500">{children}</p>
 }

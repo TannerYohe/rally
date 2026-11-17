@@ -24,10 +24,10 @@ export const RALLY_SERVER = 'rally'
 export const RALLY_TOOL_PREFIX = `mcp__${RALLY_SERVER}__`
 export const PUBLISH_DRAFTS_TOOL = `${RALLY_TOOL_PREFIX}${PUBLISH_DRAFTS}`
 
-const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] })
+export const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] })
 
-export function createRallyServer(handlers: RallyToolHandlers) {
-  const publishDrafts = tool(
+export function publishDraftsTool(handlers: RallyToolHandlers) {
+  return tool(
     PUBLISH_DRAFTS,
     'Publish the current review report and the complete set of draft comments to the Rally app. Call every time you present or revise drafts, always with the full set.',
     {
@@ -88,6 +88,8 @@ export function createRallyServer(handlers: RallyToolHandlers) {
       return ok(`Rally received ${args.comments.length} draft comments.`)
     },
   )
+}
 
-  return createSdkMcpServer({ name: RALLY_SERVER, version: '1.0.0', tools: [publishDrafts] })
+export function createRallyServer(handlers: RallyToolHandlers) {
+  return createSdkMcpServer({ name: RALLY_SERVER, version: '1.0.0', tools: [publishDraftsTool(handlers)] })
 }

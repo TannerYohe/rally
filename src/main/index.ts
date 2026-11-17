@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import icon from '../../resources/icon.png?asset'
 import { registerIpc } from './ipc'
-import { prList } from './prList'
+import { prLists } from './prList'
 import { loadLoginShellPath } from './shellPath'
 import { updater } from './update/updater'
 
@@ -46,7 +46,7 @@ app.whenReady().then(() => {
   registerIpc()
   updater.start()
   createWindow()
-  prList.start()
+  for (const list of Object.values(prLists)) list.start()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

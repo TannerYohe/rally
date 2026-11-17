@@ -1,5 +1,6 @@
 import { GraphqlResponseError } from '@octokit/graphql'
-import type { MyReview, Pr, ReviewState } from '@shared/types'
+import type { MyReview, Pr, PrListKind, ReviewState } from '@shared/types'
+import { authorFeedback, type RawAuthorFields } from './authorPhase'
 import { github, timeoutRequest, type GithubClient } from './client'
 import { MY_REVIEW_WINDOW } from './phase'
 
@@ -17,11 +18,24 @@ const PR_FIELDS = `
     timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
       nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
     }
+    reviewDecision @include(if: $authored)
+    latestOpinionatedReviews(first: 50, writersOnly: true) @include(if: $authored) {
+      nodes { state author { login } }
+    }
+    reviewThreads(first: 100) @include(if: $authored) {
+      nodes { isResolved comments(last: 1) { nodes { author { login } reactionGroups { viewerHasReacted } } } }
+    }
+    comments(last: 100) @include(if: $authored) {
+      nodes { url body createdAt isMinimized author { __typename login } reactionGroups { viewerHasReacted } }
+    }
+    allReviews: reviews(last: 100) @include(if: $authored) {
+      nodes { url body state submittedAt author { __typename login } reactionGroups { viewerHasReacted } }
+    }
   }
 `
 
 const SEARCH_QUERY = `
-  query($q: String!, $viewer: String!, $cursor: String) {
+  query($q: String!, $viewer: String!, $authored: Boolean!, $cursor: String) {
     search(query: $q, type: ISSUE, first: 50, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes { ... on PullRequest { ...PrFields } }
@@ -31,7 +45,7 @@ const SEARCH_QUERY = `
 `
 
 const SINGLE_QUERY = `
-  query($owner: String!, $repo: String!, $number: Int!, $viewer: String!) {
+  query($owner: String!, $repo: String!, $number: Int!, $viewer: String!, $authored: Boolean!) {
     repository(owner: $owner, name: $repo) { pullRequest(number: $number) { ...PrFields } }
   }
   ${PR_FIELDS}
@@ -61,7 +75,7 @@ interface ReviewComment {
 
 type ReviewCommentsNode = { id: string; comments: { nodes: ReviewComment[] } }
 
-interface RawPr {
+interface RawPr extends Partial<RawAuthorFields> {
   id: string
   number: number
   url: string
@@ -136,6 +150,7 @@ function toPr(raw: RawPr, viewer: string, replyOnly: Set<string>): GithubPr {
     commitOid: r.commit?.oid ?? null,
     replyOnly: replyOnly.has(r.id),
   }))
+  const authored = authorFields(raw)
   const reviewRequestedFromMe = raw.reviewRequests.nodes.some(
     (n) => n.requestedReviewer?.login?.toLowerCase() === viewer.toLowerCase(),
   )
@@ -162,16 +177,25 @@ function toPr(raw: RawPr, viewer: string, replyOnly: Set<string>): GithubPr {
     files: raw.files?.nodes.map((f) => f.path) ?? [],
     reviewRequestedFromMe,
     myReviews,
+    feedback: authored ? authorFeedback(authored, viewer) : null,
   }
 }
 
-export async function searchPrs(queries: string[]): Promise<{ viewer: string; prs: GithubPr[] }> {
+function authorFields(raw: RawPr): RawAuthorFields | null {
+  const { reviewDecision, latestOpinionatedReviews, reviewThreads, comments, allReviews } = raw
+  if (!latestOpinionatedReviews || !reviewThreads || !comments || !allReviews) return null
+  return { reviewDecision: reviewDecision ?? null, latestOpinionatedReviews, reviewThreads, comments, allReviews }
+}
+
+const isAuthored = (kind: PrListKind) => kind === 'authored'
+
+export async function searchPrs(queries: string[], kind: PrListKind): Promise<{ viewer: string; prs: GithubPr[] }> {
   const gh = await github()
   const byId = new Map<string, RawPr>()
   for (const q of queries) {
     let cursor: string | null = null
     for (let page = 0; page < MAX_PAGES; page++) {
-      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, { q, viewer: gh.login, cursor })
+      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, { q, viewer: gh.login, authored: isAuthored(kind), cursor })
       for (const node of response.search.nodes) {
         if ('id' in node) byId.set(node.id, node as RawPr)
       }
@@ -184,13 +208,14 @@ export async function searchPrs(queries: string[]): Promise<{ viewer: string; pr
   return { viewer: gh.login, prs: raws.map((raw) => toPr(raw, gh.login, replyOnly)) }
 }
 
-export async function fetchPr(owner: string, repo: string, number: number): Promise<GithubPr> {
+export async function fetchPr(owner: string, repo: string, number: number, kind: PrListKind): Promise<GithubPr> {
   const gh = await github()
   const response = await gh.graphql<{ repository: { pullRequest: RawPr } }>(SINGLE_QUERY, {
     owner,
     repo,
     number,
     viewer: gh.login,
+    authored: isAuthored(kind),
   })
   const raw = response.repository.pullRequest
   return toPr(raw, gh.login, await replyOnlyReviewIds(gh, [raw]))

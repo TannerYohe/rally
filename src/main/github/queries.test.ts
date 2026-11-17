@@ -49,12 +49,44 @@ describe('fetchPr', () => {
     graphql.mockResolvedValueOnce({ repository: { pullRequest: raw } })
     graphql.mockResolvedValueOnce({ nodes: [{ id: 'PRR_2', comments: { nodes: [reply] } }] })
 
-    const pr = await fetchPr('acme', 'api', 12)
+    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
 
     expect(pr.myReviews).toEqual([
       { databaseId: 101, state: 'APPROVED', submittedAt: '2026-11-04T00:00:00Z', commitOid: 'old', replyOnly: false },
       { databaseId: 5787412470, state: 'COMMENTED', submittedAt: '2026-11-05T15:24:38Z', commitOid: 'head', replyOnly: true },
     ])
     expect(graphql.mock.calls[0][0]).toMatch(/reviews\(author: \$viewer[^)]*\) \{ nodes \{ id databaseId /)
+    expect(graphql.mock.calls[0][1]).toMatchObject({ authored: false })
+    expect(pr.feedback).toBeNull()
+  })
+
+  it('reads author feedback for an authored PR', async () => {
+    const raw = {
+      id: 'PR_2', number: 13, url: 'https://github.com/acme/api/pull/13', title: 't', body: '', createdAt: '', updatedAt: '',
+      isDraft: false, additions: 1, deletions: 0, changedFiles: 1, headRefOid: 'head', baseRefName: 'main', headRefName: 'f',
+      author: { login: 'me', avatarUrl: '' },
+      repository: { name: 'api', owner: { login: 'acme' } },
+      files: { nodes: [] },
+      reviewRequests: { nodes: [{ requestedReviewer: { login: 'carol' } }] },
+      reviews: { nodes: [] },
+      timelineItems: { nodes: [] },
+      reviewDecision: 'CHANGES_REQUESTED',
+      latestOpinionatedReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'bob' } }] },
+      reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'bob' }, reactionGroups: [] }] } }] },
+      comments: { nodes: [{ url: 'https://github.com/acme/api/pull/13#issuecomment-1', body: 'Why?', createdAt: '', author: { login: 'carol', __typename: 'User' }, reactionGroups: [] }] },
+      allReviews: { nodes: [] },
+    }
+    graphql.mockResolvedValueOnce({ repository: { pullRequest: raw } })
+
+    const pr = await fetchPr('acme', 'api', 13, 'authored')
+
+    expect(graphql.mock.calls.at(-1)![1]).toMatchObject({ authored: true })
+    expect(pr.feedback).toEqual({
+      reviewDecision: 'CHANGES_REQUESTED',
+      openThreads: 1,
+      unacknowledged: 2,
+      changesRequestedBy: ['bob'],
+      approvedBy: [],
+    })
   })
 })

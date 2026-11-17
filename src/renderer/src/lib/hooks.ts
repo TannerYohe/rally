@@ -1,5 +1,5 @@
-import { useEffect, useReducer, useRef, useState, type RefObject } from 'react'
-import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type InstallAttempt, type TimelineEntry, type UpdateState } from '@shared/types'
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
+import { priorConcernThreadIds, type AuthorSession, type FeedbackItem, type PrListKind, type PrListState, type PrRef, type ReviewSession, type ReviewThread, type InstallAttempt, type TimelineEntry, type UpdateState } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTab } from './reviewTabs'
 import { playSound } from './sounds'
@@ -7,12 +7,14 @@ import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
 
-export function usePrs(): PrListState {
+export function usePrs(list: PrListKind): PrListState {
   const [state, setState] = useState<PrListState>(EMPTY_PRS)
   useEffect(() => {
-    window.rally.getPrs().then(setState)
-    return window.rally.onPrsChanged(setState)
-  }, [])
+    window.rally.getPrs(list).then(setState)
+    return window.rally.onPrsChanged((change) => {
+      if (change.list === list) setState(change.state)
+    })
+  }, [list])
   return state
 }
 
@@ -50,6 +52,43 @@ export function useSession(prKey: string): [ReviewSession | null, (session: Revi
     })
   }, [prKey])
   return [session, setSession]
+}
+
+export function useAuthorSession(prKey: string): [AuthorSession | null, (session: AuthorSession | null) => void] {
+  const [session, setSession] = useState<AuthorSession | null>(null)
+  useEffect(() => {
+    window.rally.getAuthorSession(prKey).then(setSession)
+    return window.rally.onAuthorSessionChanged((s) => {
+      if (s.prKey === prKey) setSession(s)
+    })
+  }, [prKey])
+  return [session, setSession]
+}
+
+interface FeedbackItemsState {
+  items: FeedbackItem[]
+  loading: boolean
+  error: string | null
+  reload(): void
+}
+
+export function useFeedbackItems(pr: PrRef): FeedbackItemsState {
+  const [state, setState] = useState<Omit<FeedbackItemsState, 'reload'>>({ items: [], loading: true, error: null })
+  const [generation, setGeneration] = useState(0)
+  const { owner, repo, number, url } = pr
+  useEffect(() => {
+    let current = true
+    setState((s) => ({ ...s, loading: true }))
+    window.rally.getFeedbackItems({ owner, repo, number, url }).then(
+      (items) => current && setState({ items, loading: false, error: null }),
+      (error) => current && setState((s) => ({ ...s, loading: false, error: errorMessage(error) })),
+    )
+    return () => {
+      current = false
+    }
+  }, [owner, repo, number, url, generation])
+  const reload = useCallback(() => setGeneration((g) => g + 1), [])
+  return { ...state, reload }
 }
 
 export function usePersistentState<T>(key: string, fallback: T): [T, (value: T) => void] {

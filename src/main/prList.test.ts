@@ -87,6 +87,25 @@ describe('prList', () => {
     expect(mocks.store.summariesFile.get()).toEqual({ 'pr1:old': 'stale', 'other:h': 'other' })
   })
 
+  it('keeps a PR refreshed during a full refresh instead of the older search result', async () => {
+    let finishSearch: (value: unknown) => void = () => {}
+    mocks.searchPrs.mockReturnValue(new Promise((resolve) => (finishSearch = resolve)))
+    const refreshing = prList.refresh()
+    mocks.fetchPr.mockResolvedValue(githubPr({ title: 'Fresh' }))
+    await prList.refreshOne('acme', 'api', 1)
+    finishSearch({ viewer: 'me', prs: [githubPr({ title: 'Stale' }), githubPr({ id: 'pr2', number: 2 })] })
+    await refreshing
+    expect(prList.get().prs.map((pr) => pr.title)).toEqual(['Fresh', 'Change'])
+  })
+
+  it('uses the search result over a PR refreshed before the full refresh started', async () => {
+    mocks.fetchPr.mockResolvedValue(githubPr({ title: 'Older' }))
+    await prList.refreshOne('acme', 'api', 1)
+    mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ title: 'Newer' })] })
+    await prList.refresh()
+    expect(prList.get().prs.map((pr) => pr.title)).toEqual(['Newer'])
+  })
+
   it('hides a PR until it is unhidden', async () => {
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr()] })
     await prList.refresh()

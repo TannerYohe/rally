@@ -157,13 +157,25 @@ export function soundLength(voices: Voice[]): number {
   return Math.max(...voices.map((v) => v.at + v.duration))
 }
 
-let context: AudioContext | null = null
+interface AudioOutput {
+  context: AudioContext
+  volume: GainNode
+}
+
+let audio: AudioOutput | null = null
 let noiseBuffer: AudioBuffer | null = null
 
-function audioContext(): AudioContext {
-  context ??= new AudioContext()
-  if (context.state === 'suspended') void context.resume()
-  return context
+function audioOutput(): AudioOutput {
+  if (!audio) {
+    const context = new AudioContext()
+    const volume = context.createGain()
+    volume.connect(context.createDynamicsCompressor()).connect(context.destination)
+    audio = { context, volume }
+  }
+  if (audio.context.state === 'suspended') {
+    audio.context.resume().catch((error) => console.error('Resuming audio failed', { error }))
+  }
+  return audio
 }
 
 function whiteNoise(ctx: AudioContext): AudioBuffer {
@@ -235,19 +247,21 @@ function playNoise(ctx: AudioContext, voice: NoiseVoice, start: number, output: 
 
 /** Plays a cue from a sound pack; volume runs from 0 to 100. */
 export function playSound({ cue, pack, volume }: SoundPlayback): void {
-  const ctx = audioContext()
-  const output = ctx.createGain()
-  output.gain.value = (Math.min(100, Math.max(0, volume)) / 100) ** 2 * MASTER_GAIN
-  output.connect(ctx.createDynamicsCompressor()).connect(ctx.destination)
-  const start = ctx.currentTime + 0.02
-  for (const voice of SOUND_PACKS[parseSkinId(pack)][cue]) {
-    switch (voice.kind) {
-      case 'tone':
-        playTone(ctx, voice, start + voice.at, output)
-        break
-      case 'noise':
-        playNoise(ctx, voice, start + voice.at, output)
-        break
+  try {
+    const { context: ctx, volume: output } = audioOutput()
+    output.gain.setValueAtTime((Math.min(100, Math.max(0, volume)) / 100) ** 2 * MASTER_GAIN, ctx.currentTime)
+    const start = ctx.currentTime + 0.02
+    for (const voice of SOUND_PACKS[parseSkinId(pack)][cue]) {
+      switch (voice.kind) {
+        case 'tone':
+          playTone(ctx, voice, start + voice.at, output)
+          break
+        case 'noise':
+          playNoise(ctx, voice, start + voice.at, output)
+          break
+      }
     }
+  } catch (error) {
+    console.error('Playing sound failed', { cue, pack, error })
   }
 }

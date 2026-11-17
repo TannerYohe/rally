@@ -112,6 +112,20 @@ Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the
 
 Settings → Reviews picks the review skill, and the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
 
+### Sounds
+
+Rally plays a short sound for three cues, each with its own sound in every skin:
+
+| Cue | When it plays |
+|---|---|
+| Claude finishes a turn | A review turn ends or errors. A cancelled turn plays nothing. Set it to play after every turn, only when no other review is still running, or never. |
+| A PR needs your attention | A PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. A PR leaving In progress doesn't count, since that only follows your own submit or discard. Drafts and hidden PRs stay quiet. |
+| You approve a PR | A new approval of yours appears on a listed PR, whether you submitted it in Rally or on GitHub. Rally only fetches your own reviews, so other reviewers' approvals don't play it. |
+
+One PR list update plays at most one sound, and an approval outranks a PR needing attention. The first refresh after launch compares against the list Rally cached when it last ran, so changes made while Rally was closed play once.
+
+Settings → Sounds turns sounds on or off, sets the volume, toggles each cue, and plays a preview of each. The sound set follows the skin unless you pick one. The sounds are synthesized with the Web Audio API, so Rally ships no audio files. The main process decides when a cue fires (`src/main/soundCues.ts`) and the window plays it (`src/renderer/src/lib/sounds.ts`), so sounds play only while Rally's window is open.
+
 ### Updates
 
 Settings → About shows the app version, the Electron, Chromium, and Node.js versions, and the data folder. **Check for updates** reads the latest release from the GitHub API without signing in, and gives up after 15 seconds. When the release is newer than the running version, the page shows its date and notes and **Download and install**, which downloads the release asset for this machine and shows progress. A download that receives nothing for 30 seconds fails, and you can try again. Rally only downloads an asset whose name is a plain file name and whose URL, once parsed, is exactly `https://github.com/TannerYohe/rally/releases/download/<tag>/<name>` for the release's tag, with no query or fragment; otherwise the page says why and offers **Check again**.

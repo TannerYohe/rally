@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -178,6 +178,25 @@ describe('prClone', () => {
     expect(diff).toContain('+two')
     expect(diff).toContain('deleted file mode')
     expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('')
+    expect(readdirSync(join(clone.path, '.git')).filter((name) => name.startsWith('rally-uncommitted-'))).toEqual([])
+  })
+
+  it('lists renamed files once and keeps names with spaces or accents unquoted', async () => {
+    const clone = await cloneBranch(join(root, 'session18'), source)
+    commitFile(clone.path, 'move-me.txt', 'moving\n')
+    git(clone.path, 'mv', 'move-me.txt', 'moved.txt')
+    writeFileSync(join(clone.path, 'with space.txt'), 'spaced\n')
+    writeFileSync(join(clone.path, 'résumé.txt'), 'accent\n')
+
+    expect((await uncommittedPaths(clone)).sort()).toEqual(['moved.txt', 'résumé.txt', 'with space.txt'])
+  })
+
+  it('diffs uncommitted edits with a/ and b/ prefixes whatever the clone configures', async () => {
+    const clone = await cloneBranch(join(root, 'session19'), source)
+    git(clone.path, 'config', 'diff.mnemonicPrefix', 'true')
+    writeFileSync(join(clone.path, 'new.txt'), 'new\n')
+
+    expect(await uncommittedDiff(clone)).toContain('diff --git a/new.txt b/new.txt')
   })
 
   it('fast-forwards a clone with no commits of its own on sync', async () => {

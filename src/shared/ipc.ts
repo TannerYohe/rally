@@ -51,7 +51,7 @@ export interface RallyApi {
   cancelAuthorTurn(sessionId: string): Promise<void>
   getAuthorDiff(sessionId: string): Promise<string>
   pushAuthorCommits(sessionId: string): Promise<void>
-  postAuthorReplies(sessionId: string, replies: ReplyPost[]): Promise<void>
+  postAuthorReplies(sessionId: string, replies: ReplyPost[], reRequestReviews: boolean): Promise<void>
   discardAuthorReply(sessionId: string, itemId: string): Promise<void>
   dismissFinding(sessionId: string, itemId: string): Promise<void>
   discardAuthorSession(sessionId: string): Promise<void>

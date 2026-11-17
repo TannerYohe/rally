@@ -6,19 +6,12 @@ import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { authorSessions } from './claude/authorSessions'
 import { reviewSessions } from './claude/reviewSessions'
-import { acknowledgeFeedbackItem, fetchFeedbackItems } from './github/authorFeedback'
+import { fetchFeedbackItems } from './github/authorFeedback'
 import { github, resetGithubClient } from './github/client'
 import { classifyGithubFailure } from './github/failure'
 import { authoredPrList, prList, prLists } from './prList'
 import { configFile } from './store'
 import { appInfo, updater } from './update/updater'
-
-async function acknowledgeFeedback(pr: PrRef, itemId: string): Promise<void> {
-  await acknowledgeFeedbackItem(pr, itemId)
-  authoredPrList.refreshOne(pr.owner, pr.repo, pr.number).catch((error) => {
-    console.error('Authored PR refresh after acknowledging failed', { pr: pr.url, error })
-  })
-}
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, payload)
@@ -59,7 +52,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.discardSession, (_event, id: string) => reviewSessions.discard(id))
   ipcMain.handle(IPC.getAuthorSession, (_event, key: string) => authorSessions.getByPr(key))
   ipcMain.handle(IPC.getFeedbackItems, (_event, pr: PrRef) => fetchFeedbackItems(pr))
-  ipcMain.handle(IPC.acknowledgeFeedback, (_event, pr: PrRef, itemId: string) => acknowledgeFeedback(pr, itemId))
+  ipcMain.handle(IPC.acknowledgeFeedback, (_event, pr: PrRef, itemId: string) => authorSessions.acknowledge(pr, itemId))
   ipcMain.handle(IPC.runAuthorActions, (_event, pr: PrRef, requests: ActionRequest[], note: string) =>
     authorSessions.runActions(pr, requests, note),
   )
@@ -68,7 +61,9 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.cancelAuthorTurn, (_event, id: string) => authorSessions.cancel(id))
   ipcMain.handle(IPC.getAuthorDiff, (_event, id: string) => authorSessions.diff(id))
   ipcMain.handle(IPC.pushAuthorCommits, (_event, id: string) => authorSessions.push(id))
-  ipcMain.handle(IPC.postAuthorReplies, (_event, id: string, replies: ReplyPost[]) => authorSessions.postReplies(id, replies))
+  ipcMain.handle(IPC.postAuthorReplies, (_event, id: string, replies: ReplyPost[], reRequestReviews: boolean) =>
+    authorSessions.postReplies(id, replies, reRequestReviews),
+  )
   ipcMain.handle(IPC.discardAuthorReply, (_event, id: string, itemId: string) => authorSessions.discardReply(id, itemId))
   ipcMain.handle(IPC.dismissFinding, (_event, id: string, itemId: string) => authorSessions.dismissFinding(id, itemId))
   ipcMain.handle(IPC.discardAuthorSession, (_event, id: string) => authorSessions.discard(id))

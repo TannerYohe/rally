@@ -15,7 +15,8 @@ import {
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { cloneBranch, cloneDiff, localCommits, pushClone, RemoteMovedError, syncClone, uncommittedPaths } from '../git/prClone'
-import { fetchFeedbackItems } from '../github/authorFeedback'
+import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
+import { repliedReviewers, requestReviews, reviewersReady, uniqueLogins } from '../github/reviewRequests'
 import { fetchCloneSource, postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
 import { authoredPrList, type SessionState } from '../prList'
 import { authorSessionsDir, configFile } from '../store'
@@ -28,13 +29,14 @@ const INTERRUPTED_PUBLISH_ERROR = 'Rally closed while pushing or posting. Check 
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
 function restoreAuthorSession(stored: AuthorSession): AuthorSession {
-  switch (stored.status) {
+  const session = { ...stored, reviewersToReRequest: stored.reviewersToReRequest ?? [], lastReRequest: stored.lastReRequest ?? null }
+  switch (session.status) {
     case 'running':
-      return { ...stored, status: 'error', error: INTERRUPTED_TURN_ERROR }
+      return { ...session, status: 'error', error: INTERRUPTED_TURN_ERROR }
     case 'submitting':
-      return { ...stored, status: 'error', error: INTERRUPTED_PUBLISH_ERROR }
+      return { ...session, status: 'error', error: INTERRUPTED_PUBLISH_ERROR }
     default:
-      return stored
+      return session
   }
 }
 
@@ -44,6 +46,7 @@ export function findingsFromDrafts(drafts: Drafts, at: string): FeedbackItem[] {
     id: `self-${comment.id}`,
     kind: 'finding',
     author: null,
+    authorIsBot: false,
     avatarUrl: null,
     path: comment.path,
     line: comment.line,
@@ -136,7 +139,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.refreshPr(pr)
   }
 
-  async postReplies(sessionId: string, posts: ReplyPost[]): Promise<void> {
+  async postReplies(sessionId: string, posts: ReplyPost[], reRequestReviews: boolean): Promise<void> {
     this.assertIdle(sessionId)
     const session = this.byId(sessionId)
     if (session.commits.length > 0) throw new Error(PUSH_BEFORE_POSTING_ERROR)
@@ -149,18 +152,30 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.publishing.add(sessionId)
     this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
     let failures = 0
+    const answered: FeedbackItem[] = []
     try {
       for (const post of replies) {
         const posted = await this.postReply(session.pr, items.get(post.itemId)!, post)
         if (posted.error) failures++
+        else answered.push(items.get(post.itemId)!)
         this.patch(sessionId, (s) => ({ posted: { ...s.posted, [post.itemId]: posted } }), true)
       }
+      if (reRequestReviews) this.queueReRequests(sessionId, repliedReviewers(answered))
+      await this.settleReRequests(sessionId)
     } finally {
       this.publishing.delete(sessionId)
       const error = failures > 0 ? `${failures} of ${replies.length} replies failed to post.` : null
       this.patch(sessionId, () => ({ status: error ? 'error' : 'awaiting_feedback', error }), true)
     }
     this.refreshPr(session.pr)
+  }
+
+  /** Reacts 👍 to a comment, then re-requests any queued reviewer that leaves with nothing unanswered. */
+  async acknowledge(pr: PrRef, itemId: string): Promise<void> {
+    await acknowledgeFeedbackItem(pr, itemId)
+    const session = this.getByPr(prKey(pr.owner, pr.repo, pr.number))
+    if (session && !this.isTurnRunning(session.id) && !this.publishing.has(session.id)) await this.settleReRequests(session.id)
+    this.refreshPr(pr)
   }
 
   discardReply(sessionId: string, itemId: string): void {
@@ -236,6 +251,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         uncommitted: [],
         lastPush: null,
         remoteMoved: false,
+        reviewersToReRequest: [],
+        lastReRequest: null,
       })
     )
   }
@@ -294,6 +311,26 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     } catch (error) {
       console.error('Resolving a thread after replying failed', { pr: pr.url, itemId: item.id, error })
       return { ...base, url, error: null, resolveError: errorMessage(error) }
+    }
+  }
+
+  private queueReRequests(sessionId: string, reviewers: string[]): void {
+    this.patch(sessionId, (s) => ({ reviewersToReRequest: uniqueLogins([...s.reviewersToReRequest, ...reviewers]) }), true)
+  }
+
+  private async settleReRequests(sessionId: string): Promise<void> {
+    const { pr, reviewersToReRequest } = this.byId(sessionId)
+    if (reviewersToReRequest.length === 0) return
+    let ready: string[] = []
+    try {
+      const split = reviewersReady(reviewersToReRequest, await fetchFeedbackItems(pr))
+      ready = split.ready
+      if (ready.length > 0) await requestReviews(pr, ready)
+      this.patch(sessionId, () => ({ reviewersToReRequest: split.waiting }), true)
+      if (ready.length > 0) this.patch(sessionId, () => ({ lastReRequest: { at: now(), reviewers: ready, error: null } }), true)
+    } catch (error) {
+      console.error('Re-requesting reviews failed', { pr: pr.url, reviewers: ready, error })
+      this.patch(sessionId, () => ({ lastReRequest: { at: now(), reviewers: ready, error: errorMessage(error) } }), true)
     }
   }
 

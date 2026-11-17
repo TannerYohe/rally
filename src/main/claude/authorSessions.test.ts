@@ -16,6 +16,7 @@ const thread = (id: string): FeedbackItem => ({
   id,
   kind: 'thread',
   author: 'bob',
+  authorIsBot: false,
   avatarUrl: null,
   path: 'a.ts',
   line: 3,
@@ -58,6 +59,8 @@ function stored(number: number, overrides: Partial<AuthorSession> = {}): AuthorS
     uncommitted: [],
     lastPush: null,
     remoteMoved: false,
+    reviewersToReRequest: [],
+    lastReRequest: null,
     ...overrides,
   }
 }
@@ -66,6 +69,8 @@ const mocks = vi.hoisted(() => ({
   stored: [] as AuthorSession[],
   query: vi.fn(),
   fetchFeedbackItems: vi.fn(),
+  acknowledgeFeedbackItem: vi.fn(),
+  requestReviews: vi.fn(),
   fetchCloneSource: vi.fn(),
   postAuthorReply: vi.fn(),
   resolveFeedbackThread: vi.fn(),
@@ -83,7 +88,11 @@ vi.mock('../store', () => ({
   authorSessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
 }))
 vi.mock('../prList', () => ({ authoredPrList: { refreshOne: mocks.refreshOne } }))
-vi.mock('../github/authorFeedback', () => ({ fetchFeedbackItems: mocks.fetchFeedbackItems }))
+vi.mock('../github/authorFeedback', () => ({ fetchFeedbackItems: mocks.fetchFeedbackItems, acknowledgeFeedbackItem: mocks.acknowledgeFeedbackItem }))
+vi.mock('../github/reviewRequests', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../github/reviewRequests')>()),
+  requestReviews: mocks.requestReviews,
+}))
 vi.mock('../github/authorReplies', () => ({
   fetchCloneSource: mocks.fetchCloneSource,
   postAuthorReply: mocks.postAuthorReply,
@@ -116,6 +125,12 @@ mocks.stored = [
   stored(3, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
   stored(4, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
   stored(5, { items: [thread('T1'), thread('T2')], responses: { T1: response('T1', 'Done'), T2: response('T2', 'Nope') } }),
+  stored(7, {
+    items: [thread('T1'), { ...thread('T2'), author: 'carol' }, { ...thread('T3'), author: 'carol' }, { ...thread('B1'), authorIsBot: true, author: 'scanner' }],
+    responses: { T1: response('T1', 'Done'), T2: response('T2', 'Yes'), B1: response('B1', 'False positive') },
+  }),
+  stored(8, { reviewersToReRequest: ['carol'] }),
+  stored(10, { reviewersToReRequest: ['dan'] }),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
 ]
 
@@ -132,7 +147,16 @@ function finishTurn(during: () => void = () => {}) {
 }
 
 beforeEach(() => {
-  for (const mock of [mocks.query, mocks.fetchFeedbackItems, mocks.postAuthorReply, mocks.resolveFeedbackThread, mocks.pushClone]) mock.mockReset()
+  for (const mock of [
+    mocks.query,
+    mocks.fetchFeedbackItems,
+    mocks.postAuthorReply,
+    mocks.resolveFeedbackThread,
+    mocks.pushClone,
+    mocks.requestReviews,
+    mocks.acknowledgeFeedbackItem,
+  ])
+    mock.mockReset()
   mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'u', branch: 'feature', baseUrl: 'u', baseBranch: 'main' })
   mocks.cloneBranch.mockResolvedValue(CLONE)
   mocks.localCommits.mockResolvedValue([])
@@ -212,7 +236,7 @@ describe('postReplies', () => {
     await authorSessions.postReplies('author-5', [
       { itemId: 'T1', body: ' Done ', resolve: true },
       { itemId: 'T2', body: 'Nope', resolve: false },
-    ])
+    ], false)
     expect(mocks.postAuthorReply).toHaveBeenCalledWith(pr(5), expect.objectContaining({ id: 'T1' }), 'Done')
     expect(mocks.resolveFeedbackThread).toHaveBeenCalledWith('T1')
     expect(session(5).posted.T1).toMatchObject({ body: 'Done', resolved: true, error: null })
@@ -221,8 +245,53 @@ describe('postReplies', () => {
   })
 
   it('refuses to post while commits are unpushed', async () => {
-    await expect(authorSessions.postReplies('author-6', [{ itemId: 'T1', body: 'Done', resolve: false }])).rejects.toThrow(PUSH_BEFORE_POSTING_ERROR)
+    await expect(authorSessions.postReplies('author-6', [{ itemId: 'T1', body: 'Done', resolve: false }], true)).rejects.toThrow(PUSH_BEFORE_POSTING_ERROR)
     expect(mocks.postAuthorReply).not.toHaveBeenCalled()
+  })
+})
+
+describe('re-requesting reviews', () => {
+  it('re-requests people I replied to once none of their comments are left unanswered', async () => {
+    mocks.postAuthorReply.mockResolvedValue('https://github.com/acme/api/pull/7#r')
+    mocks.fetchFeedbackItems.mockResolvedValue([
+      { ...thread('T1'), answered: true },
+      { ...thread('T2'), author: 'carol', answered: true },
+      { ...thread('T3'), author: 'carol', answered: false },
+    ])
+    await authorSessions.postReplies(
+      'author-7',
+      ['T1', 'T2', 'B1'].map((itemId) => ({ itemId, body: 'reply', resolve: false })),
+      true,
+    )
+    expect(mocks.requestReviews).toHaveBeenCalledWith(pr(7), ['bob'])
+    expect(session(7)).toMatchObject({ reviewersToReRequest: ['carol'], lastReRequest: { reviewers: ['bob'], error: null } })
+  })
+
+  it('leaves the queue alone when posting without re-requesting', async () => {
+    mocks.postAuthorReply.mockResolvedValue('https://github.com/acme/api/pull/7#r')
+    await authorSessions.postReplies('author-7', [{ itemId: 'T1', body: 'again', resolve: false }], false)
+    expect(mocks.requestReviews).toHaveBeenCalledTimes(0)
+  })
+
+  it('re-requests a queued reviewer when an acknowledgment answers their last comment, but never queues one itself', async () => {
+    mocks.fetchFeedbackItems.mockResolvedValue([{ ...thread('T3'), author: 'carol', answered: true }])
+    await authorSessions.acknowledge(pr(8), 'T3')
+    expect(mocks.acknowledgeFeedbackItem).toHaveBeenCalledWith(pr(8), 'T3')
+    expect(mocks.requestReviews).toHaveBeenCalledWith(pr(8), ['carol'])
+    expect(session(8).reviewersToReRequest).toEqual([])
+
+    await authorSessions.acknowledge(pr(9), 'T9')
+    expect(mocks.requestReviews).toHaveBeenCalledTimes(1)
+  })
+
+  it('records a failed re-request and keeps the reviewer queued', async () => {
+    mocks.fetchFeedbackItems.mockResolvedValue([])
+    mocks.requestReviews.mockRejectedValue(new Error('Reviews may only be requested from collaborators'))
+    await authorSessions.acknowledge(pr(10), 'T4')
+    expect(session(10)).toMatchObject({
+      reviewersToReRequest: ['dan'],
+      lastReRequest: { reviewers: ['dan'], error: 'Reviews may only be requested from collaborators' },
+    })
   })
 })
 

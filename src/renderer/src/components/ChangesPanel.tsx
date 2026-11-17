@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { shortSha } from '@shared/authorSession'
 import type { AuthorSession } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { age, fullTime } from '../lib/format'
@@ -76,7 +77,7 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
           <ul className="space-y-1 text-sm">
             {commits.map((commit) => (
               <li key={commit.oid} className="flex gap-2">
-                <span className="font-mono text-ink-500">{commit.oid.slice(0, 7)}</span>
+                <span className="font-mono text-ink-500">{shortSha(commit.oid)}</span>
                 <span className="text-ink-200">{commit.subject}</span>
               </li>
             ))}
@@ -89,7 +90,7 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
 
       {lastPush && (
         <p className="text-xs text-ink-500" title={fullTime(lastPush.at)}>
-          Last pushed {lastPush.commits.length} commit(s) {age(lastPush.at)} ago, head <span className="font-mono">{lastPush.oid.slice(0, 7)}</span>.
+          Last pushed {lastPush.commits.length} commit(s) {age(lastPush.at)} ago, head <span className="font-mono">{shortSha(lastPush.oid)}</span>.
         </p>
       )}
     </div>

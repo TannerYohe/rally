@@ -24,7 +24,7 @@ import { fullTime } from '../lib/format'
 import { useActionRunner, usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastSuccessfulTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
 import { emptyReviewTabs, REVIEW_TAB_LABELS, REVIEW_TABS, type ReviewTab } from '../lib/reviewTabs'
-import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 export function PrDetail() {
   const params = useParams()
@@ -162,13 +162,13 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         actions={
           <>
             {session.status === 'running' && (
-              <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={() => window.rally.cancelReview(session.id)}>
+              <button className={SECONDARY_BUTTON_CLASS} onClick={() => window.rally.cancelReview(session.id)}>
                 Cancel
               </button>
             )}
             {!busy && !submitted && (
               <button
-                className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700 disabled:opacity-40"
+                className={SECONDARY_BUTTON_CLASS}
                 disabled={resolvingThreads}
                 onClick={startOver}
               >

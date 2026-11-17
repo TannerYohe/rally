@@ -9,7 +9,7 @@ const run = promisify(execFile)
 const GH_CREDENTIAL_HELPER = '!gh auth git-credential'
 const GH_CREDENTIALS = ['-c', 'credential.helper=', '-c', `credential.helper=${GH_CREDENTIAL_HELPER}`]
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
-export const MAX_DIFF_CHARS = 400_000
+const MAX_DIFF_CHARS = 400_000
 const FIELD_SEPARATOR = '\x1f'
 
 export const CLONE_DIR_NAME = 'repo'
@@ -135,7 +135,7 @@ async function conflictedFiles(clone: CloneInfo): Promise<string[]> {
 }
 
 /** Merges the remote branch into the clone, leaving the merge in progress and throwing MergeConflictError when it conflicts. */
-export async function mergeRemote(clone: CloneInfo): Promise<void> {
+async function mergeRemote(clone: CloneInfo): Promise<void> {
   try {
     await git(clone.path, ['merge', '--no-edit', `origin/${clone.branch}`])
   } catch (error) {

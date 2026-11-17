@@ -50,7 +50,7 @@ const ITEM_SOURCE_LABELS: Record<FeedbackItemKind, string> = {
 }
 
 function itemSection(item: FeedbackItem, request: ActionRequest): string {
-  const source = item.kind === 'finding' ? 'Self-review finding' : `${ITEM_SOURCE_LABELS[item.kind]} by @${item.author ?? 'ghost'}`
+  const source = item.author ? `${ITEM_SOURCE_LABELS[item.kind]} by @${item.author}` : ITEM_SOURCE_LABELS[item.kind]
   const lines = [
     `## Item ${item.id}: ${RESPONSE_ACTION_LABELS[request.action]}`,
     `${source} on ${itemLocation(item)}${item.outdated ? ' (outdated)' : ''}${item.severity ? `, severity ${item.severity}` : ''}`,

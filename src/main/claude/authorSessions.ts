@@ -16,7 +16,7 @@ import {
 import { errorMessage } from '@shared/errors'
 import { cloneBranch, cloneDiff, localCommits, pushClone, RemoteMovedError, syncClone, uncommittedPaths } from '../git/prClone'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
-import { repliedReviewers, requestReviews, reviewersReady, uniqueLogins } from '../github/reviewRequests'
+import { fetchApprovers, repliedReviewers, requestReviews, reviewersReady, uniqueLogins } from '../github/reviewRequests'
 import { fetchCloneSource, postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
 import { authoredPrList, type SessionState } from '../prList'
 import { authorSessionsDir, configFile } from '../store'
@@ -323,7 +323,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (reviewersToReRequest.length === 0) return
     let ready: string[] = []
     try {
-      const split = reviewersReady(reviewersToReRequest, await fetchFeedbackItems(pr))
+      const [items, approvers] = await Promise.all([fetchFeedbackItems(pr), fetchApprovers(pr)])
+      const split = reviewersReady(reviewersToReRequest, items, approvers)
       ready = split.ready
       if (ready.length > 0) await requestReviews(pr, ready)
       this.patch(sessionId, () => ({ reviewersToReRequest: split.waiting }), true)

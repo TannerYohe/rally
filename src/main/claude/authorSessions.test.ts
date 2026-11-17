@@ -71,6 +71,7 @@ const mocks = vi.hoisted(() => ({
   fetchFeedbackItems: vi.fn(),
   acknowledgeFeedbackItem: vi.fn(),
   requestReviews: vi.fn(),
+  fetchApprovers: vi.fn(),
   fetchCloneSource: vi.fn(),
   postAuthorReply: vi.fn(),
   resolveFeedbackThread: vi.fn(),
@@ -92,6 +93,7 @@ vi.mock('../github/authorFeedback', () => ({ fetchFeedbackItems: mocks.fetchFeed
 vi.mock('../github/reviewRequests', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../github/reviewRequests')>()),
   requestReviews: mocks.requestReviews,
+  fetchApprovers: mocks.fetchApprovers,
 }))
 vi.mock('../github/authorReplies', () => ({
   fetchCloneSource: mocks.fetchCloneSource,
@@ -131,6 +133,7 @@ mocks.stored = [
   }),
   stored(8, { reviewersToReRequest: ['carol'] }),
   stored(10, { reviewersToReRequest: ['dan'] }),
+  stored(11, { reviewersToReRequest: ['erin', 'frank'] }),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
 ]
 
@@ -157,6 +160,7 @@ beforeEach(() => {
     mocks.acknowledgeFeedbackItem,
   ])
     mock.mockReset()
+  mocks.fetchApprovers.mockResolvedValue([])
   mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'u', branch: 'feature', baseUrl: 'u', baseBranch: 'main' })
   mocks.cloneBranch.mockResolvedValue(CLONE)
   mocks.localCommits.mockResolvedValue([])
@@ -282,6 +286,14 @@ describe('re-requesting reviews', () => {
 
     await authorSessions.acknowledge(pr(9), 'T9')
     expect(mocks.requestReviews).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops reviewers who already approved instead of re-requesting them', async () => {
+    mocks.fetchFeedbackItems.mockResolvedValue([])
+    mocks.fetchApprovers.mockResolvedValue(['Erin'])
+    await authorSessions.acknowledge(pr(11), 'T5')
+    expect(mocks.requestReviews).toHaveBeenCalledWith(pr(11), ['frank'])
+    expect(session(11).reviewersToReRequest).toEqual([])
   })
 
   it('records a failed re-request and keeps the reviewer queued', async () => {

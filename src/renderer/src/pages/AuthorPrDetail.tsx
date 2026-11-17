@@ -279,7 +279,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
           <div className="flex items-center justify-end gap-3 rounded-xl bg-ink-900/60 px-4 py-3 ring-1 ring-white/5">
             <label
               className="mr-auto flex items-center gap-1.5 text-xs text-ink-400"
-              title="Once a person's comments all have a reply or reaction from you, Rally re-requests their review. A 👍 alone never triggers it."
+              title="Once a person's comments all have a reply or reaction from you, Rally re-requests their review, unless they already approved. A 👍 alone never triggers it."
             >
               <input type="checkbox" checked={reRequestReviews} disabled={busy} onChange={(e) => setReRequestReviews(e.target.checked)} />
               Re-request review from people I reply to

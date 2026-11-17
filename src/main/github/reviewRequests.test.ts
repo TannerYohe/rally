@@ -21,7 +21,12 @@ describe('reviewersReady', () => {
       { author: 'bob', answered: true },
       { author: 'carol', answered: false },
     ]
-    expect(reviewersReady(['bob', 'Carol'], open)).toEqual({ ready: ['bob'], waiting: ['Carol'] })
+    expect(reviewersReady(['bob', 'Carol'], open, [])).toEqual({ ready: ['bob'], waiting: ['Carol'], approved: [] })
+  })
+
+  it('skips reviewers who already approved, whether or not they are still owed a response', () => {
+    const open = [{ author: 'carol', answered: false }]
+    expect(reviewersReady(['bob', 'carol', 'dan'], open, ['Bob', 'carol'])).toEqual({ ready: ['dan'], waiting: [], approved: ['bob', 'carol'] })
   })
 })
 

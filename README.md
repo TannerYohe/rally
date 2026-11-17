@@ -74,7 +74,7 @@ Hidden PRs leave the main list and the phase counts and collect in a collapsed *
 
 ### Phases
 
-In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads. A reply-only review that Rally submitted still counts, since it is a review of the PR. Rally keeps the ids of the reviews it submits in `rally-reviews.json`, so this holds after a follow-up review or **Start over** replaces the session. Rally reads your reviews 20 at a time, newest first, and when a page holds only thread replies it reads older pages until it finds a real review, up to 10 pages (200 reviews). Pending drafts and dismissed reviews don't stop the search, since they don't count either. If none turns up, the PR counts as unreviewed. If an older page fails to load, Rally computes the phase from the reviews it already has.
+In progress comes from Rally's own review sessions and takes precedence. The other phases come from GitHub, where only your submitted reviews count. Pending (unsubmitted) and dismissed reviews are ignored, and so are thread replies: Comment reviews with an empty body whose comments all reply to existing threads. A reply-only review that Rally submitted still counts, since it is a review of the PR. Rally keeps the ids of the reviews it submits in `rally-reviews.json`, so this holds after a follow-up review or **Start over** replaces the session. Rally reads your reviews 20 at a time, newest first, and when a page holds only thread replies it reads older pages until it finds a real review, up to 10 pages (200 reviews). Pending drafts and dismissed reviews don't stop the search, since they don't count either. If none turns up, the PR counts as unreviewed. If an older page fails to load, Rally computes the phase from the reviews it already has. Paging stops at your newest review that counts, so an approval more than 20 reviews back can fall out of view: if you approve, reply on 20 or more threads, then leave a Comment review, the PR shows Pending changes instead of Approved.
 
 | Phase | Rule |
 |---|---|
@@ -84,7 +84,7 @@ In progress comes from Rally's own review sessions and takes precedence. The oth
 | Approved | Your latest approval or change request is an approval, and nothing changed since. Comment-only reviews don't change it. |
 | Pending changes | Anything else: you reviewed and nothing new has happened. |
 
-The logic lives in `src/main/github/phase.ts`.
+Phase rules live in `src/main/github/phase.ts`, and which of your reviews Rally fetches lives in `src/main/github/queries.ts`.
 
 ### Review skill
 

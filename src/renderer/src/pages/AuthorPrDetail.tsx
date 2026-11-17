@@ -10,7 +10,7 @@ import { Markdown } from '../components/Markdown'
 import { PrHeader } from '../components/PrHeader'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
-import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, replyPosts, type AuthorTab } from '../lib/authorView'
+import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
 import { age, clockTime, fullTime } from '../lib/format'
 import { useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
@@ -58,6 +58,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const tab = chosenTab ?? (busy ? 'activity' : 'feedback')
 
   const rows = feedbackRows(feedback.items, session)
+  const { open: openRows, waiting: waitingRows } = splitWaitingRows(rows)
   const requests = Object.entries(picks).map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
   const postBlocked = session && session.commits.length > 0 ? PUSH_BEFORE_POSTING_ERROR : null
@@ -102,6 +103,11 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
       feedback.reload()
     })
   }
+  const acknowledge = (itemId: string) =>
+    run(async () => {
+      await window.rally.acknowledgeFeedback(prRef, itemId)
+      feedback.reload()
+    })
   const startOver = () => {
     if (!session || !window.confirm('Discard this session, its clone, unpushed commits, and unposted replies?')) return
     void run(async () => {
@@ -110,8 +116,28 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
     })
   }
 
+  const card = (row: FeedbackRow) => {
+    const id = row.item.id
+    return (
+      <FeedbackCard
+        key={id}
+        row={row}
+        pick={picks[id]}
+        replyEdit={replyEdits[id]}
+        resolve={resolve[id] ?? false}
+        disabled={busy}
+        onPick={(pick) => setPicks(({ [id]: _removed, ...rest }) => (pick ? { ...rest, [id]: pick } : rest))}
+        onReplyEdit={(body) => setReplyEdits(({ [id]: _removed, ...rest }) => (body === undefined ? rest : { ...rest, [id]: body }))}
+        onResolve={(value) => setResolve((current) => ({ ...current, [id]: value }))}
+        onDropReply={() => session && run(() => window.rally.discardAuthorReply(session.id, id))}
+        onDismiss={() => session && run(() => window.rally.dismissFinding(session.id, id))}
+        onAcknowledge={() => acknowledge(id)}
+      />
+    )
+  }
+
   const badges: Record<AuthorTab, ReactNode> = {
-    feedback: rows.length > 0 && <TabCount count={rows.length} />,
+    feedback: openRows.length > 0 && <TabCount count={openRows.length} />,
     activity: busy && <BusyDot className="h-2 w-2 bg-primary-400" />,
     changes: session && session.commits.length > 0 && <TabCount count={session.commits.length} />,
     report: session?.selfReview && (
@@ -179,26 +205,21 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
         {rows.length === 0 ? (
           <EmptyTab>{feedback.loading ? 'Loading comments…' : 'No open comments. Run a self-review to look for problems before reviewers do.'}</EmptyTab>
         ) : (
-          <ul className="space-y-3">
-            {rows.map((row) => {
-              const id = row.item.id
-              return (
-                <FeedbackCard
-                  key={id}
-                  row={row}
-                  pick={picks[id]}
-                  replyEdit={replyEdits[id]}
-                  resolve={resolve[id] ?? false}
-                  disabled={busy}
-                  onPick={(pick) => setPicks(({ [id]: _removed, ...rest }) => (pick ? { ...rest, [id]: pick } : rest))}
-                  onReplyEdit={(body) => setReplyEdits(({ [id]: _removed, ...rest }) => (body === undefined ? rest : { ...rest, [id]: body }))}
-                  onResolve={(value) => setResolve((current) => ({ ...current, [id]: value }))}
-                  onDropReply={() => session && run(() => window.rally.discardAuthorReply(session.id, id))}
-                  onDismiss={() => session && run(() => window.rally.dismissFinding(session.id, id))}
-                />
-              )
-            })}
-          </ul>
+          <div className="space-y-3">
+            {openRows.length > 0 ? (
+              <ul className="space-y-3">{openRows.map(card)}</ul>
+            ) : (
+              <EmptyTab>Every open comment has your response. They wait on the reviewers below.</EmptyTab>
+            )}
+            {waitingRows.length > 0 && (
+              <details className="space-y-3">
+                <summary className="cursor-pointer text-xs text-ink-500 hover:text-ink-300">
+                  {waitingRows.length} waiting on reviewers to resolve
+                </summary>
+                <ul className="mt-3 space-y-3">{waitingRows.map(card)}</ul>
+              </details>
+            )}
+          </div>
         )}
       </TabPanel>
 

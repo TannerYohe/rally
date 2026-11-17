@@ -81,9 +81,10 @@ interface Props {
   onResolve(resolve: boolean): void
   onDropReply(): void
   onDismiss(): void
+  onAcknowledge(): void
 }
 
-export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, onReplyEdit, onResolve, onDropReply, onDismiss }: Props) {
+export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, onReplyEdit, onResolve, onDropReply, onDismiss, onAcknowledge }: Props) {
   const { item, response, posted, closedOnGithub } = row
   const isFinding = item.kind === 'finding'
   const actions = isFinding ? FINDING_ACTIONS : RESPONSE_ACTIONS
@@ -130,6 +131,16 @@ export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, 
           {isFinding && (
             <button className="text-xs text-ink-500 hover:text-rose-300 disabled:opacity-40" disabled={disabled} onClick={onDismiss}>
               Dismiss
+            </button>
+          )}
+          {!isFinding && !item.answered && item.reactionSubjectId && (
+            <button
+              className="rounded-md px-2 py-1 text-xs text-ink-400 ring-1 ring-ink-800 hover:bg-ink-800 hover:text-ink-100 disabled:opacity-40"
+              disabled={disabled}
+              title="React 👍 on GitHub. That counts as your response, so the comment stops needing one."
+              onClick={onAcknowledge}
+            >
+              👍 Acknowledge
             </button>
           )}
           {pick && (

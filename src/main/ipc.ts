@@ -6,12 +6,19 @@ import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { authorSessions } from './claude/authorSessions'
 import { reviewSessions } from './claude/reviewSessions'
-import { fetchFeedbackItems } from './github/authorFeedback'
+import { acknowledgeFeedbackItem, fetchFeedbackItems } from './github/authorFeedback'
 import { github, resetGithubClient } from './github/client'
 import { classifyGithubFailure } from './github/failure'
 import { authoredPrList, prList, prLists } from './prList'
 import { configFile } from './store'
 import { appInfo, updater } from './update/updater'
+
+async function acknowledgeFeedback(pr: PrRef, itemId: string): Promise<void> {
+  await acknowledgeFeedbackItem(pr, itemId)
+  authoredPrList.refreshOne(pr.owner, pr.repo, pr.number).catch((error) => {
+    console.error('Authored PR refresh after acknowledging failed', { pr: pr.url, error })
+  })
+}
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, payload)
@@ -52,6 +59,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.discardSession, (_event, id: string) => reviewSessions.discard(id))
   ipcMain.handle(IPC.getAuthorSession, (_event, key: string) => authorSessions.getByPr(key))
   ipcMain.handle(IPC.getFeedbackItems, (_event, pr: PrRef) => fetchFeedbackItems(pr))
+  ipcMain.handle(IPC.acknowledgeFeedback, (_event, pr: PrRef, itemId: string) => acknowledgeFeedback(pr, itemId))
   ipcMain.handle(IPC.runAuthorActions, (_event, pr: PrRef, requests: ActionRequest[], note: string) =>
     authorSessions.runActions(pr, requests, note),
   )

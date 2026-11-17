@@ -1,4 +1,4 @@
-import { canReplyTo, pendingReplies } from '@shared/authorSession'
+import { canReplyTo, isReplyPending, pendingReplies } from '@shared/authorSession'
 import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, SessionStatus } from '@shared/types'
 
 export interface FeedbackRow {
@@ -23,6 +23,17 @@ export function feedbackRows(open: FeedbackItem[], session: SessionView | null):
   const pendingIds = new Set(pendingReplies(session).map((r) => r.itemId))
   const closed = session.items.filter((item) => !openIds.has(item.id) && pendingIds.has(item.id))
   return [...open.map((item) => row(item, false)), ...closed.map((item) => row(item, true)), ...(session.selfReview?.findings ?? []).map((item) => row(item, false))]
+}
+
+export interface SplitRows {
+  open: FeedbackRow[]
+  waiting: FeedbackRow[]
+}
+
+/** Separates threads that wait on the reviewer, because my reply or reaction is last and no new reply is pending, from the rest. */
+export function splitWaitingRows(rows: FeedbackRow[]): SplitRows {
+  const isWaiting = (row: FeedbackRow) => row.item.answered && !(row.response && isReplyPending(row.response, row.posted))
+  return { open: rows.filter((row) => !isWaiting(row)), waiting: rows.filter(isWaiting) }
 }
 
 /** Returns the replies Post replies sends: every pending reply on a thread or review, with the user's edits and resolve choices. */

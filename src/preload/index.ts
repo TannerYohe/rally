@@ -27,6 +27,7 @@ const api: RallyApi = {
   onSessionChanged: (listener) => subscribe(IPC.sessionChanged, listener),
   getAuthorSession: (key) => ipcRenderer.invoke(IPC.getAuthorSession, key),
   getFeedbackItems: (pr) => ipcRenderer.invoke(IPC.getFeedbackItems, pr),
+  acknowledgeFeedback: (pr, itemId) => ipcRenderer.invoke(IPC.acknowledgeFeedback, pr, itemId),
   runAuthorActions: (pr, requests, note) => ipcRenderer.invoke(IPC.runAuthorActions, pr, requests, note),
   startSelfReview: (pr) => ipcRenderer.invoke(IPC.startSelfReview, pr),
   sendAuthorFeedback: (id, message) => ipcRenderer.invoke(IPC.sendAuthorFeedback, id, message),

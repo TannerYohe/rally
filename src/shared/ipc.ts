@@ -44,6 +44,7 @@ export interface RallyApi {
   onSessionChanged(listener: (session: ReviewSession) => void): () => void
   getAuthorSession(prKey: string): Promise<AuthorSession | null>
   getFeedbackItems(pr: PrRef): Promise<FeedbackItem[]>
+  acknowledgeFeedback(pr: PrRef, itemId: string): Promise<void>
   runAuthorActions(pr: PrRef, requests: ActionRequest[], note: string): Promise<AuthorSession>
   startSelfReview(pr: PrRef): Promise<AuthorSession>
   sendAuthorFeedback(sessionId: string, message: string): Promise<void>
@@ -84,6 +85,7 @@ export const IPC = {
   sessionChanged: 'session:changed',
   getAuthorSession: 'author:get',
   getFeedbackItems: 'author:feedback-items',
+  acknowledgeFeedback: 'author:acknowledge',
   runAuthorActions: 'author:run',
   startSelfReview: 'author:self-review',
   sendAuthorFeedback: 'author:feedback',

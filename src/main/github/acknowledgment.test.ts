@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pendingConversation, threadAcknowledged, type RawConversationComment, type RawReviewBody } from './acknowledgment'
+import { linksAnchor, pendingConversation, threadAcknowledged, type RawConversationComment, type RawReviewBody } from './acknowledgment'
 
 const PR = 'https://github.com/acme/api/pull/1'
 
@@ -47,9 +47,17 @@ describe('pendingConversation', () => {
       review(12, 'dan', 'LGTM', { state: 'APPROVED' }),
       review(13, 'copilot', 'Copilot reviewed 4 files', { author: { login: 'copilot', __typename: 'Bot' } }),
     ]
-    const mine = [...comments, comment(7, 'me', 'Re pullrequestreview-12: thanks!')]
+    const mine = [...comments, comment(7, 'me', 'Re #pullrequestreview-12: thanks!'), comment(8, 'me', `See ${PR}#issuecomment-10`)]
     const pending = pendingConversation(mine, reviews, 'me')
     expect(pending.comments.map((c) => c.url)).toEqual([`${PR}#issuecomment-1`])
     expect(pending.reviews.map((r) => r.url)).toEqual([`${PR}#pullrequestreview-10`])
+  })
+})
+
+describe('linksAnchor', () => {
+  it('matches the anchor but not a longer id with the same prefix', () => {
+    expect(linksAnchor(`${PR}#issuecomment-12`, '#issuecomment-1')).toBe(false)
+    expect(linksAnchor(`${PR}#issuecomment-12 and ${PR}#issuecomment-1)`, '#issuecomment-1')).toBe(true)
+    expect(linksAnchor('see #issuecomment-1', '#issuecomment-1')).toBe(true)
   })
 })

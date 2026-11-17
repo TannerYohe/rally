@@ -43,15 +43,19 @@ export function threadAcknowledged(last: RawThreadTail | undefined, viewer: stri
   return Boolean(last && (isViewer(last.author, viewer) || viewerReacted(last.reactionGroups)))
 }
 
-function anchorOf(url: string): string | null {
-  return URL.parse(url)?.hash.slice(1) || null
+/** Returns whether the text links `#anchor` itself, not a longer id that starts with the same digits. */
+export function linksAnchor(text: string, anchor: string): boolean {
+  for (let at = text.indexOf(anchor); at !== -1; at = text.indexOf(anchor, at + 1)) {
+    if (!/[0-9]/.test(text[at + anchor.length] ?? '')) return true
+  }
+  return false
 }
 
 /** Returns whether I reacted to a comment or a comment of mine links to it. */
 function conversationAcknowledged(target: { url: string; reactionGroups?: RawReactionGroup[] | null }, mine: RawConversationComment[]): boolean {
   if (viewerReacted(target.reactionGroups)) return true
-  const anchor = anchorOf(target.url)
-  return mine.some((comment) => comment.body.includes(target.url) || (anchor !== null && comment.body.includes(anchor)))
+  const anchor = URL.parse(target.url)?.hash
+  return Boolean(anchor) && mine.some((comment) => linksAnchor(comment.body, anchor!))
 }
 
 function needsAcknowledgment(item: { body: string; author: RawActor | null }, viewer: string): boolean {

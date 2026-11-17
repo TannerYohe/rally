@@ -4,7 +4,7 @@ import { github, timeoutRequest } from './client'
 import {
   prCommentsField,
   reviewSummariesField,
-  THREAD_COMMENTS_FIELD,
+  threadCommentsField,
   threadsField,
   type RawAuthor,
   type RawComment,
@@ -14,7 +14,7 @@ import {
   type RawThread,
 } from './feedbackFields'
 
-const PAGE_LIMIT = 20
+export const PAGE_LIMIT = 20
 
 const pullRequestQuery = (fields: string) => `
   query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
@@ -22,7 +22,17 @@ const pullRequestQuery = (fields: string) => `
   }
 `
 
-const THREADS = threadsField('first: 50, after: $cursor', '', THREAD_COMMENTS_FIELD)
+const THREADS = threadsField('first: 50, after: $cursor', '', threadCommentsField('first: 100'))
+
+const THREAD_COMMENTS_QUERY = `
+  query($id: ID!, $cursor: String) {
+    node(id: $id) { ... on PullRequestReviewThread { ${threadCommentsField('first: 100, after: $cursor')} } }
+  }
+`
+
+interface ThreadCommentsResponse {
+  node: { comments: RawConnection<RawComment> } | null
+}
 const PR_COMMENTS = prCommentsField('last: 100, before: $cursor')
 const REVIEWS = reviewSummariesField('last: 100, before: $cursor')
 
@@ -40,7 +50,7 @@ function feedbackComment(comment: { url: string; body: string; author: RawAuthor
   return { author: comment.author?.login ?? null, avatarUrl: comment.author?.avatarUrl ?? null, body: comment.body, createdAt, url: comment.url }
 }
 
-/** Returns the thread's opening comments plus its newest comment when that falls past the first page. */
+/** Returns the thread's comments, adding its newest comment when paging stopped short of it. */
 function threadComments(thread: RawThread): RawComment[] {
   const opening = thread.comments?.nodes ?? []
   const [newest] = thread.latest.nodes
@@ -131,8 +141,18 @@ export async function fetchFeedbackItems(pr: PrRef): Promise<FeedbackItem[]> {
     return response.repository.pullRequest
   }
   const first = await page<keyof FeedbackPage>('reviewThreads', `${THREADS} ${PR_COMMENTS} ${REVIEWS}`, null)
+  const threadComments = async (thread: RawThread): Promise<RawThread> => {
+    if (!thread.comments?.pageInfo.hasNextPage) return thread
+    const nodes = await allNodes(thread.comments, afterCursor, async (cursor) => {
+      const response = await gh.graphql<ThreadCommentsResponse>(THREAD_COMMENTS_QUERY, { id: thread.id, cursor, request: timeoutRequest() })
+      return response.node?.comments ?? { pageInfo: {}, nodes: [] }
+    })
+    return { ...thread, comments: { pageInfo: {}, nodes } }
+  }
   const [threads, comments, reviews] = await Promise.all([
-    allNodes(first.reviewThreads, afterCursor, async (cursor) => (await page('reviewThreads', THREADS, cursor)).reviewThreads),
+    allNodes(first.reviewThreads, afterCursor, async (cursor) => (await page('reviewThreads', THREADS, cursor)).reviewThreads).then((all) =>
+      Promise.all(all.map(threadComments)),
+    ),
     allNodes(first.comments, beforeCursor, async (cursor) => (await page('comments', PR_COMMENTS, cursor)).comments),
     allNodes(first.reviews, beforeCursor, async (cursor) => (await page('reviews', REVIEWS, cursor)).reviews),
   ])

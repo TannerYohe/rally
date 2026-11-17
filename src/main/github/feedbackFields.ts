@@ -56,7 +56,7 @@ export interface RawThread {
   line: number | null
   originalLine: number | null
   latest: { nodes: RawComment[] }
-  comments?: { totalCount: number; nodes: RawComment[] }
+  comments?: RawConnection<RawComment>
 }
 
 export type RawPrComment = RawComment & { isMinimized: boolean }
@@ -78,8 +78,8 @@ export const threadsField = (args: string, directive = '', extra = '') =>
     nodes { id isResolved isOutdated path line originalLine latest: comments(last: 1) { nodes { ${COMMENT} } } ${extra} }
   }`
 
-/** Selects the opening comments of a thread, for display and for the comment a reply answers. */
-export const THREAD_COMMENTS_FIELD = `comments(first: 50) { totalCount nodes { ${COMMENT} } }`
+/** Selects a thread's comments, oldest first, for display and for the comment a reply answers. */
+export const threadCommentsField = (args: string) => `comments(${args}) { pageInfo { hasNextPage endCursor } nodes { ${COMMENT} } }`
 
 /** Selects PR conversation comments, newest page first. */
 export const prCommentsField = (args: string, directive = '') =>

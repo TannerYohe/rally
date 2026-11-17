@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { feedbackItems } from './authorFeedback'
+import { describe, expect, it, vi } from 'vitest'
+
+const graphql = vi.hoisted(() => vi.fn())
+vi.mock('./client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./client')>()),
+  github: async () => ({ graphql, login: 'me' }),
+}))
+
+const { feedbackItems, fetchFeedbackItems, PAGE_LIMIT } = await import('./authorFeedback')
 import type { RawPrComment, RawReviewSummary, RawThread } from './feedbackFields'
 
 const PR = 'https://github.com/acme/api/pull/1'
@@ -25,7 +32,7 @@ function thread(id: string, overrides: Partial<RawThread> = {}, ...comments: Ret
     line: 3,
     originalLine: 2,
     latest: { nodes: comments.slice(-1) },
-    comments: { totalCount: comments.length, nodes: comments },
+    comments: { pageInfo: {}, nodes: comments },
     ...overrides,
   }
 }
@@ -76,7 +83,7 @@ describe('feedbackItems', () => {
   it('judges a long thread by its newest comment and shows it after the opening page', () => {
     const opening = Array.from({ length: 50 }, (_, i) => threadComment(i % 2 ? 'Me' : 'bob', '2026-11-01T00:00:00Z', i + 1))
     const newest = threadComment('bob', '2026-11-09T00:00:00Z', 99)
-    const long = thread('T1', { latest: { nodes: [newest] }, comments: { totalCount: 51, nodes: opening } })
+    const long = thread('T1', { latest: { nodes: [newest] }, comments: { pageInfo: {}, nodes: opening } })
     const [item] = feedbackItems([long], [], [], 'me')
     expect(item).toMatchObject({ answered: false, reactionSubjectId: 'C99', replyToCommentId: 1 })
     expect(item.comments).toHaveLength(51)
@@ -111,5 +118,47 @@ describe('feedbackItems', () => {
       'me',
     )
     expect(items.map((i) => i.id)).toEqual(['new', 'old'])
+  })
+})
+
+describe('fetchFeedbackItems', () => {
+  const connection = <T>(nodes: T[], pageInfo = {}) => ({ pageInfo, nodes })
+
+  it('pages threads forward, comments and reviews backward, and long threads forward, stopping at the page limit', async () => {
+    const t1Comments = [threadComment('bob', '2026-11-01T00:00:00Z', 1)]
+    const t1More = [threadComment('carol', '2026-11-02T00:00:00Z', 2)]
+    const firstThread = { ...thread('T1', {}, ...t1Comments), comments: connection(t1Comments, { hasNextPage: true, endCursor: 'TC2' }) }
+    let older = 100
+    graphql.mockImplementation(async (query: string, variables: { cursor: string | null }) => {
+      if (query.includes('node(id: $id)')) return { node: { comments: connection(t1More) } }
+      if (variables.cursor === null) {
+        return {
+          repository: {
+            pullRequest: {
+              reviewThreads: connection([firstThread], { hasNextPage: true, endCursor: 'T2' }),
+              comments: connection([prComment(1, 'dan', 'Newest question')], { hasPreviousPage: true, startCursor: 'C2' }),
+              reviews: connection([review(10, 'COMMENTED', 'erin', 'Overall')]),
+            },
+          },
+        }
+      }
+      if (query.includes('reviewThreads')) return { repository: { pullRequest: { reviewThreads: connection([thread('T2', {}, threadComment('bob', '2026-11-03T00:00:00Z', 5))]) } } }
+      if (query.includes('comments(last: 100')) {
+        return { repository: { pullRequest: { comments: connection([prComment(++older, 'dan', `Older ${variables.cursor}`)], { hasPreviousPage: true, startCursor: `${variables.cursor}+` }) } } }
+      }
+      throw new Error(`unexpected query with cursor ${variables.cursor}`)
+    })
+
+    const items = await fetchFeedbackItems({ owner: 'acme', repo: 'api', number: 1, url: PR })
+
+    const calls = graphql.mock.calls.map(([query, variables]) => ({ query: query as string, cursor: variables.cursor as string | null, id: variables.id }))
+    expect(calls.find((c) => c.query.includes('node(id: $id)'))).toMatchObject({ id: 'T1', cursor: 'TC2' })
+    expect(calls.filter((c) => c.query.includes('reviewThreads') && c.cursor !== null).map((c) => c.cursor)).toEqual(['T2'])
+    const commentCursors = calls.filter((c) => c.query.includes('comments(last: 100') && !c.query.includes('reviewThreads')).map((c) => c.cursor)
+    expect(commentCursors).toHaveLength(PAGE_LIMIT - 1)
+    expect(commentCursors[0]).toBe('C2')
+    expect(items.filter((i) => i.kind === 'comment')).toHaveLength(PAGE_LIMIT)
+    expect(items.filter((i) => i.kind !== 'comment').map((i) => i.id).sort()).toEqual(['R10', 'T1', 'T2'])
+    expect(items.find((i) => i.id === 'T1')?.comments.map((c) => c.author)).toEqual(['bob', 'carol'])
   })
 })

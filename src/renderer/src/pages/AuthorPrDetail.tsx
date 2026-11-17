@@ -1,18 +1,17 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrRef } from '@shared/types'
-import { errorMessage } from '@shared/errors'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
 import { FeedbackCard, type ActionPick } from '../components/FeedbackCard'
-import { Markdown } from '../components/Markdown'
 import { PrHeader } from '../components/PrHeader'
+import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
 import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
-import { age, clockTime, fullTime } from '../lib/format'
-import { useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
+import { age, fullTime } from '../lib/format'
+import { useActionRunner, useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
@@ -51,7 +50,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const [resolve, setResolve] = useState<Record<string, boolean>>({})
   const [message, setMessage] = useState('')
   const [reRequestReviews, setReRequestReviews] = useState(true)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const { error: actionError, run } = useActionRunner()
   const [chosenTab, setChosenTab] = useState<AuthorTab | null>(null)
 
   const busy = session !== null && BUSY_STATUSES.includes(session.status)
@@ -63,17 +62,6 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const requests = Object.entries(picks).map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
   const postBlocked = session && session.commits.length > 0 ? PUSH_BEFORE_POSTING_ERROR : null
-
-  const run = async (action: () => Promise<void>): Promise<boolean> => {
-    setActionError(null)
-    try {
-      await action()
-      return true
-    } catch (error) {
-      setActionError(errorMessage(error))
-      return false
-    }
-  }
 
   const runActions = () =>
     run(async () => {
@@ -89,11 +77,6 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
     })
   const primary = () => (requests.length > 0 ? runActions() : sendMessage(message))
   const canRunPrimary = !busy && (requests.length > 0 || (session !== null && Boolean(message.trim())))
-  const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    if (canRunPrimary) void primary()
-  }
   const selfReview = () => run(async () => onSession(await window.rally.startSelfReview(prRef)))
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${posts.length} repl${posts.length === 1 ? 'y' : 'ies'} to GitHub as you?`)) return
@@ -156,49 +139,38 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">Respond</h2>
-        {session && (
+      <SessionHeader
+        title="Respond"
+        session={session}
+        statusLabels={AUTHOR_STATUS_LABELS}
+        actions={
           <>
-            <span className={`text-sm ${session.status === 'error' ? 'text-rose-300' : 'text-ink-400'}`}>
-              {busy && <BusyDot className="mr-2 h-2 w-2 bg-primary-400" />}
-              {AUTHOR_STATUS_LABELS[session.status]}
-            </span>
-            <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>
-              started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
-            </span>
+            <button className={SECONDARY_BUTTON_CLASS} disabled={feedback.loading} onClick={feedback.reload}>
+              {feedback.loading ? 'Loading…' : 'Refresh comments'}
+            </button>
+            <button
+              className={SECONDARY_BUTTON_CLASS}
+              disabled={busy}
+              title="Run your review skill on this PR. Findings stay in Rally and show up as comments you can fix."
+              onClick={selfReview}
+            >
+              Self-review
+            </button>
+            {session?.status === 'running' && (
+              <button className={SECONDARY_BUTTON_CLASS} onClick={() => window.rally.cancelAuthorTurn(session.id)}>
+                Cancel
+              </button>
+            )}
+            {session && !busy && (
+              <button className={SECONDARY_BUTTON_CLASS} onClick={startOver}>
+                Start over
+              </button>
+            )}
           </>
-        )}
-        <div className="ml-auto flex gap-2">
-          <button className={SECONDARY_BUTTON_CLASS} disabled={feedback.loading} onClick={feedback.reload}>
-            {feedback.loading ? 'Loading…' : 'Refresh comments'}
-          </button>
-          <button
-            className={SECONDARY_BUTTON_CLASS}
-            disabled={busy}
-            title="Run your review skill on this PR. Findings stay in Rally and show up as comments you can fix."
-            onClick={selfReview}
-          >
-            Self-review
-          </button>
-          {session?.status === 'running' && (
-            <button className={SECONDARY_BUTTON_CLASS} onClick={() => window.rally.cancelAuthorTurn(session.id)}>
-              Cancel
-            </button>
-          )}
-          {session && !busy && (
-            <button className={SECONDARY_BUTTON_CLASS} onClick={startOver}>
-              Start over
-            </button>
-          )}
-        </div>
-      </div>
+        }
+      />
 
-      {(actionError || session?.error || feedback.error) && (
-        <div className="rounded-md bg-rose-950 px-3 py-2 text-sm text-rose-200">
-          {actionError ?? session?.error ?? `Loading comments failed: ${feedback.error}`}
-        </div>
-      )}
+      <ErrorBox message={actionError ?? session?.error ?? (feedback.error && `Loading comments failed: ${feedback.error}`)} />
 
       <TabBar name={TAB_PANEL} tabs={AUTHOR_TABS} labels={AUTHOR_TAB_LABELS} tab={tab} badges={badges} empty={empty} onSelect={setChosenTab} />
 
@@ -244,38 +216,26 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
 
       <TabPanel name={TAB_PANEL} id="report" tab={tab}>
         {session?.selfReview ? (
-          <div className="space-y-3">
-            <div className="text-sm">
-              <span className="text-ink-500">Verdict · </span>
-              <span className="text-ink-200">{session.selfReview.verdict}</span>
-            </div>
-            <Markdown>{session.selfReview.reportMarkdown}</Markdown>
-          </div>
+          <ReportView verdict={session.selfReview.verdict} markdown={session.selfReview.reportMarkdown} />
         ) : (
           <EmptyTab>No self-review yet. It runs your review skill and keeps the results private.</EmptyTab>
         )}
       </TabPanel>
 
       <div className="space-y-3">
-        <textarea
-          className="w-full rounded-md border border-ink-800 bg-ink-900 p-3 text-sm"
-          rows={3}
+        <Composer
+          value={message}
           placeholder={
             requests.length > 0
               ? 'Optional note for Claude about these comments'
               : 'Pick an action on a comment, or message Claude, e.g. "make the reply to the naming comment shorter"'
           }
-          value={message}
           disabled={busy}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={sendOnEnter}
+          canSend={canRunPrimary}
+          sendLabel={requests.length > 0 ? `Run ${requests.length} action${requests.length === 1 ? '' : 's'}` : 'Send to Claude'}
+          onChange={setMessage}
+          onSend={() => void primary()}
         />
-        <div className="flex items-center justify-end gap-3">
-          <span className="text-xs text-ink-500">Enter to send · Shift+Enter for a new line</span>
-          <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={!canRunPrimary} onClick={primary}>
-            {requests.length > 0 ? `Run ${requests.length} action${requests.length === 1 ? '' : 's'}` : 'Send to Claude'}
-          </button>
-        </div>
         {posts.length > 0 && (
           <div className="flex items-center justify-end gap-3 rounded-xl bg-ink-900/60 px-4 py-3 ring-1 ring-white/5">
             <label

@@ -154,9 +154,9 @@ Rally plays a short sound for three cues, each with its own sound in every skin:
 
 | Cue | When it plays |
 |---|---|
-| Claude finishes a turn | A review turn ends or errors. A cancelled turn plays nothing. Set it to play after every turn, only when no other review is still running, or never. |
-| A PR needs your attention | A PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. A PR leaving In progress doesn't count, since that only follows your own submit or discard. Drafts and hidden PRs stay quiet. |
-| You approve a PR | A new approval of yours appears on a listed PR, whether you submitted it in Rally or on GitHub. Rally only fetches your own reviews, so other reviewers' approvals don't play it. |
+| Claude finishes a turn | A turn in a review, a self-review, or a My PRs response session ends or errors. A cancelled turn plays nothing. Set it to play after every turn, only when no other turn is still running in either tab, or never. |
+| A PR needs your attention | In **Reviewing**, a PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. In **My PRs**, a PR is newly listed as needs response, or moves to it. A PR leaving In progress doesn't count, since that only follows your own work in Rally. Drafts and hidden PRs stay quiet. |
+| A PR is approved | In **Reviewing**, a new approval of yours appears, whether you submitted it in Rally or on GitHub. In **My PRs**, a reviewer who hadn't approved before approves. |
 
 One PR list update plays at most one sound, and an approval outranks a PR needing attention. The first refresh after launch compares against the list Rally cached when it last ran, so changes made while Rally was closed play once.
 

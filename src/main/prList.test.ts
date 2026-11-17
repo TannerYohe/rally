@@ -228,7 +228,7 @@ describe('prList', () => {
   })
 
   it('computes author phases for the authored list from its own query', async () => {
-    const feedback = { reviewDecision: null, openThreads: 1, unansweredThreads: 1, changesRequestedBy: [], approvedBy: [], headCommittedAt: null }
+    const feedback = { reviewDecision: null, openThreads: 1, unacknowledged: 1, changesRequestedBy: [], approvedBy: [] }
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ author: 'me', feedback })] })
     authoredPrList.setSessionLookup(() => null)
     await authoredPrList.refresh()

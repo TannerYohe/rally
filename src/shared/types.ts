@@ -26,10 +26,9 @@ export type ReviewDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED
 export interface PrFeedback {
   reviewDecision: ReviewDecision | null
   openThreads: number
-  unansweredThreads: number
+  unacknowledged: number
   changesRequestedBy: string[]
   approvedBy: string[]
-  headCommittedAt: string | null
 }
 
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'

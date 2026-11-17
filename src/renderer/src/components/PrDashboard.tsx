@@ -37,10 +37,10 @@ function ReviewStatusNote({ status }: { status: SessionStatus }) {
 
 function FeedbackNote({ feedback }: { feedback: PrFeedback }) {
   const parts: ReactNode[] = []
-  if (feedback.unansweredThreads > 0) {
+  if (feedback.unacknowledged > 0) {
     parts.push(
       <span key="unanswered" className="text-amber-300">
-        {feedback.unansweredThreads} unanswered
+        {feedback.unacknowledged} unanswered
       </span>,
     )
   }

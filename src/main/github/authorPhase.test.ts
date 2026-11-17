@@ -2,84 +2,69 @@ import { describe, expect, it } from 'vitest'
 import type { PrFeedback } from '@shared/types'
 import { authorFeedback, computeAuthorPhase, type RawAuthorFields } from './authorPhase'
 
-const HEAD_AT = '2026-11-01T12:00:00Z'
+const PR = 'https://github.com/acme/api/pull/1'
 
 function raw(overrides: Partial<RawAuthorFields> = {}): RawAuthorFields {
   return {
     reviewDecision: null,
     latestOpinionatedReviews: { nodes: [] },
     reviewThreads: { nodes: [] },
-    commits: { nodes: [{ commit: { committedDate: HEAD_AT } }] },
+    comments: { nodes: [] },
+    allReviews: { nodes: [] },
     ...overrides,
   }
 }
 
-const thread = (isResolved: boolean, ...authors: (string | null)[]) => ({
+const thread = (isResolved: boolean, last: string | null, reacted = false) => ({
   isResolved,
-  comments: { nodes: authors.map((login) => ({ author: login ? { login } : null })) },
+  comments: { nodes: [{ author: last ? { login: last } : null, reactionGroups: [{ viewerHasReacted: reacted }] }] },
 })
 
-const review = (state: 'APPROVED' | 'CHANGES_REQUESTED', login: string, submittedAt: string) => ({ state, submittedAt, author: { login } })
+const decision = (state: 'APPROVED' | 'CHANGES_REQUESTED', login: string) => ({ state, author: { login } })
 
 const feedback = (overrides: Partial<PrFeedback> = {}): PrFeedback => ({
   reviewDecision: null,
   openThreads: 0,
-  unansweredThreads: 0,
+  unacknowledged: 0,
   changesRequestedBy: [],
   approvedBy: [],
-  headCommittedAt: HEAD_AT,
   ...overrides,
 })
 
 describe('authorFeedback', () => {
-  it('counts open threads whose last comment is not mine as unanswered', () => {
-    const result = authorFeedback(
-      raw({ reviewThreads: { nodes: [thread(false, 'bob'), thread(false, 'bob', 'Me'), thread(true, 'bob'), thread(false, null)] } }),
-      [],
-      'me',
-    )
-    expect(result).toMatchObject({ openThreads: 3, unansweredThreads: 2 })
-  })
-
-  it('lists change requests submitted after the head commit', () => {
+  it('counts open threads not ending in my reply or reaction, plus unacknowledged PR comments and review bodies', () => {
     const result = authorFeedback(
       raw({
-        latestOpinionatedReviews: {
-          nodes: [review('CHANGES_REQUESTED', 'bob', '2026-11-02T00:00:00Z'), review('CHANGES_REQUESTED', 'carol', '2026-10-30T00:00:00Z')],
+        reviewThreads: { nodes: [thread(false, 'bob'), thread(false, 'Me'), thread(false, 'bob', true), thread(true, 'bob'), thread(false, null)] },
+        comments: {
+          nodes: [
+            { url: `${PR}#issuecomment-1`, body: 'Question?', createdAt: '', author: { login: 'carol', __typename: 'User' } },
+            { url: `${PR}#issuecomment-2`, body: 'Coverage', createdAt: '', author: { login: 'codecov', __typename: 'Bot' } },
+          ],
         },
+        allReviews: { nodes: [{ url: `${PR}#pullrequestreview-5`, body: 'LGTM', state: 'APPROVED', submittedAt: '', author: { login: 'dan' } }] },
       }),
-      [],
       'me',
     )
-    expect(result.changesRequestedBy).toEqual(['bob'])
+    expect(result).toMatchObject({ openThreads: 4, unacknowledged: 4 })
   })
 
-  it('drops change requests from reviewers I re-requested', () => {
+  it('lists reviewers by their latest decision, leaving me out', () => {
     const result = authorFeedback(
-      raw({ latestOpinionatedReviews: { nodes: [review('CHANGES_REQUESTED', 'bob', '2026-11-02T00:00:00Z')] } }),
-      ['Bob'],
+      raw({ latestOpinionatedReviews: { nodes: [decision('CHANGES_REQUESTED', 'bob'), decision('APPROVED', 'carol'), decision('APPROVED', 'me')] } }),
       'me',
     )
-    expect(result.changesRequestedBy).toEqual([])
-  })
-
-  it('lists approvers', () => {
-    const result = authorFeedback(raw({ latestOpinionatedReviews: { nodes: [review('APPROVED', 'bob', '2026-11-02T00:00:00Z')] } }), [], 'me')
-    expect(result.approvedBy).toEqual(['bob'])
+    expect(result).toMatchObject({ changesRequestedBy: ['bob'], approvedBy: ['carol'] })
   })
 })
 
 describe('computeAuthorPhase', () => {
   it('is in progress while a Rally session has work', () => {
-    expect(computeAuthorPhase(feedback({ unansweredThreads: 2 }), true)).toBe('in_progress')
+    expect(computeAuthorPhase(feedback({ unacknowledged: 2 }), true)).toBe('in_progress')
   })
 
-  it('needs a response for unanswered threads', () => {
-    expect(computeAuthorPhase(feedback({ unansweredThreads: 1, reviewDecision: 'APPROVED' }), false)).toBe('needs_response')
-  })
-
-  it('needs a response for a fresh change request', () => {
-    expect(computeAuthorPhase(feedback({ changesRequestedBy: ['bob'] }), false)).toBe('needs_response')
+  it('needs a response for any unacknowledged comment, even when approved', () => {
+    expect(computeAuthorPhase(feedback({ unacknowledged: 1, reviewDecision: 'APPROVED', approvedBy: ['bob'] }), false)).toBe('needs_response')
   })
 
   it('is approved when GitHub says so', () => {
@@ -90,11 +75,9 @@ describe('computeAuthorPhase', () => {
     expect(computeAuthorPhase(feedback({ approvedBy: ['bob'] }), false)).toBe('approved')
   })
 
-  it('awaits reviews when the change request predates the last commit', () => {
-    expect(computeAuthorPhase(feedback({ reviewDecision: 'CHANGES_REQUESTED' }), false)).toBe('awaiting_reviews')
-  })
-
-  it('awaits reviews with no activity', () => {
-    expect(computeAuthorPhase(feedback(), false)).toBe('awaiting_reviews')
+  it('awaits reviews once every comment is acknowledged, even with changes requested', () => {
+    expect(computeAuthorPhase(feedback({ reviewDecision: 'CHANGES_REQUESTED', changesRequestedBy: ['bob'], openThreads: 2 }), false)).toBe(
+      'awaiting_reviews',
+    )
   })
 })

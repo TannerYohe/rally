@@ -71,9 +71,10 @@ describe('fetchPr', () => {
       reviews: { nodes: [] },
       timelineItems: { nodes: [] },
       reviewDecision: 'CHANGES_REQUESTED',
-      latestOpinionatedReviews: { nodes: [{ state: 'CHANGES_REQUESTED', submittedAt: '2026-11-06T00:00:00Z', author: { login: 'bob' } }] },
-      reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'bob' } }] } }] },
-      commits: { nodes: [{ commit: { committedDate: '2026-11-05T00:00:00Z' } }] },
+      latestOpinionatedReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'bob' } }] },
+      reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: 'bob' }, reactionGroups: [] }] } }] },
+      comments: { nodes: [{ url: 'https://github.com/acme/api/pull/13#issuecomment-1', body: 'Why?', createdAt: '', author: { login: 'carol', __typename: 'User' }, reactionGroups: [] }] },
+      allReviews: { nodes: [] },
     }
     graphql.mockResolvedValueOnce({ repository: { pullRequest: raw } })
 
@@ -83,10 +84,9 @@ describe('fetchPr', () => {
     expect(pr.feedback).toEqual({
       reviewDecision: 'CHANGES_REQUESTED',
       openThreads: 1,
-      unansweredThreads: 1,
+      unacknowledged: 2,
       changesRequestedBy: ['bob'],
       approvedBy: [],
-      headCommittedAt: '2026-11-05T00:00:00Z',
     })
   })
 })

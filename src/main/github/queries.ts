@@ -20,12 +20,17 @@ const PR_FIELDS = `
     }
     reviewDecision @include(if: $authored)
     latestOpinionatedReviews(first: 50, writersOnly: true) @include(if: $authored) {
-      nodes { state submittedAt author { login } }
+      nodes { state author { login } }
     }
     reviewThreads(first: 100) @include(if: $authored) {
-      nodes { isResolved comments(last: 1) { nodes { author { login } } } }
+      nodes { isResolved comments(last: 1) { nodes { author { login } reactionGroups { viewerHasReacted } } } }
     }
-    commits(last: 1) @include(if: $authored) { nodes { commit { committedDate } } }
+    comments(last: 100) @include(if: $authored) {
+      nodes { url body createdAt isMinimized author { __typename login } reactionGroups { viewerHasReacted } }
+    }
+    allReviews: reviews(last: 100) @include(if: $authored) {
+      nodes { url body state submittedAt author { __typename login } reactionGroups { viewerHasReacted } }
+    }
   }
 `
 
@@ -145,9 +150,10 @@ function toPr(raw: RawPr, viewer: string, replyOnly: Set<string>): GithubPr {
     commitOid: r.commit?.oid ?? null,
     replyOnly: replyOnly.has(r.id),
   }))
-  const requestedReviewers = raw.reviewRequests.nodes.flatMap((n) => (n.requestedReviewer?.login ? [n.requestedReviewer.login] : []))
   const authored = authorFields(raw)
-  const reviewRequestedFromMe = requestedReviewers.some((login) => login.toLowerCase() === viewer.toLowerCase())
+  const reviewRequestedFromMe = raw.reviewRequests.nodes.some(
+    (n) => n.requestedReviewer?.login?.toLowerCase() === viewer.toLowerCase(),
+  )
   return {
     id: raw.id,
     number: raw.number,
@@ -171,14 +177,14 @@ function toPr(raw: RawPr, viewer: string, replyOnly: Set<string>): GithubPr {
     files: raw.files?.nodes.map((f) => f.path) ?? [],
     reviewRequestedFromMe,
     myReviews,
-    feedback: authored ? authorFeedback(authored, requestedReviewers, viewer) : null,
+    feedback: authored ? authorFeedback(authored, viewer) : null,
   }
 }
 
 function authorFields(raw: RawPr): RawAuthorFields | null {
-  const { reviewDecision, latestOpinionatedReviews, reviewThreads, commits } = raw
-  if (!latestOpinionatedReviews || !reviewThreads || !commits) return null
-  return { reviewDecision: reviewDecision ?? null, latestOpinionatedReviews, reviewThreads, commits }
+  const { reviewDecision, latestOpinionatedReviews, reviewThreads, comments, allReviews } = raw
+  if (!latestOpinionatedReviews || !reviewThreads || !comments || !allReviews) return null
+  return { reviewDecision: reviewDecision ?? null, latestOpinionatedReviews, reviewThreads, comments, allReviews }
 }
 
 const isAuthored = (kind: PrListKind) => kind === 'authored'

@@ -91,6 +91,24 @@ export const EFFORT_LABELS: Record<EffortChoice, string> = {
 
 export type SkinId = 'classic' | 'tennis' | 'motorsport' | 'pep'
 
+export type SoundCue = 'reviewDone' | 'needsAttention' | 'approved'
+
+export const SOUND_CUES: SoundCue[] = ['reviewDone', 'needsAttention', 'approved']
+
+export type ReviewDoneSound = 'each' | 'last' | 'off'
+
+export const REVIEW_DONE_SOUND_LABELS: Record<ReviewDoneSound, string> = {
+  each: 'Every turn',
+  last: 'When no review is still running',
+  off: 'Off',
+}
+
+export interface SoundPlayback {
+  cue: SoundCue
+  pack: SkinId
+  volume: number
+}
+
 export interface Config {
   authors: string[]
   repos: string[]
@@ -102,6 +120,13 @@ export interface Config {
   subagentModel: ModelChoice | null
   subagentEffort: EffortChoice | null
   skin: SkinId
+  soundsEnabled: boolean
+  soundVolume: number
+  /** The skin whose sounds play; null follows the selected skin. */
+  soundPack: SkinId | null
+  reviewDoneSound: ReviewDoneSound
+  attentionSound: boolean
+  approvedSound: boolean
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -115,6 +140,12 @@ export const DEFAULT_CONFIG: Config = {
   subagentModel: null,
   subagentEffort: null,
   skin: 'classic',
+  soundsEnabled: true,
+  soundVolume: 60,
+  soundPack: null,
+  reviewDoneSound: 'each',
+  attentionSound: true,
+  approvedSound: true,
 }
 
 export interface PrListState {

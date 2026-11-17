@@ -141,8 +141,8 @@ export async function fetchFeedbackItems(pr: PrRef): Promise<FeedbackItem[]> {
     return response.repository.pullRequest
   }
   const first = await page<keyof FeedbackPage>('reviewThreads', `${THREADS} ${PR_COMMENTS} ${REVIEWS}`, null)
-  const threadComments = async (thread: RawThread): Promise<RawThread> => {
-    if (!thread.comments?.pageInfo.hasNextPage) return thread
+  const withAllComments = async (thread: RawThread): Promise<RawThread> => {
+    if (thread.isResolved || !thread.comments?.pageInfo.hasNextPage) return thread
     const nodes = await allNodes(thread.comments, afterCursor, async (cursor) => {
       const response = await gh.graphql<ThreadCommentsResponse>(THREAD_COMMENTS_QUERY, { id: thread.id, cursor, request: timeoutRequest() })
       return response.node?.comments ?? { pageInfo: {}, nodes: [] }
@@ -151,7 +151,7 @@ export async function fetchFeedbackItems(pr: PrRef): Promise<FeedbackItem[]> {
   }
   const [threads, comments, reviews] = await Promise.all([
     allNodes(first.reviewThreads, afterCursor, async (cursor) => (await page('reviewThreads', THREADS, cursor)).reviewThreads).then((all) =>
-      Promise.all(all.map(threadComments)),
+      Promise.all(all.map(withAllComments)),
     ),
     allNodes(first.comments, beforeCursor, async (cursor) => (await page('comments', PR_COMMENTS, cursor)).comments),
     allNodes(first.reviews, beforeCursor, async (cursor) => (await page('reviews', REVIEWS, cursor)).reviews),

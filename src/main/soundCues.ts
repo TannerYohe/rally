@@ -26,21 +26,30 @@ function approvals(kind: PrListKind, pr: PrFields): string[] {
   }
 }
 
-export function snapshotPrs(kind: PrListKind, prs: PrFields[]): PrSnapshots {
-  return new Map(prs.map((pr) => [pr.id, { phase: pr.phase, approvals: approvals(kind, pr) }]))
+function isShown(pr: PrFields): boolean {
+  return !pr.hidden && !pr.isDraft
 }
 
-/** True when the PR is newly listed in an attention phase or moved into one from any phase but In progress. */
+/** Records shown PRs only, so a draft marked ready or a hidden PR that resurfaces counts as newly listed. */
+export function snapshotPrs(kind: PrListKind, prs: PrFields[]): PrSnapshots {
+  return new Map(prs.filter(isShown).map((pr) => [pr.id, { phase: pr.phase, approvals: approvals(kind, pr) }]))
+}
+
+/** True when the PR left In progress, which only your own work in Rally ends (README.md#sounds). */
+function leftOwnSession(before: PrSnapshot): boolean {
+  return before.phase === 'in_progress'
+}
+
+/** True when the PR is newly listed in an attention phase or moved into one from another phase. */
 function enteredAttentionPhase(kind: PrListKind, before: PrSnapshot | undefined, pr: PrFields): boolean {
   if (!ATTENTION_PHASES[kind].includes(pr.phase)) return false
-  return before === undefined || (before.phase !== pr.phase && before.phase !== 'in_progress')
+  return before === undefined || (before.phase !== pr.phase && !leftOwnSession(before))
 }
 
 /** Returns the cue for one PR list update; an approval outranks a PR needing attention. */
 export function prListCue(kind: PrListKind, previous: PrSnapshots, prs: PrFields[]): SoundCue | null {
   let cue: SoundCue | null = null
-  for (const pr of prs) {
-    if (pr.hidden || pr.isDraft) continue
+  for (const pr of prs.filter(isShown)) {
     const before = previous.get(pr.id)
     if (before && approvals(kind, pr).some((approval) => !before.approvals.includes(approval))) return 'approved'
     if (enteredAttentionPhase(kind, before, pr)) cue = 'needsAttention'

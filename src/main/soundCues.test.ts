@@ -45,6 +45,13 @@ describe('prListCue for PRs you review', () => {
     expect(prListCue('reviewing', reviewing([]), [pr('unreviewed', { hidden: { mode: 'snooze', at: '2026-11-01T00:00:00Z' } })])).toBeNull()
   })
 
+  it('cues attention when a draft is marked ready or a hidden PR resurfaces', () => {
+    expect(prListCue('reviewing', reviewing([pr('unreviewed', { isDraft: true })]), [pr('unreviewed')])).toBe('needsAttention')
+    const snoozed = pr('awaiting_rereview', { hidden: { mode: 'snooze', at: '2026-11-01T00:00:00Z' } })
+    expect(prListCue('reviewing', reviewing([snoozed]), [pr('awaiting_rereview')])).toBe('needsAttention')
+    expect(prListCue('authored', authored([pr('needs_response', { isDraft: true })]), [pr('needs_response')])).toBe('needsAttention')
+  })
+
   it('cues approved when a new approval of yours appears on a listed PR', () => {
     expect(prListCue('reviewing', reviewing([pr('unreviewed')]), [pr('approved', { myReviews: [approval(1)] })])).toBe('approved')
     expect(prListCue('reviewing', reviewing([pr('approved', { myReviews: [approval(1)] })]), [pr('approved', { myReviews: [approval(1), approval(2)] })])).toBe(
@@ -157,6 +164,22 @@ describe('SoundCues', () => {
     expect(played.map((p) => p.cue)).toEqual(['reviewDone', 'reviewDone'])
   })
 
+  it('plays only the approval across a submit, its stale refresh, and the approved refresh', () => {
+    const { cues, played } = setup()
+    cues.prsChanged('reviewing', [pr('in_progress')])
+    cues.prsChanged('reviewing', [pr('unreviewed')])
+    cues.prsChanged('reviewing', [pr('approved', { myReviews: [approval(9)] })])
+    expect(played.map((p) => p.cue)).toEqual(['approved'])
+  })
+
+  it('stays quiet when a submit fails', () => {
+    const { cues, played } = setup()
+    cues.sessionChanged('a', 'awaiting_feedback')
+    cues.sessionChanged('a', 'submitting')
+    cues.sessionChanged('a', 'error')
+    expect(played).toEqual([])
+  })
+
   it('stays quiet for a cancelled turn, a repeated status, or a session first seen idle', () => {
     const { cues, played } = setup()
     cues.sessionChanged('a', 'awaiting_feedback')
@@ -183,6 +206,16 @@ describe('SoundCues', () => {
     cues.sessionChanged('reviewing:a', 'awaiting_feedback')
     expect(played).toEqual([])
     cues.sessionChanged('authored:a', 'error')
+    expect(played.map((p) => p.cue)).toEqual(['reviewDone'])
+  })
+
+  it('stops waiting for a cancelled peer in last mode', () => {
+    const { cues, played } = setup({ reviewDoneSound: 'last' })
+    cues.sessionChanged('a', 'running')
+    cues.sessionChanged('b', 'running')
+    cues.sessionChanged('b', 'cancelled')
+    expect(played).toEqual([])
+    cues.sessionChanged('a', 'awaiting_feedback')
     expect(played.map((p) => p.cue)).toEqual(['reviewDone'])
   })
 

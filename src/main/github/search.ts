@@ -41,3 +41,5 @@ export function buildSearchQueries(config: Config): string[] {
   if (config.includeReviewRequests) queries.push(`${BASE} user-review-requested:@me`, `${BASE} reviewed-by:@me -author:@me`)
   return queries
 }
+
+export const AUTHORED_SEARCH_QUERIES = [`${BASE} author:@me`]

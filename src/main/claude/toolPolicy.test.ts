@@ -299,4 +299,18 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(decideToolUse('mcp__rally__publish_drafts', {}, REVIEWING).allow).toBe(true)
     expect(decideToolUse('Agent', { description: 'Security lens' }, REVIEWING).allow).toBe(true)
   })
+
+  it('only lets git read in a repo Rally commits in, and leaves other temp repos alone', () => {
+    const clone = join(SESSION_CWD, 'repo')
+    const AUTHOR = { cwd: SESSION_CWD, readOnlyGitRepos: [clone] }
+    expect(bash(`git -C "${clone}" diff origin/main...HEAD`, AUTHOR)).toBe(true)
+    expect(bash(`cd repo && git log --oneline -5 && git status`, AUTHOR)).toBe(true)
+    expect(bash(`cd repo && git commit -am "fix"`, AUTHOR)).toBe(false)
+    expect(bash(`git -C "${clone}" fetch origin`, AUTHOR)).toBe(false)
+    expect(bash(`git -C "${clone}/src" checkout -- a.ts`, AUTHOR)).toBe(false)
+    expect(bash(`cd repo && gh pr checkout 12`, AUTHOR)).toBe(false)
+    expect(decideToolUse('Bash', { command: 'cd repo && git merge origin/main' }, AUTHOR)).toMatchObject({ reason: expect.stringContaining('publish_responses') })
+    expect(bash(`git -C "${WORK}/repo" commit -am "skill scratch"`, AUTHOR)).toBe(true)
+    expect(bash(`cd repo && git commit -am "fix"`)).toBe(true)
+  })
 })

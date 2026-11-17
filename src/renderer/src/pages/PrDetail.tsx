@@ -1,19 +1,14 @@
-import { useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useState, type ReactNode } from 'react'
+import { useParams } from 'react-router-dom'
 import { prKey, REVIEW_EVENT_LABELS, type ReviewEvent, type ReviewSession } from '@shared/types'
-import { errorMessage } from '@shared/errors'
 import { DraftList } from '../components/DraftList'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
-import { Markdown } from '../components/Markdown'
-import { Avatar } from '../components/Avatar'
 import { BusyDot } from '../components/BusyDot'
-import { DiffStat } from '../components/DiffStat'
-import { HideControls } from '../components/HideControls'
-import { PhaseBadge } from '../components/PhaseBadge'
-import { RepoChip } from '../components/RepoChip'
+import { PrHeader } from '../components/PrHeader'
 import { ProgressTimeline } from '../components/ProgressTimeline'
-import { ReviewTabBar, ReviewTabPanel } from '../components/ReviewTabBar'
+import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
+import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
 import { SubmitBar } from '../components/SubmitBar'
 import {
   EMPTY_COMMENT_REVIEW_ERROR,
@@ -25,11 +20,11 @@ import {
   type DraftChanges,
   type DraftEdits,
 } from '@shared/feedback'
-import { age, clockTime, fullTime } from '../lib/format'
-import { usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
+import { fullTime } from '../lib/format'
+import { useActionRunner, usePrs, useReviewTab, useSession, useThreadResolution } from '../lib/hooks'
 import { BUSY_STATUSES, isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastSuccessfulTurn, SESSION_STATUS_LABELS } from '../lib/sessionStatus'
-import { emptyReviewTabs, type ReviewTab } from '../lib/reviewTabs'
-import { PHASE_THEME, PRIMARY_BUTTON_CLASS } from '../lib/theme'
+import { emptyReviewTabs, REVIEW_TAB_LABELS, REVIEW_TABS, type ReviewTab } from '../lib/reviewTabs'
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 export function PrDetail() {
   const params = useParams()
@@ -37,7 +32,7 @@ export function PrDetail() {
   const repo = params.repo!
   const number = Number(params.number)
   const key = prKey(owner, repo, number)
-  const { prs } = usePrs()
+  const { prs } = usePrs('reviewing')
   const pr = prs.find((p) => p.owner === owner && p.repo === repo && p.number === number)
   const [session, setSession] = useSession(key)
   const url = pr?.url ?? `https://github.com/${owner}/${repo}/pull/${number}`
@@ -50,56 +45,7 @@ export function PrDetail() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <div>
-        <Link to="/" className="text-xs text-ink-500 hover:text-ink-300">
-          ← All PRs
-        </Link>
-        <div className="mt-3 flex items-start gap-4">
-          {pr && <Avatar login={pr.author} url={pr.authorAvatarUrl} ringClass={PHASE_THEME[pr.phase].ring} />}
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex items-start gap-3">
-              <h1 className="min-w-0 flex-1 text-xl font-semibold">{pr?.title ?? key}</h1>
-              {pr && <PhaseBadge phase={pr.phase} />}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-400">
-              <RepoChip repo={repo} number={number} />
-              {pr && (
-                <>
-                  <span>
-                    by <span className="text-ink-200">{pr.author}</span>
-                  </span>
-                  <span>opened {age(pr.createdAt)} ago</span>
-                  <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
-                </>
-              )}
-              <a className="text-primary-400 hover:text-primary-300" href={url} target="_blank" rel="noreferrer">
-                Open on GitHub ↗
-              </a>
-              {pr && <HideControls pr={pr} className="ml-auto" />}
-            </div>
-          </div>
-        </div>
-        {pr?.summary && (
-          <p className="mt-4 rounded-lg bg-secondary-500/5 px-4 py-3 text-sm text-ink-300 ring-1 ring-secondary-500/20">
-            <span className="mr-2 text-secondary-400">✦</span>
-            {pr.summary}
-          </p>
-        )}
-      </div>
-
-      {pr && (
-        <details className="rounded-xl border border-white/5 bg-ink-900/40 p-4">
-          <summary className="cursor-pointer text-sm font-semibold">Description and files</summary>
-          <div className="mt-3 space-y-4">
-            <Markdown>{pr.body || '_No description._'}</Markdown>
-            <ul className="space-y-0.5 font-mono text-xs text-ink-400">
-              {pr.files.map((file) => (
-                <li key={file}>{file}</li>
-              ))}
-            </ul>
-          </div>
-        </details>
-      )}
+      <PrHeader list="reviewing" pr={pr} title={key} repo={repo} number={number} url={url} />
 
       {session ? (
         <ReviewPanel
@@ -139,7 +85,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const [edits, setEdits] = useState<DraftEdits>({})
   const [summaryEdit, setSummaryEdit] = useState<string | undefined>(undefined)
   const [feedback, setFeedback] = useState('')
-  const [actionError, setActionError] = useState<string | null>(null)
+  const { error: actionError, run: runAction } = useActionRunner()
   const busy = BUSY_STATUSES.includes(session.status)
   const submitted = isSubmitted(session)
   const { drafts } = session
@@ -165,19 +111,13 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
     drafts: !emptyTabs.drafts && <TabCount count={keptComments} />,
   }
 
-  const run = async (action: () => Promise<void>): Promise<boolean> => {
-    setActionError(null)
-    try {
+  const run = (action: () => Promise<void>) =>
+    runAction(async () => {
       await action()
       setEdits({})
       setSummaryEdit(undefined)
       setFeedback('')
-      return true
-    } catch (error) {
-      setActionError(errorMessage(error))
-      return false
-    }
-  }
+    })
 
   const canSend = !busy && Boolean(message)
   const sendMessage = async (text: string) => {
@@ -186,11 +126,6 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   }
   const send = () => sendMessage(message)
   const pullChanges = () => sendMessage(pullChangesMessage(drafts, changes, lastSuccessfulTurnAt))
-  const sendOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    if (canSend) void send()
-  }
   const submit = (event: ReviewEvent) =>
     run(async () => {
       if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
@@ -202,51 +137,49 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">Review</h2>
-        <span className={`text-sm ${session.status === 'error' ? 'text-rose-300' : 'text-ink-400'}`}>
-          {busy && <BusyDot className="mr-2 h-2 w-2 bg-primary-400" />}
-          {SESSION_STATUS_LABELS[session.status]}
-        </span>
-        <span className="text-sm text-ink-500" title={fullTime(session.createdAt)}>
-          started {clockTime(session.createdAt)} · {age(session.createdAt)} ago
-        </span>
-        {prUpdatedAfterLastSuccessfulTurn && prUpdatedAt && (
-          <span className="flex items-center gap-2 text-sm text-amber-300">
-            <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last successful turn started at ${fullTime(lastSuccessfulTurnAt)}`}>
-              PR updated since last successful turn
+      <SessionHeader
+        title="Review"
+        session={session}
+        statusLabels={SESSION_STATUS_LABELS}
+        notes={
+          prUpdatedAfterLastSuccessfulTurn &&
+          prUpdatedAt && (
+            <span className="flex items-center gap-2 text-sm text-amber-300">
+              <span title={`PR updated ${fullTime(prUpdatedAt)}, after Claude's last successful turn started at ${fullTime(lastSuccessfulTurnAt)}`}>
+                PR updated since last successful turn
+              </span>
+              <button
+                className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
+                disabled={busy || resolvingThreads}
+                title="Send Claude a turn to pull in the commits, comments, and reviews since its last successful turn and update the review, along with any pending edits and feedback"
+                onClick={pullChanges}
+              >
+                Pull in changes
+              </button>
             </span>
-            <button
-              className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
-              disabled={busy || resolvingThreads}
-              title="Send Claude a turn to pull in the commits, comments, and reviews since its last successful turn and update the review, along with any pending edits and feedback"
-              onClick={pullChanges}
-            >
-              Pull in changes
-            </button>
-          </span>
-        )}
-        <div className="ml-auto flex gap-2">
-          {session.status === 'running' && (
-            <button className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700" onClick={() => window.rally.cancelReview(session.id)}>
-              Cancel
-            </button>
-          )}
-          {!busy && !submitted && (
-            <button
-              className="rounded-md bg-ink-800 px-3 py-1 text-sm hover:bg-ink-700 disabled:opacity-40"
-              disabled={resolvingThreads}
-              onClick={startOver}
-            >
-              Start over
-            </button>
-          )}
-        </div>
-      </div>
+          )
+        }
+        actions={
+          <>
+            {session.status === 'running' && (
+              <button className={SECONDARY_BUTTON_CLASS} onClick={() => window.rally.cancelReview(session.id)}>
+                Cancel
+              </button>
+            )}
+            {!busy && !submitted && (
+              <button
+                className={SECONDARY_BUTTON_CLASS}
+                disabled={resolvingThreads}
+                onClick={startOver}
+              >
+                Start over
+              </button>
+            )}
+          </>
+        }
+      />
 
-      {(actionError || session.error) && (
-        <div className="rounded-md bg-rose-950 px-3 py-2 text-sm text-rose-200">{actionError ?? session.error}</div>
-      )}
+      <ErrorBox message={actionError ?? session.error} />
 
       {session.submitted && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-emerald-950/70 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/20">
@@ -281,31 +214,23 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
         </div>
       )}
 
-      <ReviewTabBar tab={reviewTab.tab} badges={tabBadges} empty={emptyTabs} onSelect={reviewTab.select} />
+      <TabBar name="Review" tabs={REVIEW_TABS} labels={REVIEW_TAB_LABELS} tab={reviewTab.tab} badges={tabBadges} empty={emptyTabs} onSelect={reviewTab.select} />
 
-      <ReviewTabPanel id="activity" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="activity" tab={reviewTab.tab}>
         <div ref={reviewTab.activityRef}>
           <ProgressTimeline timeline={session.timeline} />
         </div>
-      </ReviewTabPanel>
+      </TabPanel>
 
-      <ReviewTabPanel id="report" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="report" tab={reviewTab.tab}>
         {emptyTabs.report ? (
           <EmptyTab>Claude hasn't published a report yet.</EmptyTab>
         ) : (
-          drafts && (
-            <div className="space-y-3">
-              <div className="text-sm">
-                <span className="text-ink-500">Verdict · </span>
-                <span className="text-ink-200">{drafts.verdict}</span>
-              </div>
-              <Markdown>{drafts.reportMarkdown}</Markdown>
-            </div>
-          )
+          drafts && <ReportView verdict={drafts.verdict} markdown={drafts.reportMarkdown} />
         )}
-      </ReviewTabPanel>
+      </TabPanel>
 
-      <ReviewTabPanel id="threads" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="threads" tab={reviewTab.tab}>
         {emptyTabs.threads ? (
           <EmptyTab>No earlier comments. Threads appear in follow-up reviews.</EmptyTab>
         ) : (
@@ -316,9 +241,9 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             submitted={submitted}
           />
         )}
-      </ReviewTabPanel>
+      </TabPanel>
 
-      <ReviewTabPanel id="drafts" tab={reviewTab.tab}>
+      <TabPanel name="Review" id="drafts" tab={reviewTab.tab}>
         <div className="space-y-2">
           {emptyTabs.drafts ? (
             <EmptyTab>{hasDrafts ? 'No draft comments.' : "Claude hasn't drafted any comments yet."}</EmptyTab>
@@ -336,29 +261,19 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
             <ReviewBodyEditor original={drafts.summaryBody} edit={summaryEdit} disabled={busy || submitted} onEdit={setSummaryEdit} />
           )}
         </div>
-      </ReviewTabPanel>
+      </TabPanel>
 
       {!submitted && (
         <div className="space-y-3">
-          <textarea
-            className="w-full rounded-md border border-ink-800 bg-ink-900 p-3 text-sm"
-            rows={3}
-            placeholder='Feedback for Claude, e.g. "drop 2, make 1 shorter, is finding 4 real?"'
+          <Composer
             value={feedback}
+            placeholder='Feedback for Claude, e.g. "drop 2, make 1 shorter, is finding 4 real?"'
             disabled={busy}
-            onChange={(e) => setFeedback(e.target.value)}
-            onKeyDown={sendOnEnter}
+            canSend={canSend}
+            sendLabel="Send to Claude"
+            onChange={setFeedback}
+            onSend={send}
           />
-          <div className="flex items-center justify-end gap-3">
-            <span className="text-xs text-ink-500">Enter to send · Shift+Enter for a new line</span>
-            <button
-              className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
-              disabled={!canSend}
-              onClick={send}
-            >
-              Send to Claude
-            </button>
-          </div>
           {drafts && (
             <SubmitBar
               disabled={busy || resolvingThreads}
@@ -372,12 +287,4 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
       )}
     </section>
   )
-}
-
-function TabCount({ count }: { count: number }) {
-  return <span className="rounded-full bg-white/10 px-1.5 text-xs font-normal text-ink-200">{count}</span>
-}
-
-function EmptyTab({ children }: { children: ReactNode }) {
-  return <p className="py-6 text-center text-sm text-ink-500">{children}</p>
 }

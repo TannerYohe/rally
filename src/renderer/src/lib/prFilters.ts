@@ -1,4 +1,4 @@
-import { PHASE_ORDER, type Phase, type Pr } from '@shared/types'
+import type { Phase, Pr } from '@shared/types'
 
 export type DraftFilter = 'all' | 'ready' | 'draft'
 export type SortField = 'phase' | 'created' | 'updated' | 'size' | 'author' | 'repo'
@@ -45,30 +45,32 @@ export function applySecondaryFilters(prs: Pr[], filters: PrFilters): Pr[] {
   )
 }
 
-export interface DashboardView {
+export interface DashboardView<P extends Phase> {
   visible: Pr[]
   hiddenPrs: Pr[]
-  phaseCounts: Record<Phase, number>
+  phaseCounts: Record<P, number>
   allMatchingHidden: boolean
 }
 
-export function dashboardView(prs: Pr[], filters: PrFilters, sort: PrSort): DashboardView {
+export function dashboardView<P extends Phase>(prs: Pr[], filters: PrFilters, sort: PrSort, phaseOrder: readonly P[]): DashboardView<P> {
   const filtered = applySecondaryFilters(prs, filters)
   const shown = filtered.filter((pr) => !pr.hidden)
-  const phaseCounts = Object.fromEntries(PHASE_ORDER.map((phase) => [phase, 0])) as Record<Phase, number>
-  for (const pr of shown) phaseCounts[pr.phase]++
+  const phaseCounts = Object.fromEntries(phaseOrder.map((phase) => [phase, 0])) as Record<P, number>
+  for (const pr of shown) {
+    if (pr.phase in phaseCounts) phaseCounts[pr.phase as P]++
+  }
   return {
-    visible: sortPrs(shown.filter((pr) => !filters.hiddenPhases.includes(pr.phase)), sort),
-    hiddenPrs: sortPrs(filtered.filter((pr) => pr.hidden), sort),
+    visible: sortPrs(shown.filter((pr) => !filters.hiddenPhases.includes(pr.phase)), sort, phaseOrder),
+    hiddenPrs: sortPrs(filtered.filter((pr) => pr.hidden), sort, phaseOrder),
     phaseCounts,
     allMatchingHidden: shown.length === 0 && filtered.length > 0,
   }
 }
 
-function compareField(a: Pr, b: Pr, field: SortField): number {
+function compareField(a: Pr, b: Pr, field: SortField, phaseOrder: readonly Phase[]): number {
   switch (field) {
     case 'phase':
-      return PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase)
+      return phaseOrder.indexOf(a.phase) - phaseOrder.indexOf(b.phase)
     case 'created':
       return a.createdAt.localeCompare(b.createdAt)
     case 'updated':
@@ -82,9 +84,9 @@ function compareField(a: Pr, b: Pr, field: SortField): number {
   }
 }
 
-export function sortPrs(prs: Pr[], sort: PrSort): Pr[] {
+export function sortPrs(prs: Pr[], sort: PrSort, phaseOrder: readonly Phase[]): Pr[] {
   const sign = sort.direction === 'asc' ? 1 : -1
-  return [...prs].sort((a, b) => sign * compareField(a, b, sort.field) || a.createdAt.localeCompare(b.createdAt))
+  return [...prs].sort((a, b) => sign * compareField(a, b, sort.field, phaseOrder) || a.createdAt.localeCompare(b.createdAt))
 }
 
 export interface FilterOption {

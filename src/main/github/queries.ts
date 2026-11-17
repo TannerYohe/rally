@@ -1,9 +1,13 @@
 import { GraphqlResponseError } from '@octokit/graphql'
-import type { MyReview, Pr, ReviewState } from '@shared/types'
+import type { MyReview, Pr, PrListKind, ReviewState } from '@shared/types'
+import { authorFeedback, type RawAuthorFields } from './authorPhase'
+import { decisionsField, prCommentsField, reviewSummariesField, threadsField } from './feedbackFields'
 import { github, timeoutRequest, type GithubClient } from './client'
 import { countsAsReview } from './phase'
 
 export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError' | 'hidden'>
+
+const AUTHORED = '@include(if: $authored)'
 
 const REVIEW_PAGE_SIZE = 20
 const MAX_REVIEW_PAGES = 10
@@ -24,12 +28,17 @@ const PR_FIELDS = `
     timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
       nodes { ... on HeadRefForcePushedEvent { createdAt afterCommit { oid } } }
     }
+    reviewDecision @include(if: $authored)
+    ${decisionsField(AUTHORED)}
+    ${threadsField('first: 100', AUTHORED)}
+    ${prCommentsField('last: 100', AUTHORED)}
+    ${reviewSummariesField('last: 100', AUTHORED, 'allReviews')}
   }
 `
 
 const SEARCH_QUERY = `
-  query($q: String!, $viewer: String!, $cursor: String) {
-    search(query: $q, type: ISSUE, first: 50, after: $cursor) {
+  query($q: String!, $viewer: String!, $authored: Boolean!, $pageSize: Int!, $cursor: String) {
+    search(query: $q, type: ISSUE, first: $pageSize, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes { ... on PullRequest { ...PrFields } }
     }
@@ -38,7 +47,7 @@ const SEARCH_QUERY = `
 `
 
 const SINGLE_QUERY = `
-  query($owner: String!, $repo: String!, $number: Int!, $viewer: String!) {
+  query($owner: String!, $repo: String!, $number: Int!, $viewer: String!, $authored: Boolean!) {
     repository(owner: $owner, name: $repo) { pullRequest(number: $number) { ...PrFields } }
   }
   ${PR_FIELDS}
@@ -63,7 +72,11 @@ const REVIEW_COMMENTS_QUERY = `
   }
 `
 
-const MAX_PAGES = 4
+/** Authored PRs fetch every thread, comment, and review, so they come in small pages to keep each query's rate-limit cost low. */
+export const SEARCH_PAGES: Record<PrListKind, { size: number; max: number }> = {
+  reviewing: { size: 50, max: 4 },
+  authored: { size: 10, max: 10 },
+}
 const MAX_NODE_IDS = 100
 
 interface RawReview {
@@ -91,7 +104,7 @@ interface OlderReviewPage {
   nodes: (RawReview & ReviewCommentsNode)[]
 }
 
-interface RawPr {
+interface RawPr extends Partial<RawAuthorFields> {
   id: string
   number: number
   url: string
@@ -189,10 +202,14 @@ async function olderReviewsUntilCounted(gh: GithubClient, raw: RawPr, newest: My
   return reviews
 }
 
-async function myReviewsOf(gh: GithubClient, raws: RawPr[]): Promise<MyReview[][]> {
+/** Returns my reviews on each PR, paging back past thread replies only for PRs I review; author phases don't read them. */
+async function myReviewsOf(gh: GithubClient, raws: RawPr[], kind: PrListKind): Promise<MyReview[][]> {
   const replyOnly = await replyOnlyReviewIds(gh, raws.flatMap((raw) => raw.reviews.nodes))
   return Promise.all(
-    raws.map((raw) => olderReviewsUntilCounted(gh, raw, raw.reviews.nodes.map((r) => toMyReview(r, replyOnly.has(r.id))))),
+    raws.map((raw) => {
+      const newest = raw.reviews.nodes.map((r) => toMyReview(r, replyOnly.has(r.id)))
+      return isAuthored(kind) ? newest : olderReviewsUntilCounted(gh, raw, newest)
+    }),
   )
 }
 
@@ -206,6 +223,7 @@ interface SearchResponse {
 }
 
 function toPr(raw: RawPr, viewer: string, myReviews: MyReview[]): GithubPr {
+  const authored = authorFields(raw)
   const reviewRequestedFromMe = raw.reviewRequests.nodes.some(
     (n) => n.requestedReviewer?.login?.toLowerCase() === viewer.toLowerCase(),
   )
@@ -232,16 +250,33 @@ function toPr(raw: RawPr, viewer: string, myReviews: MyReview[]): GithubPr {
     files: raw.files?.nodes.map((f) => f.path) ?? [],
     reviewRequestedFromMe,
     myReviews,
+    feedback: authored ? authorFeedback(authored, viewer) : null,
   }
 }
 
-export async function searchPrs(queries: string[]): Promise<{ viewer: string; prs: GithubPr[] }> {
+function authorFields(raw: RawPr): RawAuthorFields | null {
+  const { reviewDecision, latestOpinionatedReviews, reviewThreads, comments, allReviews } = raw
+  if (!latestOpinionatedReviews || !reviewThreads || !comments || !allReviews) return null
+  return { reviewDecision: reviewDecision ?? null, latestOpinionatedReviews, reviewThreads, comments, allReviews }
+}
+
+const isAuthored = (kind: PrListKind) => kind === 'authored'
+
+export async function searchPrs(queries: string[], kind: PrListKind): Promise<{ viewer: string; prs: GithubPr[] }> {
   const gh = await github()
   const byId = new Map<string, RawPr>()
   for (const q of queries) {
     let cursor: string | null = null
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, { q, viewer: gh.login, cursor })
+    const pages = SEARCH_PAGES[kind]
+    for (let page = 0; page < pages.max; page++) {
+      const response: SearchResponse = await gh.graphql<SearchResponse>(SEARCH_QUERY, {
+        q,
+        viewer: gh.login,
+        authored: isAuthored(kind),
+        pageSize: pages.size,
+        cursor,
+        request: timeoutRequest(),
+      })
       for (const node of response.search.nodes) {
         if ('id' in node) byId.set(node.id, node as RawPr)
       }
@@ -250,19 +285,21 @@ export async function searchPrs(queries: string[]): Promise<{ viewer: string; pr
     }
   }
   const raws = [...byId.values()]
-  const myReviews = await myReviewsOf(gh, raws)
+  const myReviews = await myReviewsOf(gh, raws, kind)
   return { viewer: gh.login, prs: raws.map((raw, index) => toPr(raw, gh.login, myReviews[index])) }
 }
 
-export async function fetchPr(owner: string, repo: string, number: number): Promise<GithubPr> {
+export async function fetchPr(owner: string, repo: string, number: number, kind: PrListKind): Promise<GithubPr> {
   const gh = await github()
   const response = await gh.graphql<{ repository: { pullRequest: RawPr } }>(SINGLE_QUERY, {
     owner,
     repo,
     number,
     viewer: gh.login,
+    authored: isAuthored(kind),
+    request: timeoutRequest(),
   })
   const raw = response.repository.pullRequest
-  const [myReviews] = await myReviewsOf(gh, [raw])
+  const [myReviews] = await myReviewsOf(gh, [raw], kind)
   return toPr(raw, gh.login, myReviews)
 }

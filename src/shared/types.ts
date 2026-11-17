@@ -1,13 +1,36 @@
-export type Phase = 'in_progress' | 'unreviewed' | 'awaiting_rereview' | 'pending_changes' | 'approved'
+export type ReviewPhase = 'in_progress' | 'unreviewed' | 'awaiting_rereview' | 'pending_changes' | 'approved'
 
-export const PHASE_ORDER: Phase[] = ['in_progress', 'awaiting_rereview', 'unreviewed', 'pending_changes', 'approved']
+export type AuthorPhase = 'in_progress' | 'needs_response' | 'awaiting_reviews' | 'approved'
+
+export type Phase = ReviewPhase | AuthorPhase
+
+export const REVIEW_PHASE_ORDER: ReviewPhase[] = ['in_progress', 'awaiting_rereview', 'unreviewed', 'pending_changes', 'approved']
+
+export const AUTHOR_PHASE_ORDER: AuthorPhase[] = ['in_progress', 'needs_response', 'awaiting_reviews', 'approved']
 
 export const PHASE_LABELS: Record<Phase, string> = {
   in_progress: 'In progress',
   unreviewed: 'Unreviewed',
   awaiting_rereview: 'Awaiting re-review',
   pending_changes: 'Pending changes',
+  needs_response: 'Needs response',
+  awaiting_reviews: 'Awaiting reviews',
   approved: 'Approved',
+}
+
+export type PrListKind = 'reviewing' | 'authored'
+
+export type ReviewDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED'
+
+/** Review activity on a PR the viewer authored. */
+export interface PrFeedback {
+  reviewDecision: ReviewDecision | null
+  openThreads: number
+  unacknowledged: number
+  changesRequestedBy: string[]
+  approvedBy: string[]
+  /** True when the PR has more threads, comments, or reviews than the list query reads, so some feedback went unchecked. */
+  truncated: boolean
 }
 
 export type ReviewState = 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
@@ -62,6 +85,7 @@ export interface Pr {
   files: string[]
   reviewRequestedFromMe: boolean
   myReviews: MyReview[]
+  feedback: PrFeedback | null
   phase: Phase
   reviewStatus: SessionStatus | null
   summary: string | null
@@ -212,7 +236,7 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
-export type TurnMode = 'review' | 'refine'
+export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review' | 'resolve_merge'
 
 export type TimelineEntry =
   | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }
@@ -242,6 +266,35 @@ export interface SubmittedReview {
   foldedDraftIds?: string[]
 }
 
+export type FeedbackItemKind = 'thread' | 'review' | 'comment' | 'finding'
+
+export interface FeedbackComment {
+  author: string | null
+  avatarUrl: string | null
+  body: string
+  createdAt: string
+  url: string
+}
+
+/** One thing a reviewer, or a self-review, raised on the viewer's own PR. */
+export interface FeedbackItem {
+  id: string
+  kind: FeedbackItemKind
+  author: string | null
+  authorIsBot: boolean
+  avatarUrl: string | null
+  path: string | null
+  line: number | null
+  url: string | null
+  severity: Severity | null
+  outdated: boolean
+  answered: boolean
+  comments: FeedbackComment[]
+  replyToCommentId: number | null
+  /** Node id of the comment an acknowledgment reaction goes on, or null when there is nothing to react to. */
+  reactionSubjectId: string | null
+}
+
 export interface PrRef {
   owner: string
   repo: string
@@ -249,7 +302,8 @@ export interface PrRef {
   url: string
 }
 
-export interface ReviewSession {
+/** Fields every Claude session Rally runs for a PR has. */
+export interface SessionCore {
   id: string
   pr: PrRef
   prKey: string
@@ -257,14 +311,123 @@ export interface ReviewSession {
   status: SessionStatus
   error: string | null
   timeline: TimelineEntry[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ReviewSession extends SessionCore {
   drafts: Drafts | null
   submitted: SubmittedReview | null
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]
   submitAttemptReviewId?: number
-  createdAt: string
-  updatedAt: string
+}
+
+export const RESPONSE_ACTIONS = ['investigate', 'fix', 'push_back', 'answer'] as const
+
+export type ResponseAction = (typeof RESPONSE_ACTIONS)[number]
+
+export const RESPONSE_ACTION_LABELS: Record<ResponseAction, string> = {
+  investigate: 'Investigate',
+  fix: 'Fix',
+  push_back: 'Push back',
+  answer: 'Answer',
+}
+
+export const RESPONSE_VERDICTS = ['valid', 'partly_valid', 'not_valid', 'unclear'] as const
+
+export type ResponseVerdict = (typeof RESPONSE_VERDICTS)[number]
+
+export const RESPONSE_VERDICT_LABELS: Record<ResponseVerdict, string> = {
+  valid: 'Valid',
+  partly_valid: 'Partly valid',
+  not_valid: 'Not valid',
+  unclear: 'Unclear',
+}
+
+export interface ActionRequest {
+  itemId: string
+  action: ResponseAction
+  note: string
+}
+
+export interface ItemResponse {
+  itemId: string
+  action: ResponseAction
+  verdict: ResponseVerdict | null
+  summary: string
+  reply: string
+  /** Files Claude changed for a fix, which Rally commits after the turn. */
+  files: string[]
+  commitMessage: string
+  /** True until Rally commits the files Claude listed. */
+  pendingCommit: boolean
+  commits: string[]
+  commitError: string | null
+  at: string
+}
+
+export interface PostedReply {
+  at: string
+  body: string
+  url: string | null
+  resolved: boolean
+  error: string | null
+  resolveError: string | null
+}
+
+export interface ReplyPost {
+  itemId: string
+  body: string
+  resolve: boolean
+}
+
+export interface LocalCommit {
+  oid: string
+  subject: string
+}
+
+export interface CloneInfo {
+  path: string
+  branch: string
+  baseRef: string
+  /** The branch head on GitHub when Rally last synced, merged, or pushed; commits after it are Rally's own. */
+  syncedHead?: string
+}
+
+export interface PushRecord {
+  at: string
+  oid: string
+  commits: LocalCommit[]
+}
+
+export interface ReviewReRequest {
+  at: string
+  reviewers: string[]
+  error: string | null
+}
+
+export interface SelfReview {
+  verdict: string
+  reportMarkdown: string
+  findings: FeedbackItem[]
+}
+
+export interface AuthorSession extends SessionCore {
+  clone: CloneInfo | null
+  items: FeedbackItem[]
+  responses: Record<string, ItemResponse>
+  posted: Record<string, PostedReply>
+  selfReview: SelfReview | null
+  commits: LocalCommit[]
+  uncommitted: string[]
+  lastPush: PushRecord | null
+  /** Files left conflicted by merging the remote branch, until the merge is committed or aborted. */
+  mergeConflicts: string[]
+  /** Reviewers I replied to whose review Rally re-requests once none of their comments are left unanswered. */
+  reviewersToReRequest: string[]
+  lastReRequest: ReviewReRequest | null
 }
 
 export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {

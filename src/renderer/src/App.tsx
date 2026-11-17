@@ -1,8 +1,11 @@
-import { createHashRouter, Link, NavLink, Outlet, RouterProvider } from 'react-router-dom'
+import { createHashRouter, Link, NavLink, Outlet, RouterProvider, useLocation } from 'react-router-dom'
 import logo from '../../../resources/icon.svg'
 import { SETTINGS_ROOT } from './lib/settingsSections'
 import { useSkin } from './lib/skins'
+import { LIST_ROOTS } from './lib/routes'
+import { AuthorPrDetail } from './pages/AuthorPrDetail'
 import { Dashboard } from './pages/Dashboard'
+import { MyPrs } from './pages/MyPrs'
 import { PrDetail } from './pages/PrDetail'
 import { Settings } from './pages/Settings'
 
@@ -19,6 +22,28 @@ function GearIcon() {
   )
 }
 
+const NAV_TABS = [
+  { to: LIST_ROOTS.reviewing, label: 'Reviewing', isActive: (path: string) => path === '/' || path.startsWith('/pr/') },
+  { to: LIST_ROOTS.authored, label: 'My PRs', isActive: (path: string) => path.startsWith(LIST_ROOTS.authored) },
+]
+
+function NavTabs() {
+  const { pathname } = useLocation()
+  return (
+    <nav className="ml-8 flex gap-1">
+      {NAV_TABS.map((tab) => (
+        <Link
+          key={tab.to}
+          to={tab.to}
+          className={`rounded-md px-3 py-1 text-sm transition ${tab.isActive(pathname) ? 'bg-white/10 text-white' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100'}`}
+        >
+          {tab.label}
+        </Link>
+      ))}
+    </nav>
+  )
+}
+
 function Layout() {
   const skin = useSkin()
   return (
@@ -31,6 +56,7 @@ function Layout() {
           </span>
           {skin.mark && <span className="text-base">{skin.mark}</span>}
         </Link>
+        <NavTabs />
         <NavLink
           to={SETTINGS_ROOT}
           title="Settings"
@@ -55,6 +81,8 @@ const router = createHashRouter([
     children: [
       { path: '/', element: <Dashboard /> },
       { path: '/pr/:owner/:repo/:number', element: <PrDetail /> },
+      { path: LIST_ROOTS.authored, element: <MyPrs /> },
+      { path: `${LIST_ROOTS.authored}/:owner/:repo/:number`, element: <AuthorPrDetail /> },
       { path: `${SETTINGS_ROOT}/:section?`, element: <Settings /> },
     ],
   },

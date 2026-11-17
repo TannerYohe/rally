@@ -144,11 +144,14 @@ export async function uncommittedPaths(clone: CloneInfo): Promise<string[]> {
   return paths
 }
 
+/** Pins the a/ and b/ prefixes the diff view parses and shows file contents rather than a textconv or external driver's rendering. */
+const DIFF_DISPLAY_FLAGS = ['--src-prefix=a/', '--dst-prefix=b/', '--no-textconv', '--no-ext-diff']
+
 const truncateDiff = (diff: string) => (diff.length > MAX_DIFF_CHARS ? `${diff.slice(0, MAX_DIFF_CHARS)}\n… diff truncated` : diff)
 
 /** Returns the unified diff of the clone's unpushed commits, cut off at MAX_DIFF_CHARS. */
 export async function cloneDiff(clone: CloneInfo): Promise<string> {
-  return truncateDiff(await git(clone.path, ['diff', `${syncedRef(clone)}...HEAD`]))
+  return truncateDiff(await git(clone.path, ['diff', ...DIFF_DISPLAY_FLAGS, `${syncedRef(clone)}...HEAD`]))
 }
 
 /** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index and cut off at MAX_DIFF_CHARS. */
@@ -157,7 +160,7 @@ export async function uncommittedDiff(clone: CloneInfo): Promise<string> {
   try {
     await git(clone.path, ['read-tree', 'HEAD'], LOCAL_TIMEOUT_MS, env)
     await git(clone.path, ['add', '-A', '--', '.'], LOCAL_TIMEOUT_MS, env)
-    return truncateDiff(await git(clone.path, ['diff', '--cached', 'HEAD'], LOCAL_TIMEOUT_MS, env))
+    return truncateDiff(await git(clone.path, ['diff', '--cached', ...DIFF_DISPLAY_FLAGS, 'HEAD'], LOCAL_TIMEOUT_MS, env))
   } finally {
     await rm(env.GIT_INDEX_FILE, { force: true })
   }

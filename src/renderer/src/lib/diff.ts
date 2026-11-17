@@ -6,8 +6,9 @@ export interface DiffFile {
 }
 
 const FILE_HEADER = /^diff --git a\/.+? b\/(.+)$/
+const KEPT_METADATA = /^(?:new file mode|deleted file mode|old mode|new mode|similarity index|rename from|rename to|Binary files) /
 
-/** Splits a unified diff into files, dropping each file's metadata lines before its first hunk. */
+/** Splits a unified diff into files, keeping the metadata lines that describe a file with no hunks, such as a mode change or a binary file. */
 export function splitDiffFiles(diff: string): DiffFile[] {
   const files: DiffFile[] = []
   let inHunk = false
@@ -20,7 +21,7 @@ export function splitDiffFiles(diff: string): DiffFile[] {
     }
     if (files.length === 0) continue
     if (line.startsWith('@@')) inHunk = true
-    if (inHunk) files.at(-1)!.lines.push(line)
+    if (inHunk || KEPT_METADATA.test(line)) files.at(-1)!.lines.push(line)
   }
   return files
 }

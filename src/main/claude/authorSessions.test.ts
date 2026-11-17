@@ -133,6 +133,9 @@ mocks.stored = [
   stored(44, { reviewersToReRequest: ['bob'] }),
   stored(45),
   stored(46, { status: 'cancelled', clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', '') } }),
+  stored(47, { clone: CLONE, uncommitted: ['a.ts'] }),
+  stored(48),
+  stored(49),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
@@ -323,11 +326,37 @@ describe('push', () => {
     expect(session(29)).toMatchObject({ uncommitted: [], commits: [{ oid: 'def', subject: 'Tidy up' }] })
   })
 
-  it('refuses to commit without a message, while a merge is open, or when nothing changed', async () => {
+  it('refuses to commit without a message, while a merge is open, or without a clone', async () => {
     await expect(authorSessions.commitUncommitted('author-25', ' ')).rejects.toThrow('Write a commit message first')
     await expect(authorSessions.commitUncommitted('author-14', 'Tidy up')).rejects.toThrow('Finish or abort the merge')
+    await expect(authorSessions.commitUncommitted('author-48', 'Tidy up')).rejects.toThrow('nothing to commit')
+    expect(mocks.commitAll).not.toHaveBeenCalled()
+  })
+
+  it('refuses to commit while a turn runs', async () => {
+    let release: () => void = () => {}
+    mocks.query.mockImplementation(async function* () {
+      await new Promise<void>((resolve) => (release = resolve))
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+    await authorSessions.feedback('author-49', 'still working')
+    await expect(authorSessions.commitUncommitted('author-49', 'Tidy up')).rejects.toThrow('already working')
+    expect(mocks.commitAll).not.toHaveBeenCalled()
+    release()
+    await vi.waitFor(() => expect(session(49).status).toBe('awaiting_feedback'))
+  })
+
+  it('rereads the clone when there is nothing to commit or the commit fails', async () => {
+    mocks.uncommittedPaths.mockResolvedValue(['b.ts'])
+    mocks.localCommits.mockResolvedValue([{ oid: 'x', subject: 'Earlier' }])
     mocks.commitAll.mockResolvedValue(null)
     await expect(authorSessions.commitUncommitted('author-25', 'Tidy up')).rejects.toThrow('no changes to commit')
+    expect(session(25)).toMatchObject({ uncommitted: ['b.ts'], commits: [{ oid: 'x', subject: 'Earlier' }] })
+
+    mocks.uncommittedPaths.mockResolvedValue(['c.ts'])
+    mocks.commitAll.mockRejectedValue(new Error('git commit failed: hook rejected'))
+    await expect(authorSessions.commitUncommitted('author-25', 'Tidy up')).rejects.toThrow('hook rejected')
+    expect(session(25).uncommitted).toEqual(['c.ts'])
   })
 
   it('keeps the merge open when conflict markers remain', async () => {
@@ -524,7 +553,7 @@ describe('self-review', () => {
 })
 
 describe('pruneUnlisted', () => {
-  const own = [40, 41, 42, 43, 44, 45, 46].map((n) => `acme/api#${n}`)
+  const own = [40, 41, 42, 43, 44, 45, 46, 47].map((n) => `acme/api#${n}`)
   const othersListed = () => new Set(mocks.stored.map((st) => st.prKey).filter((key) => !own.includes(key)))
 
   it('removes sessions with no work left for PRs that left the list, with their session folders', async () => {
@@ -547,6 +576,7 @@ describe('pruneUnlisted', () => {
     expect(authorSessions.getByPr('acme/api#43')).not.toBeNull()
     expect(authorSessions.getByPr('acme/api#44')).not.toBeNull()
     expect(authorSessions.getByPr('acme/api#45')).not.toBeNull()
+    expect(authorSessions.getByPr('acme/api#47')).not.toBeNull()
     expect(authorSessions.getByPr('acme/api#3')).not.toBeNull()
     release()
     await vi.waitFor(() => expect(session(45).status).toBe('awaiting_feedback'))

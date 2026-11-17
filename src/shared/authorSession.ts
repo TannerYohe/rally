@@ -39,16 +39,26 @@ export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'poste
   )
 }
 
-type WorkState = Pick<AuthorSession, 'commits' | 'responses' | 'posted' | 'items'>
+type WorkState = Pick<AuthorSession, 'commits' | 'uncommitted' | 'responses' | 'posted' | 'items'>
 
-/** Returns whether the session holds work GitHub doesn't have yet: unpushed commits or unposted replies. */
+/** Returns whether the session holds work GitHub doesn't have yet: uncommitted edits, unpushed commits, or unposted replies. */
 export function hasUnsharedWork(session: WorkState): boolean {
-  return session.commits.length > 0 || pendingReplies(session).length > 0
+  return session.uncommitted.length > 0 || session.commits.length > 0 || pendingReplies(session).length > 0
 }
 
-/** Returns whether the session has a running turn, an error, unpushed commits, or unposted replies. */
+/** Returns whether the session has a running turn, an error, uncommitted edits, unpushed commits, or unposted replies. */
 export function hasPendingWork(session: WorkState & Pick<AuthorSession, 'status'>): boolean {
   return session.status !== 'awaiting_feedback' || hasUnsharedWork(session)
+}
+
+/** Returns how many uncommitted files and unpushed commits the clone holds that GitHub doesn't. */
+export function cloneChangeCount(session: Pick<AuthorSession, 'commits' | 'uncommitted'>): number {
+  return session.commits.length + session.uncommitted.length
+}
+
+/** Returns whether the clone has commits to push with nothing left uncommitted and no merge open. */
+export function canPush(session: Pick<AuthorSession, 'commits' | 'uncommitted' | 'mergeConflicts'>): boolean {
+  return session.commits.length > 0 && session.uncommitted.length === 0 && session.mergeConflicts.length === 0
 }
 
 export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {

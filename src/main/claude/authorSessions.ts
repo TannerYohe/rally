@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, newAuthorSession, pendingReplies, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import {
   prKey,
   type ActionRequest,
@@ -303,7 +303,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
       if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
-      const hasWork = session.commits.length > 0 || pendingReplies(session).length > 0 || session.mergeConflicts.length > 0
+      const hasWork = hasUnsharedWork(session) || session.mergeConflicts.length > 0
       if (hasWork || session.reviewersToReRequest.length > 0) continue
       console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId: session.id })
       this.remove(session)

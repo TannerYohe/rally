@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasPendingWork, itemLocation, pendingReplies } from './authorSession'
+import { hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
@@ -48,6 +48,14 @@ describe('hasPendingWork', () => {
     expect(hasPendingWork(session({ status: 'running' }))).toBe(true)
     expect(hasPendingWork(session({ commits: [{ oid: 'a', subject: 'fix' }] }))).toBe(true)
     expect(hasPendingWork(session({ responses: { a: response('a', 'Done') } }))).toBe(true)
+  })
+})
+
+describe('hasUnsharedWork', () => {
+  it('ignores the last turn status and counts only unpushed commits and unposted replies', () => {
+    expect(hasUnsharedWork(session({ status: 'error' }))).toBe(false)
+    expect(hasUnsharedWork(session({ commits: [{ oid: 'a', subject: 'fix' }] }))).toBe(true)
+    expect(hasUnsharedWork(session({ responses: { a: response('a', 'Done') } }))).toBe(true)
   })
 })
 

@@ -39,9 +39,16 @@ export function pendingReplies(session: Pick<AuthorSession, 'responses' | 'poste
   )
 }
 
+type WorkState = Pick<AuthorSession, 'commits' | 'responses' | 'posted' | 'items'>
+
+/** Returns whether the session holds work GitHub doesn't have yet: unpushed commits or unposted replies. */
+export function hasUnsharedWork(session: WorkState): boolean {
+  return session.commits.length > 0 || pendingReplies(session).length > 0
+}
+
 /** Returns whether the session has a running turn, an error, unpushed commits, or unposted replies. */
-export function hasPendingWork(session: Pick<AuthorSession, 'status' | 'commits' | 'responses' | 'posted' | 'items'>): boolean {
-  return session.status !== 'awaiting_feedback' || session.commits.length > 0 || pendingReplies(session).length > 0
+export function hasPendingWork(session: WorkState & Pick<AuthorSession, 'status'>): boolean {
+  return session.status !== 'awaiting_feedback' || hasUnsharedWork(session)
 }
 
 export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {

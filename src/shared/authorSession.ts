@@ -1,5 +1,8 @@
 import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply } from './types'
 
+/** Where a fix reply names its commit; Rally replaces it with the short sha once it commits. */
+export const COMMIT_PLACEHOLDER = '{commit}'
+
 export const PUSH_BEFORE_POSTING_ERROR = 'Push your commits before posting replies, so the replies point at code reviewers can see.'
 
 /** Returns whether a response has a reply that hasn't been posted since Claude last wrote it. */
@@ -35,12 +38,4 @@ export function itemLocation(item: Pick<FeedbackItem, 'path' | 'line' | 'kind'>)
     default:
       return 'General'
   }
-}
-
-/** Returns the turn message asking Claude to rebase its commits after the branch moved on GitHub. */
-export function rebaseMessage(branch: string): string {
-  return (
-    `The branch moved on GitHub after you committed, so Rally couldn't push. In the clone, fetch origin, rebase your commits onto origin/${branch}, ` +
-    'resolve any conflicts, and rerun the checks you ran before. Then call publish_responses again for every item you fixed, with the new commit shas and replies that name them.'
-  )
 }

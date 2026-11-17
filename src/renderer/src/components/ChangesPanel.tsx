@@ -5,11 +5,14 @@ import { age, fullTime } from '../lib/format'
 import { PRIMARY_BUTTON_CLASS } from '../lib/theme'
 import { DiffView } from './DiffView'
 
+const MERGE_BUTTON_CLASS = 'rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-amber-500/30 hover:bg-amber-500/25 disabled:opacity-40'
+
 interface Props {
   session: AuthorSession
   disabled: boolean
   onPush(): void
-  onRebase(): void
+  onResolveConflicts(): void
+  onAbortMerge(): void
 }
 
 function useCloneDiff(session: AuthorSession): { diff: string; error: string | null } {
@@ -32,23 +35,31 @@ function useCloneDiff(session: AuthorSession): { diff: string; error: string | n
   return state
 }
 
-export function ChangesPanel({ session, disabled, onPush, onRebase }: Props) {
+export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge }: Props) {
   const { diff, error } = useCloneDiff(session)
-  const { commits, uncommitted, lastPush, remoteMoved, clone } = session
+  const { commits, uncommitted, lastPush, mergeConflicts, clone } = session
 
   return (
     <div className="space-y-4">
-      {remoteMoved && (
-        <div className="flex items-center gap-3 rounded-lg bg-amber-950/70 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/30">
-          The branch moved on GitHub, so Rally didn't push.
-          <button className="ml-auto rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-amber-500/30 hover:bg-amber-500/25 disabled:opacity-40" disabled={disabled} onClick={onRebase}>
-            Ask Claude to rebase
-          </button>
+      {mergeConflicts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-amber-950/70 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/30">
+          <span title={mergeConflicts.join('\n')}>
+            Merging the branch's new commits from GitHub conflicted in {mergeConflicts.length} file(s).{' '}
+            {disabled ? 'Claude is resolving them.' : 'Rally commits the merge once Claude resolves them.'}
+          </span>
+          <div className="ml-auto flex gap-2">
+            <button className={MERGE_BUTTON_CLASS} disabled={disabled} onClick={onResolveConflicts}>
+              Resolve with Claude
+            </button>
+            <button className={MERGE_BUTTON_CLASS} disabled={disabled} onClick={onAbortMerge}>
+              Abort merge
+            </button>
+          </div>
         </div>
       )}
       {uncommitted.length > 0 && (
         <div className="rounded-lg bg-amber-950/50 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/20" title={uncommitted.join('\n')}>
-          Claude left {uncommitted.length} uncommitted change(s) in the clone. They won't be pushed.
+          {uncommitted.length} changed file(s) in the clone aren't part of any fix Claude listed, so Rally didn't commit them. They won't be pushed.
         </div>
       )}
 

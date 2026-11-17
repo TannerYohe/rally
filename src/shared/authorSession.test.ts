@@ -8,7 +8,11 @@ const response = (itemId: string, reply: string, at = '2026-11-02T00:00:00Z'): I
   verdict: null,
   summary: '',
   reply,
+  files: [],
+  commitMessage: '',
+  pendingCommit: false,
   commits: [],
+  commitError: null,
   at,
 })
 

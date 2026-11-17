@@ -358,7 +358,13 @@ export interface ItemResponse {
   verdict: ResponseVerdict | null
   summary: string
   reply: string
+  /** Files Claude changed for a fix, which Rally commits after the turn. */
+  files: string[]
+  commitMessage: string
+  /** True until Rally commits the files Claude listed. */
+  pendingCommit: boolean
   commits: string[]
+  commitError: string | null
   at: string
 }
 
@@ -415,7 +421,8 @@ export interface AuthorSession extends SessionCore {
   commits: LocalCommit[]
   uncommitted: string[]
   lastPush: PushRecord | null
-  remoteMoved: boolean
+  /** Files left conflicted by merging the remote branch, until the merge is committed or aborted. */
+  mergeConflicts: string[]
   /** Reviewers I replied to whose review Rally re-requests once none of their comments are left unanswered. */
   reviewersToReRequest: string[]
   lastReRequest: ReviewReRequest | null

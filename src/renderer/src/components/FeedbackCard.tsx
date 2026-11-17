@@ -167,6 +167,8 @@ export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, 
             ))}
           </div>
           {response.summary && <Markdown>{response.summary}</Markdown>}
+          {response.pendingCommit && <p className="text-xs text-ink-500">Rally commits {response.files.join(', ')} when this turn ends.</p>}
+          {response.commitError && <p className="text-xs text-amber-300">{response.commitError}</p>}
           {canReplyTo(item) && replyPending && (
             <div className="space-y-2">
               <BodyTextarea value={reply} disabled={disabled} onChange={(value) => onReplyEdit(value === response.reply ? undefined : value)} />

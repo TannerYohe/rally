@@ -19,7 +19,7 @@ const item = (id: string, kind: FeedbackItem['kind'] = 'thread'): FeedbackItem =
   reactionSubjectId: null,
 })
 
-const response = (itemId: string, reply: string): ItemResponse => ({ itemId, action: 'push_back', verdict: null, summary: '', reply, commits: [], at: '2026-11-02T00:00:00Z' })
+const response = (itemId: string, reply: string): ItemResponse => ({ itemId, action: 'push_back', verdict: null, summary: '', reply, files: [], commitMessage: '', pendingCommit: false, commits: [], commitError: null, at: '2026-11-02T00:00:00Z' })
 
 function session(overrides: Partial<AuthorSession> = {}): AuthorSession {
   return {
@@ -40,7 +40,7 @@ function session(overrides: Partial<AuthorSession> = {}): AuthorSession {
     commits: [],
     uncommitted: [],
     lastPush: null,
-    remoteMoved: false,
+    mergeConflicts: [],
     reviewersToReRequest: [],
     lastReRequest: null,
     ...overrides,

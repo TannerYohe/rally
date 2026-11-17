@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { PUSH_BEFORE_POSTING_ERROR, rebaseMessage } from '@shared/authorSession'
+import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrRef } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { BusyDot } from '../components/BusyDot'
@@ -234,7 +234,8 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             session={session}
             disabled={busy}
             onPush={() => run(() => window.rally.pushAuthorCommits(session.id))}
-            onRebase={() => session.clone && sendMessage(rebaseMessage(session.clone.branch))}
+            onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
+            onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
           />
         ) : (
           <EmptyTab>No changes yet. Pick Fix on a comment to have Claude change the code.</EmptyTab>

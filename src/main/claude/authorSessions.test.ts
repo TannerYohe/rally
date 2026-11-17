@@ -35,7 +35,11 @@ const response = (itemId: string, reply: string): ItemResponse => ({
   verdict: null,
   summary: '',
   reply,
+  files: [],
+  commitMessage: '',
+  pendingCommit: false,
   commits: [],
+  commitError: null,
   at: '2026-11-02T00:00:00Z',
 })
 
@@ -58,7 +62,7 @@ function stored(number: number, overrides: Partial<AuthorSession> = {}): AuthorS
     commits: [],
     uncommitted: [],
     lastPush: null,
-    remoteMoved: false,
+    mergeConflicts: [],
     reviewersToReRequest: [],
     lastReRequest: null,
     ...overrides,
@@ -80,6 +84,9 @@ const mocks = vi.hoisted(() => ({
   localCommits: vi.fn(),
   uncommittedPaths: vi.fn(),
   pushClone: vi.fn(),
+  commitFiles: vi.fn(),
+  concludeMerge: vi.fn(),
+  abortMerge: vi.fn(),
   refreshOne: vi.fn(async () => {}),
   handlers: null as AuthorToolHandlers | null,
 }))
@@ -101,7 +108,11 @@ vi.mock('../github/authorReplies', () => ({
   resolveFeedbackThread: mocks.resolveFeedbackThread,
 }))
 vi.mock('../git/prClone', async (importOriginal) => ({
-  RemoteMovedError: (await importOriginal<typeof import('../git/prClone')>()).RemoteMovedError,
+  MergeConflictError: (await importOriginal<typeof import('../git/prClone')>()).MergeConflictError,
+  CLONE_DIR_NAME: 'repo',
+  commitFiles: mocks.commitFiles,
+  concludeMerge: mocks.concludeMerge,
+  abortMerge: mocks.abortMerge,
   cloneBranch: mocks.cloneBranch,
   syncClone: mocks.syncClone,
   localCommits: mocks.localCommits,
@@ -140,6 +151,8 @@ mocks.stored = [
   }),
   stored(13, { items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
   stored(11, { reviewersToReRequest: ['erin', 'frank'] }),
+  stored(14, { clone: CLONE, mergeConflicts: ['a.ts'], items: [thread('T1')] }),
+  stored(15, { clone: CLONE, items: [thread('T1')] }),
   stored(31, {
     items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }],
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
@@ -149,7 +162,7 @@ mocks.stored = [
 ]
 
 const { authorSessions, findingsFromDrafts } = await import('./authorSessions')
-const { RemoteMovedError } = await import('../git/prClone')
+const { MergeConflictError } = await import('../git/prClone')
 
 const session = (number: number) => authorSessions.getByPr(`acme/api#${number}`)!
 
@@ -167,6 +180,8 @@ beforeEach(() => {
     mocks.postAuthorReply,
     mocks.resolveFeedbackThread,
     mocks.pushClone,
+    mocks.commitFiles,
+    mocks.concludeMerge,
     mocks.requestReview,
     mocks.acknowledgeFeedbackItem,
   ])
@@ -194,19 +209,29 @@ describe('restoring sessions', () => {
 describe('runActions', () => {
   it('clones the branch, runs a turn, and keeps responses only for known items', async () => {
     mocks.fetchFeedbackItems.mockResolvedValue([thread('T1'), thread('T9')])
-    mocks.localCommits.mockResolvedValue([{ oid: 'def', subject: 'rename' }])
-    finishTurn(() => mocks.handlers!.onResponses([{ ...response('T1', 'Fixed in def'), action: 'fix' }, response('nope', 'x')]))
+    mocks.localCommits.mockResolvedValue([{ oid: 'def4567890', subject: 'Rename the helper' }])
+    mocks.commitFiles.mockResolvedValue('def4567890')
+    const fix = { ...response('T1', 'Renamed in {commit}.'), action: 'fix' as const, files: ['a.ts'], commitMessage: 'Rename the helper' }
+    finishTurn(() => mocks.handlers!.onResponses([fix, response('nope', 'x')]))
 
     await authorSessions.runActions(pr(20), [{ itemId: 'T1', action: 'fix', note: 'use camelCase' }], '')
     await vi.waitFor(() => expect(session(20).status).toBe('awaiting_feedback'))
 
     expect(mocks.cloneBranch).toHaveBeenCalledWith(join(tmpdir(), 'rally', session(20).id), expect.objectContaining({ branch: 'feature' }))
+    const [preToolUse] = mocks.query.mock.calls[0][0].options.hooks.PreToolUse[0].hooks
+    const gitCommit = (command: string) =>
+      preToolUse({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, tool_use_id: command }, undefined, {})
+    const clonePath = join(tmpdir(), 'rally', session(20).id, 'repo')
+    expect(await gitCommit(`git -C "${clonePath}" commit -am fix`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    expect(await gitCommit(`git -C "${clonePath}" log -1`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } })
     const prompt = mocks.query.mock.calls[0][0].prompt as string
     expect(prompt).toContain('## Item T1: Fix')
     expect(prompt).toContain('Note from me: use camelCase')
     expect(session(20).items.map((i) => i.id)).toEqual(['T1'])
     expect(Object.keys(session(20).responses)).toEqual(['T1'])
-    expect(session(20).commits).toEqual([{ oid: 'def', subject: 'rename' }])
+    expect(mocks.commitFiles).toHaveBeenCalledWith(CLONE, ['a.ts'], 'Rename the helper')
+    expect(session(20).responses.T1).toMatchObject({ pendingCommit: false, commits: ['def4567890'], reply: 'Renamed in def4567.', commitError: null })
+    expect(session(20).commits).toEqual([{ oid: 'def4567890', subject: 'Rename the helper' }])
     expect(authorSessions.sessionState('acme/api#20')).toEqual({ status: 'awaiting_feedback', active: true })
   })
 
@@ -230,15 +255,42 @@ describe('push', () => {
     const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
     mocks.pushClone.mockResolvedValue(lastPush)
     await authorSessions.push('author-3')
-    expect(session(3)).toMatchObject({ status: 'awaiting_feedback', commits: [], lastPush, remoteMoved: false })
+    expect(session(3)).toMatchObject({ status: 'awaiting_feedback', commits: [], lastPush, mergeConflicts: [] })
     expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 3)
   })
 
-  it('flags a branch that moved on GitHub', async () => {
-    mocks.pushClone.mockRejectedValue(new RemoteMovedError('feature'))
+  it('has Claude resolve a conflicting merge, then commits the merge', async () => {
+    mocks.pushClone.mockRejectedValue(new MergeConflictError('feature', ['a.ts']))
     mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
-    await expect(authorSessions.push('author-4')).rejects.toBeInstanceOf(RemoteMovedError)
-    expect(session(4)).toMatchObject({ status: 'error', remoteMoved: true, commits: [{ oid: 'abc', subject: 'fix' }] })
+    finishTurn()
+    await authorSessions.push('author-4')
+    expect(session(4).mergeConflicts).toEqual(['a.ts'])
+    await vi.waitFor(() => expect(mocks.concludeMerge).toHaveBeenCalledWith(CLONE, ['a.ts']))
+    expect(mocks.query.mock.calls[0][0].prompt).toContain('- a.ts')
+    await vi.waitFor(() => expect(session(4)).toMatchObject({ status: 'awaiting_feedback', mergeConflicts: [] }))
+  })
+
+  it('keeps the merge open when conflict markers remain', async () => {
+    mocks.concludeMerge.mockRejectedValue(new Error('Conflict markers remain in a.ts.'))
+    finishTurn()
+    await authorSessions.resolveConflicts('author-14')
+    await vi.waitFor(() => expect(session(14)).toMatchObject({ status: 'error', error: 'Conflict markers remain in a.ts.', mergeConflicts: ['a.ts'] }))
+    await expect(authorSessions.runActions(pr(14), [{ itemId: 'T1', action: 'fix', note: '' }], '')).rejects.toThrow('Finish or abort the merge')
+  })
+})
+
+describe('turn exits', () => {
+  it('reads the clone after a cancelled turn without committing anything', async () => {
+    mocks.localCommits.mockResolvedValue([])
+    mocks.uncommittedPaths.mockResolvedValue(['a.ts'])
+    mocks.query.mockImplementation(async function* () {
+      mocks.handlers!.onResponses([{ ...response('T1', 'Fixed in {commit}'), action: 'fix', files: ['a.ts'] }])
+      throw new Error('aborted')
+    })
+    await authorSessions.feedback('author-15', 'fix it')
+    await vi.waitFor(() => expect(session(15).status).toBe('error'))
+    expect(mocks.commitFiles).not.toHaveBeenCalled()
+    expect(session(15)).toMatchObject({ uncommitted: ['a.ts'], responses: { T1: { pendingCommit: true } } })
   })
 })
 
@@ -257,6 +309,12 @@ describe('postReplies', () => {
     expect(session(5).posted.T1).toMatchObject({ body: 'Done', resolved: true, error: null })
     expect(session(5).posted.T2).toMatchObject({ url: null, error: 'rate limited' })
     expect(session(5)).toMatchObject({ status: 'error', error: '1 of 2 replies failed to post.' })
+  })
+
+  it('refuses to post a reply that still has the commit placeholder', async () => {
+    await expect(authorSessions.postReplies('author-13', [{ itemId: 'T1', body: 'Fixed in {commit}', resolve: false }], false)).rejects.toThrow(
+      'still has {commit}',
+    )
   })
 
   it('refuses to post while commits are unpushed', async () => {

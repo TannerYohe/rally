@@ -147,23 +147,30 @@ function allReplies(reviews: RawReview[], replyOnly: Set<string>): boolean {
   return reviews.every((r) => replyOnly.has(r.id))
 }
 
+async function olderReviewsUntilCounted(gh: GithubClient, raw: RawPr, replyOnly: Set<string>): Promise<RawReview[]> {
+  let reviews = raw.reviews.nodes
+  let page = raw.reviews.pageInfo
+  for (let pages = 1; pages < MAX_REVIEW_PAGES; pages++) {
+    if (!allReplies(reviews, replyOnly)) break
+    if (!page.hasPreviousPage || !page.startCursor) break
+    const response = await gh.graphql<{ node: { reviews: ReviewPage } }>(OLDER_REVIEWS_QUERY, {
+      id: raw.id,
+      viewer: gh.login,
+      before: page.startCursor,
+    })
+    const older = response.node.reviews
+    for (const id of await replyOnlyReviewIds(gh, older.nodes)) replyOnly.add(id)
+    reviews = [...older.nodes, ...reviews]
+    page = older.pageInfo
+  }
+  return reviews
+}
+
 async function myReviewsOf(gh: GithubClient, raws: RawPr[]): Promise<MyReview[][]> {
   const replyOnly = await replyOnlyReviewIds(gh, raws.flatMap((raw) => raw.reviews.nodes))
   const result: MyReview[][] = []
   for (const raw of raws) {
-    const reviews = [...raw.reviews.nodes]
-    let page = raw.reviews.pageInfo
-    for (let pages = 1; pages < MAX_REVIEW_PAGES && page.hasPreviousPage && page.startCursor && allReplies(reviews, replyOnly); pages++) {
-      const response = await gh.graphql<{ node: { reviews: ReviewPage } }>(OLDER_REVIEWS_QUERY, {
-        id: raw.id,
-        viewer: gh.login,
-        before: page.startCursor,
-      })
-      const older = response.node.reviews
-      for (const id of await replyOnlyReviewIds(gh, older.nodes)) replyOnly.add(id)
-      reviews.unshift(...older.nodes)
-      page = older.pageInfo
-    }
+    const reviews = await olderReviewsUntilCounted(gh, raw, replyOnly)
     result.push(reviews.map((r) => toMyReview(r, replyOnly)))
   }
   return result

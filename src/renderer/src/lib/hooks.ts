@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { priorConcernThreadIds, type PrListState, type ReviewSession, type ReviewThread, type InstallAttempt, type TimelineEntry, type UpdateState } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTab } from './reviewTabs'
+import { playSound } from './sounds'
 import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
 
 const EMPTY_PRS: PrListState = { prs: [], viewer: null, refreshedAt: null, refreshing: false, error: null }
@@ -22,6 +23,10 @@ export function useUpdateState(): UpdateState {
     return window.rally.onUpdateChanged(setState)
   }, [])
   return state
+}
+
+export function useSoundCues(): void {
+  useEffect(() => window.rally.onSoundCue(playSound), [])
 }
 
 export function useFailedInstall(): [InstallAttempt | null, () => void] {

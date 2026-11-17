@@ -1,5 +1,6 @@
 import { createHashRouter, Link, NavLink, Outlet, RouterProvider } from 'react-router-dom'
 import logo from '../../../resources/icon.svg'
+import { useSoundCues } from './lib/hooks'
 import { SETTINGS_ROOT } from './lib/settingsSections'
 import { useSkin } from './lib/skins'
 import { Dashboard } from './pages/Dashboard'
@@ -61,5 +62,6 @@ const router = createHashRouter([
 ])
 
 export function App() {
+  useSoundCues()
   return <RouterProvider router={router} />
 }

@@ -6,7 +6,7 @@ vi.mock('./client', async (importOriginal) => ({
   github: async () => ({ graphql, login: 'me' }),
 }))
 
-const { fetchPr, isReplyOnly } = await import('./queries')
+const { fetchPr, isReplyOnly, searchPrs } = await import('./queries')
 
 const reply = { replyTo: { id: 'c1' } }
 const inline = { replyTo: null }
@@ -28,9 +28,9 @@ describe('isReplyOnly', () => {
   })
 })
 
-function rawPr(reviews: unknown[], pageInfo = { hasPreviousPage: false, startCursor: null as string | null }) {
+function rawPr(reviews: unknown[], pageInfo = { hasPreviousPage: false, startCursor: null as string | null }, number = 12) {
   return {
-    id: 'PR_1', number: 12, url: 'https://github.com/acme/api/pull/12', title: 't', body: '', createdAt: '', updatedAt: '',
+    id: `PR_${number}`, number, url: `https://github.com/acme/api/pull/${number}`, title: 't', body: '', createdAt: '', updatedAt: '',
     isDraft: false, additions: 1, deletions: 0, changedFiles: 1, headRefOid: 'head', baseRefName: 'main', headRefName: 'f',
     author: { login: 'author', avatarUrl: '' },
     repository: { name: 'api', owner: { login: 'acme' } },
@@ -49,7 +49,7 @@ function commentsFor(reviews: { id: string }[]) {
   return { nodes: reviews.map((r) => ({ id: r.id, comments: { nodes: [reply] } })) }
 }
 
-function olderPage(reviews: { id: string; body: string }[], startCursor: string, hasPreviousPage = true) {
+function olderPage<T extends { id: string; body: string }>(reviews: T[], startCursor: string, hasPreviousPage = true) {
   const nodes = reviews.map((r) => ({ ...r, comments: { nodes: r.body ? [] : [reply] } }))
   return { node: { reviews: { pageInfo: { hasPreviousPage, startCursor }, nodes } } }
 }
@@ -58,10 +58,9 @@ describe('fetchPr', () => {
   beforeEach(() => graphql.mockReset())
 
   it('carries each review database id and reply-only flag into myReviews', async () => {
-    const replyReview = { id: 'PRR_2', databaseId: 5787412470, state: 'COMMENTED', submittedAt: '2026-11-05T15:24:38Z', body: '', commit: { oid: 'head' } }
     const raw = rawPr([
       { id: 'PRR_1', databaseId: 101, state: 'APPROVED', submittedAt: '2026-11-04T00:00:00Z', body: 'ok', commit: { oid: 'old' } },
-      replyReview,
+      { ...replyReview(0), id: 'PRR_2', databaseId: 5787412470, submittedAt: '2026-11-05T15:24:38Z' },
     ])
     graphql.mockResolvedValueOnce({ repository: { pullRequest: raw } })
     graphql.mockResolvedValueOnce({ nodes: [{ id: 'PRR_2', comments: { nodes: [reply] } }] })
@@ -85,12 +84,41 @@ describe('fetchPr', () => {
 
     const pr = await fetchPr('acme', 'api', 12)
 
-    expect(graphql.mock.calls[2][1]).toMatchObject({ id: 'PR_1', viewer: 'me', before: 'c20' })
+    expect(graphql.mock.calls[2][1]).toMatchObject({ id: 'PR_12', viewer: 'me', before: 'c20' })
     expect(graphql.mock.calls[2][0]).toMatch(/comments\(first: 20\)/)
     expect(graphql).toHaveBeenCalledTimes(3)
     expect(pr.myReviews).toHaveLength(26)
     expect(pr.myReviews[0]).toEqual({ databaseId: 7, state: 'COMMENTED', submittedAt: '2026-11-04T00:00:00Z', commitOid: 'old', replyOnly: false })
     expect(pr.myReviews.slice(1).every((r) => r.replyOnly)).toBe(true)
+  })
+
+  it('pages back through two pages of replies to my last real review', async () => {
+    const newest = Array.from({ length: 20 }, (_, i) => replyReview(i + 40))
+    const middle = Array.from({ length: 20 }, (_, i) => replyReview(i + 20))
+    const real = { id: 'PRR_real', databaseId: 7, state: 'APPROVED', submittedAt: '2026-11-04T00:00:00Z', body: '', commit: { oid: 'old' } }
+    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c40' }) } })
+    graphql.mockResolvedValueOnce(commentsFor(newest))
+    graphql.mockResolvedValueOnce(olderPage(middle, 'c20'))
+    graphql.mockResolvedValueOnce(olderPage([real], 'c0'))
+
+    const pr = await fetchPr('acme', 'api', 12)
+
+    expect(graphql.mock.calls.slice(2).map((call) => call[1].before)).toEqual(['c40', 'c20'])
+    expect(pr.myReviews).toHaveLength(41)
+    expect(pr.myReviews[0]).toMatchObject({ databaseId: 7, state: 'APPROVED', replyOnly: false })
+  })
+
+  it('stops paging after 10 pages when every page is replies', async () => {
+    const newest = [replyReview(0)]
+    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c0' }) } })
+    graphql.mockResolvedValueOnce(commentsFor(newest))
+    for (let page = 1; page <= 10; page++) graphql.mockResolvedValueOnce(olderPage([replyReview(page)], `c${page}`))
+
+    const pr = await fetchPr('acme', 'api', 12)
+
+    expect(graphql).toHaveBeenCalledTimes(2 + 9)
+    expect(pr.myReviews).toHaveLength(10)
+    expect(pr.myReviews.every((r) => r.replyOnly)).toBe(true)
   })
 
   it('keeps paging when the window holds only replies and reviews that do not count', async () => {
@@ -145,5 +173,25 @@ describe('fetchPr', () => {
     expect(pr.myReviews.map((r) => r.databaseId)).toEqual([1001])
     expect(warn).toHaveBeenCalledWith(expect.any(String), { pr: 'https://github.com/acme/api/pull/12' })
     warn.mockRestore()
+  })
+})
+
+describe('searchPrs', () => {
+  beforeEach(() => graphql.mockReset())
+
+  it('pages back only for the PR whose newest reviews are all replies', async () => {
+    const replies = [replyReview(1), replyReview(2)]
+    const real = { id: 'PRR_real', databaseId: 7, state: 'COMMENTED', submittedAt: '2026-11-04T00:00:00Z', body: 'nits', commit: { oid: 'old' } }
+    const reviewed = rawPr([real], { hasPreviousPage: true, startCursor: 'r1' }, 12)
+    const repliesOnly = rawPr(replies, { hasPreviousPage: true, startCursor: 'c1' }, 13)
+    graphql.mockResolvedValueOnce({ search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [reviewed, repliesOnly] } })
+    graphql.mockResolvedValueOnce(commentsFor(replies))
+    graphql.mockResolvedValueOnce(olderPage([{ ...real, id: 'PRR_old', databaseId: 6 }], 'c0', false))
+
+    const { prs } = await searchPrs(['query'])
+
+    expect(graphql).toHaveBeenCalledTimes(3)
+    expect(graphql.mock.calls[2][1]).toMatchObject({ id: 'PR_13', before: 'c1' })
+    expect(prs.map((pr) => pr.myReviews.map((r) => r.databaseId))).toEqual([[7], [6, 1001, 1002]])
   })
 })

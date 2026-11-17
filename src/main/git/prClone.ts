@@ -103,7 +103,7 @@ export async function uncommittedPaths(clone: CloneInfo): Promise<string[]> {
 
 /** Returns the unified diff of the clone's unpushed commits, cut off at MAX_DIFF_CHARS. */
 export async function cloneDiff(clone: CloneInfo): Promise<string> {
-  const diff = await git(clone.path, ['diff', `origin/${clone.branch}..HEAD`])
+  const diff = await git(clone.path, ['diff', `origin/${clone.branch}...HEAD`])
   return diff.length > MAX_DIFF_CHARS ? `${diff.slice(0, MAX_DIFF_CHARS)}\n… diff truncated` : diff
 }
 

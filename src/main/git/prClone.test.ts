@@ -88,4 +88,30 @@ describe('prClone', () => {
     await syncClone(clone)
     expect(git(clone.path, 'rev-parse', 'HEAD').trim()).toBe(oid)
   })
+
+  it('diffs only the commits made in the clone after the branch moved on GitHub', async () => {
+    const clone = await cloneBranch(join(root, 'session7'), source)
+    const other = await cloneBranch(join(root, 'session8'), source)
+    commitFile(clone.path, 'mine.txt', 'mine\n')
+    commitFile(other.path, 'theirs.txt', 'theirs\n')
+    await pushClone(other, AT)
+    await syncClone(clone)
+
+    const diff = await cloneDiff(clone)
+    expect(diff).toContain('mine.txt')
+    expect(diff).not.toContain('theirs.txt')
+  })
+
+  it('keeps local commits on sync when the branch moved on GitHub', async () => {
+    const clone = await cloneBranch(join(root, 'session9'), source)
+    const other = await cloneBranch(join(root, 'session10'), source)
+    commitFile(clone.path, 'kept.txt', 'kept\n')
+    const [local] = await localCommits(clone)
+    commitFile(other.path, 'moved.txt', 'moved\n')
+    await pushClone(other, AT)
+
+    await syncClone(clone)
+    expect(git(clone.path, 'rev-parse', 'HEAD').trim()).toBe(local.oid)
+    expect((await localCommits(clone)).map((c) => c.oid)).toEqual([local.oid])
+  })
 })

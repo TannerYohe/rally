@@ -59,7 +59,7 @@ PRs are squash-merged, so the PR title becomes the commit semantic-release reads
 
 ### Dashboard
 
-The **Reviewing** tab lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand.
+The **Reviewing** tab lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand. After you submit a review, Rally fetches that PR again, and a full refresh already in flight keeps that newer copy.
 
 Each row shows author, title, repo, age, phase, and a one-line summary. Claude Haiku writes the summary, and it is cached per head SHA. If summarizing fails, the row shows **Summary unavailable** with the error on hover, and Rally retries on the next refresh.
 
@@ -155,12 +155,12 @@ Rally plays a short sound for three cues, each with its own sound in every skin:
 | Cue | When it plays |
 |---|---|
 | Claude finishes a turn | A turn in a review, a self-review, or a My PRs response session ends or errors. A cancelled turn plays nothing. Set it to play after every turn, only when no other turn is still running in either tab, or never. |
-| A PR needs your attention | In **Reviewing**, a PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. In **My PRs**, a PR is newly listed as needs response, or moves to it. A PR leaving In progress doesn't count, since that only follows your own work in Rally. Drafts and hidden PRs stay quiet. |
+| A PR needs your attention | In **Reviewing**, a PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. In **My PRs**, a PR is newly listed as needs response, or moves to it. A PR leaving In progress doesn't count, since that only follows your own work in Rally, and its phase can lag until the refresh after a submit lands. Drafts and hidden PRs stay quiet until they show up: a draft marked ready, or a hidden PR that resurfaces or that you unhide, counts as newly listed. |
 | A PR is approved | In **Reviewing**, a new approval of yours appears, whether you submitted it in Rally or on GitHub. In **My PRs**, a reviewer who hadn't approved before approves. |
 
 One PR list update plays at most one sound, and an approval outranks a PR needing attention. The first refresh after launch compares against the list Rally cached when it last ran, so changes made while Rally was closed play once.
 
-Settings → Sounds turns sounds on or off, sets the volume, toggles each cue, and plays a preview of each. The sound set follows the skin unless you pick one. The sounds are synthesized with the Web Audio API, so Rally ships no audio files. The main process decides when a cue fires (`src/main/soundCues.ts`) and the window plays it (`src/renderer/src/lib/sounds.ts`), so sounds play only while Rally's window is open.
+Settings → Sounds turns sounds on or off, sets the volume, toggles each cue, and plays a preview of each. The sound set follows the skin unless you pick one. The sounds are synthesized with the Web Audio API, so Rally ships no audio files. The main process decides when a cue fires (`src/main/soundCues.ts`), taking its baseline after the lists recompute phases from your sessions at launch, and the window plays it (`src/renderer/src/lib/sounds.ts`), so sounds play only while Rally's window is open. A sound that fails to play is logged to the window's console.
 
 ### Updates
 

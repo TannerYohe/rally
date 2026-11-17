@@ -121,7 +121,7 @@ export type ReviewDoneSound = 'each' | 'last' | 'off'
 
 export const REVIEW_DONE_SOUND_LABELS: Record<ReviewDoneSound, string> = {
   each: 'Every turn',
-  last: 'When no review is still running',
+  last: 'When no other turn is still running',
   off: 'Off',
 }
 

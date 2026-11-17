@@ -336,7 +336,7 @@ function SoundsSection({ config, onChange }: SectionProps) {
         </Row>
       </Card>
       <Card title="When to play" description="Sounds play only while Rally's window is open.">
-        <Row label="Claude finishes a turn" description="A review turn ends or errors. Cancelling a turn plays nothing.">
+        <Row label="Claude finishes a turn" description="A review, self-review, or response turn ends or errors. Cancelling a turn plays nothing.">
           <span className="flex items-center gap-2">
             <select
               className={`${FIELD_CLASS} w-56`}
@@ -354,17 +354,17 @@ function SoundsSection({ config, onChange }: SectionProps) {
         </Row>
         <Row
           label="A PR needs your attention"
-          description="A PR is newly listed as unreviewed, or moves to unreviewed or awaiting re-review. Drafts and hidden PRs stay quiet."
+          description="A PR you review becomes unreviewed or awaiting re-review, or one of your PRs needs a response. Drafts and hidden PRs stay quiet."
         >
           <span className="flex items-center gap-2">
             <Switch label="A PR needs your attention" checked={config.attentionSound} onChange={(attentionSound) => onChange({ ...config, attentionSound })} />
             <PreviewButton label="A PR needs your attention" onClick={() => preview('needsAttention')} />
           </span>
         </Row>
-        <Row label="You approve a PR" description="A new approval of yours shows up on a PR, whether you submitted it in Rally or on GitHub.">
+        <Row label="A PR is approved" description="You approve a PR you review, in Rally or on GitHub, or a reviewer approves one of your PRs.">
           <span className="flex items-center gap-2">
-            <Switch label="You approve a PR" checked={config.approvedSound} onChange={(approvedSound) => onChange({ ...config, approvedSound })} />
-            <PreviewButton label="You approve a PR" onClick={() => preview('approved')} />
+            <Switch label="A PR is approved" checked={config.approvedSound} onChange={(approvedSound) => onChange({ ...config, approvedSound })} />
+            <PreviewButton label="A PR is approved" onClick={() => preview('approved')} />
           </span>
         </Row>
       </Card>

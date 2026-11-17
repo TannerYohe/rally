@@ -1,42 +1,49 @@
-import type { Config, Phase, Pr, SessionStatus, SoundCue, SoundPlayback } from '@shared/types'
+import type { Config, Phase, Pr, PrListKind, SessionStatus, SoundCue, SoundPlayback } from '@shared/types'
 
-export const ATTENTION_PHASES: Phase[] = ['unreviewed', 'awaiting_rereview']
+export const ATTENTION_PHASES: Record<PrListKind, Phase[]> = {
+  reviewing: ['unreviewed', 'awaiting_rereview'],
+  authored: ['needs_response'],
+}
 
 const TURN_END_STATUSES: SessionStatus[] = ['awaiting_feedback', 'error']
 
 interface PrSnapshot {
   phase: Phase
-  approvalIds: number[]
+  approvals: string[]
 }
 
-type PrFields = Pick<Pr, 'id' | 'phase' | 'isDraft' | 'hidden' | 'myReviews'>
+type PrSnapshots = Map<string, PrSnapshot>
 
-export function snapshotPrs(prs: PrFields[]): Map<string, PrSnapshot> {
-  return new Map(prs.map((pr) => [pr.id, { phase: pr.phase, approvalIds: approvalIds(pr) }]))
+type PrFields = Pick<Pr, 'id' | 'phase' | 'isDraft' | 'hidden' | 'myReviews' | 'feedback'>
+
+/** Returns your approval review ids on a PR you review, or the logins that approved a PR you authored. */
+function approvals(kind: PrListKind, pr: PrFields): string[] {
+  switch (kind) {
+    case 'reviewing':
+      return pr.myReviews.flatMap((r) => (r.state === 'APPROVED' && r.databaseId !== null ? [String(r.databaseId)] : []))
+    case 'authored':
+      return (pr.feedback?.approvedBy ?? []).map((login) => login.toLowerCase())
+  }
 }
 
-function approvalIds(pr: Pick<Pr, 'myReviews'>): number[] {
-  return pr.myReviews.flatMap((r) => (r.state === 'APPROVED' && r.databaseId !== null ? [r.databaseId] : []))
-}
-
-function gainedApproval(before: PrSnapshot, pr: PrFields): boolean {
-  return approvalIds(pr).some((id) => !before.approvalIds.includes(id))
+export function snapshotPrs(kind: PrListKind, prs: PrFields[]): PrSnapshots {
+  return new Map(prs.map((pr) => [pr.id, { phase: pr.phase, approvals: approvals(kind, pr) }]))
 }
 
 /** True when the PR is newly listed in an attention phase or moved into one from any phase but In progress. */
-function enteredAttentionPhase(before: PrSnapshot | undefined, pr: PrFields): boolean {
-  if (!ATTENTION_PHASES.includes(pr.phase)) return false
+function enteredAttentionPhase(kind: PrListKind, before: PrSnapshot | undefined, pr: PrFields): boolean {
+  if (!ATTENTION_PHASES[kind].includes(pr.phase)) return false
   return before === undefined || (before.phase !== pr.phase && before.phase !== 'in_progress')
 }
 
 /** Returns the cue for one PR list update; an approval outranks a PR needing attention. */
-export function prListCue(previous: ReadonlyMap<string, PrSnapshot>, prs: PrFields[]): SoundCue | null {
+export function prListCue(kind: PrListKind, previous: PrSnapshots, prs: PrFields[]): SoundCue | null {
   let cue: SoundCue | null = null
   for (const pr of prs) {
     if (pr.hidden || pr.isDraft) continue
     const before = previous.get(pr.id)
-    if (before && gainedApproval(before, pr)) return 'approved'
-    if (enteredAttentionPhase(before, pr)) cue = 'needsAttention'
+    if (before && approvals(kind, pr).some((approval) => !before.approvals.includes(approval))) return 'approved'
+    if (enteredAttentionPhase(kind, before, pr)) cue = 'needsAttention'
   }
   return cue
 }
@@ -58,33 +65,34 @@ export function soundPlayback(cue: SoundCue, config: Config): SoundPlayback {
 }
 
 export class SoundCues {
-  private prs: Map<string, PrSnapshot>
+  private prs: Record<PrListKind, PrSnapshots>
   private sessionStatuses = new Map<string, SessionStatus>()
 
   constructor(
-    prs: PrFields[],
+    lists: Record<PrListKind, PrFields[]>,
     private readonly config: () => Config,
     private readonly play: (playback: SoundPlayback) => void,
   ) {
-    this.prs = snapshotPrs(prs)
+    this.prs = { reviewing: snapshotPrs('reviewing', lists.reviewing), authored: snapshotPrs('authored', lists.authored) }
   }
 
-  prsChanged(prs: PrFields[]): void {
-    const cue = prListCue(this.prs, prs)
-    this.prs = snapshotPrs(prs)
+  prsChanged(kind: PrListKind, prs: PrFields[]): void {
+    const cue = prListCue(kind, this.prs[kind], prs)
+    this.prs[kind] = snapshotPrs(kind, prs)
     if (cue) this.cue(cue)
   }
 
-  sessionChanged(prKey: string, status: SessionStatus): void {
-    const previous = this.sessionStatuses.get(prKey)
-    this.sessionStatuses.set(prKey, status)
+  /** Tracks a review or author session by a key unique across both kinds. */
+  sessionChanged(key: string, status: SessionStatus): void {
+    const previous = this.sessionStatuses.get(key)
+    this.sessionStatuses.set(key, status)
     if (previous !== 'running' || !TURN_END_STATUSES.includes(status)) return
     if (this.config().reviewDoneSound === 'last' && [...this.sessionStatuses.values()].includes('running')) return
     this.cue('reviewDone')
   }
 
-  sessionRemoved(prKey: string): void {
-    this.sessionStatuses.delete(prKey)
+  sessionRemoved(key: string): void {
+    this.sessionStatuses.delete(key)
   }
 
   private cue(cue: SoundCue): void {

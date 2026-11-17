@@ -1,59 +1,96 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, type Config, type MyReview, type Phase, type Pr, type SoundPlayback } from '@shared/types'
+import { DEFAULT_CONFIG, type Config, type MyReview, type Phase, type Pr, type PrFeedback, type SoundPlayback } from '@shared/types'
 import { cueEnabled, prListCue, snapshotPrs, SoundCues } from './soundCues'
 
-type PrFields = Pick<Pr, 'id' | 'phase' | 'isDraft' | 'hidden' | 'myReviews'>
+type PrFields = Pick<Pr, 'id' | 'phase' | 'isDraft' | 'hidden' | 'myReviews' | 'feedback'>
 
 function pr(phase: Phase, overrides: Partial<PrFields> = {}): PrFields {
-  return { id: 'pr1', phase, isDraft: false, hidden: null, myReviews: [], ...overrides }
+  return { id: 'pr1', phase, isDraft: false, hidden: null, myReviews: [], feedback: null, ...overrides }
 }
+
+function feedback(approvedBy: string[]): PrFeedback {
+  return { reviewDecision: null, openThreads: 0, unacknowledged: 0, changesRequestedBy: [], approvedBy }
+}
+
+const reviewing = (prs: PrFields[]) => snapshotPrs('reviewing', prs)
+const authored = (prs: PrFields[]) => snapshotPrs('authored', prs)
 
 function approval(databaseId: number): MyReview {
   return { databaseId, state: 'APPROVED', submittedAt: '2026-11-01T00:00:00Z', commitOid: 'abc', replyOnly: false }
 }
 
-describe('prListCue', () => {
+describe('prListCue for PRs you review', () => {
   it('cues attention when a PR moves into an attention phase', () => {
-    expect(prListCue(snapshotPrs([pr('pending_changes')]), [pr('awaiting_rereview')])).toBe('needsAttention')
-    expect(prListCue(snapshotPrs([pr('approved')]), [pr('awaiting_rereview')])).toBe('needsAttention')
+    expect(prListCue('reviewing', reviewing([pr('pending_changes')]), [pr('awaiting_rereview')])).toBe('needsAttention')
+    expect(prListCue('reviewing', reviewing([pr('approved')]), [pr('awaiting_rereview')])).toBe('needsAttention')
   })
 
   it('cues attention when a new PR is listed unreviewed', () => {
-    expect(prListCue(snapshotPrs([]), [pr('unreviewed')])).toBe('needsAttention')
+    expect(prListCue('reviewing', reviewing([]), [pr('unreviewed')])).toBe('needsAttention')
   })
 
   it('stays quiet when nothing changed or the PR left an attention phase', () => {
-    expect(prListCue(snapshotPrs([pr('unreviewed')]), [pr('unreviewed')])).toBeNull()
-    expect(prListCue(snapshotPrs([pr('awaiting_rereview')]), [pr('pending_changes')])).toBeNull()
-    expect(prListCue(snapshotPrs([]), [pr('pending_changes')])).toBeNull()
+    expect(prListCue('reviewing', reviewing([pr('unreviewed')]), [pr('unreviewed')])).toBeNull()
+    expect(prListCue('reviewing', reviewing([pr('awaiting_rereview')]), [pr('pending_changes')])).toBeNull()
+    expect(prListCue('reviewing', reviewing([]), [pr('pending_changes')])).toBeNull()
   })
 
   it('stays quiet when a review session ends', () => {
-    expect(prListCue(snapshotPrs([pr('in_progress')]), [pr('unreviewed')])).toBeNull()
-    expect(prListCue(snapshotPrs([pr('in_progress')]), [pr('awaiting_rereview')])).toBeNull()
+    expect(prListCue('reviewing', reviewing([pr('in_progress')]), [pr('unreviewed')])).toBeNull()
+    expect(prListCue('reviewing', reviewing([pr('in_progress')]), [pr('awaiting_rereview')])).toBeNull()
   })
 
   it('skips hidden and draft PRs', () => {
-    expect(prListCue(snapshotPrs([]), [pr('unreviewed', { isDraft: true })])).toBeNull()
-    expect(prListCue(snapshotPrs([]), [pr('unreviewed', { hidden: { mode: 'snooze', at: '2026-11-01T00:00:00Z' } })])).toBeNull()
+    expect(prListCue('reviewing', reviewing([]), [pr('unreviewed', { isDraft: true })])).toBeNull()
+    expect(prListCue('reviewing', reviewing([]), [pr('unreviewed', { hidden: { mode: 'snooze', at: '2026-11-01T00:00:00Z' } })])).toBeNull()
   })
 
   it('cues approved when a new approval of yours appears on a listed PR', () => {
-    expect(prListCue(snapshotPrs([pr('unreviewed')]), [pr('approved', { myReviews: [approval(1)] })])).toBe('approved')
-    expect(prListCue(snapshotPrs([pr('approved', { myReviews: [approval(1)] })]), [pr('approved', { myReviews: [approval(1), approval(2)] })])).toBe(
+    expect(prListCue('reviewing', reviewing([pr('unreviewed')]), [pr('approved', { myReviews: [approval(1)] })])).toBe('approved')
+    expect(prListCue('reviewing', reviewing([pr('approved', { myReviews: [approval(1)] })]), [pr('approved', { myReviews: [approval(1), approval(2)] })])).toBe(
       'approved',
     )
   })
 
   it('does not cue approved for an approval already seen or a newly listed PR', () => {
-    expect(prListCue(snapshotPrs([pr('approved', { myReviews: [approval(1)] })]), [pr('approved', { myReviews: [approval(1)] })])).toBeNull()
-    expect(prListCue(snapshotPrs([]), [pr('approved', { myReviews: [approval(1)] })])).toBeNull()
+    expect(prListCue('reviewing', reviewing([pr('approved', { myReviews: [approval(1)] })]), [pr('approved', { myReviews: [approval(1)] })])).toBeNull()
+    expect(prListCue('reviewing', reviewing([]), [pr('approved', { myReviews: [approval(1)] })])).toBeNull()
   })
 
   it('prefers approved over attention in the same update', () => {
-    const before = snapshotPrs([pr('pending_changes'), pr('unreviewed', { id: 'pr2' })])
+    const before = reviewing([pr('pending_changes'), pr('unreviewed', { id: 'pr2' })])
     const after = [pr('awaiting_rereview'), pr('approved', { id: 'pr2', myReviews: [approval(5)] })]
-    expect(prListCue(before, after)).toBe('approved')
+    expect(prListCue('reviewing', before, after)).toBe('approved')
+  })
+})
+
+describe('prListCue for your own PRs', () => {
+  it('cues attention when a PR moves to needs response', () => {
+    expect(prListCue('authored', authored([pr('awaiting_reviews')]), [pr('needs_response')])).toBe('needsAttention')
+    expect(prListCue('authored', authored([pr('approved')]), [pr('needs_response')])).toBe('needsAttention')
+    expect(prListCue('authored', authored([]), [pr('needs_response')])).toBe('needsAttention')
+  })
+
+  it('stays quiet for phases that need nothing from you', () => {
+    expect(prListCue('authored', authored([pr('needs_response')]), [pr('awaiting_reviews')])).toBeNull()
+    expect(prListCue('authored', authored([pr('in_progress')]), [pr('needs_response')])).toBeNull()
+    expect(prListCue('authored', authored([pr('awaiting_reviews')]), [pr('unreviewed')])).toBeNull()
+  })
+
+  it('cues approved when a new reviewer approves', () => {
+    expect(prListCue('authored', authored([pr('awaiting_reviews')]), [pr('approved', { feedback: feedback(['bob']) })])).toBe('approved')
+    expect(
+      prListCue('authored', authored([pr('approved', { feedback: feedback(['bob']) })]), [pr('approved', { feedback: feedback(['Bob', 'carol']) })]),
+    ).toBe('approved')
+  })
+
+  it('does not cue approved for an approver already seen or a newly listed PR', () => {
+    expect(prListCue('authored', authored([pr('approved', { feedback: feedback(['bob']) })]), [pr('approved', { feedback: feedback(['Bob']) })])).toBeNull()
+    expect(prListCue('authored', authored([]), [pr('approved', { feedback: feedback(['bob']) })])).toBeNull()
+  })
+
+  it('ignores your own approval ids on a PR you authored', () => {
+    expect(prListCue('authored', authored([pr('awaiting_reviews')]), [pr('awaiting_reviews', { myReviews: [approval(1)] })])).toBeNull()
   })
 })
 
@@ -75,33 +112,40 @@ describe('SoundCues', () => {
   function setup(overrides: Partial<Config> = {}) {
     const played: SoundPlayback[] = []
     const config = { ...DEFAULT_CONFIG, skin: 'tennis' as const, ...overrides }
-    const cues = new SoundCues([pr('pending_changes')], () => config, (playback) => played.push(playback))
+    const cues = new SoundCues({ reviewing: [pr('pending_changes')], authored: [pr('awaiting_reviews', { id: 'mine' })] }, () => config, (playback) => played.push(playback))
     return { cues, played }
   }
 
   it('plays the cue with the skin pack and volume', () => {
     const { cues, played } = setup()
-    cues.prsChanged([pr('awaiting_rereview')])
+    cues.prsChanged('reviewing', [pr('awaiting_rereview')])
     expect(played).toEqual([{ cue: 'needsAttention', pack: 'tennis', volume: 60 }])
   })
 
   it('uses the chosen sound pack over the skin', () => {
     const { cues, played } = setup({ soundPack: 'pep' })
-    cues.prsChanged([pr('awaiting_rereview')])
+    cues.prsChanged('reviewing', [pr('awaiting_rereview')])
     expect(played[0].pack).toBe('pep')
   })
 
   it('compares each update with the one before it', () => {
     const { cues, played } = setup()
-    cues.prsChanged([pr('awaiting_rereview')])
-    cues.prsChanged([pr('awaiting_rereview')])
+    cues.prsChanged('reviewing', [pr('awaiting_rereview')])
+    cues.prsChanged('reviewing', [pr('awaiting_rereview')])
     expect(played).toHaveLength(1)
   })
 
   it('plays nothing for a disabled cue', () => {
     const { cues, played } = setup({ attentionSound: false })
-    cues.prsChanged([pr('awaiting_rereview')])
+    cues.prsChanged('reviewing', [pr('awaiting_rereview')])
     expect(played).toEqual([])
+  })
+
+  it('keeps a separate baseline for each list', () => {
+    const { cues, played } = setup()
+    cues.prsChanged('authored', [pr('needs_response', { id: 'mine' })])
+    cues.prsChanged('reviewing', [pr('pending_changes')])
+    expect(played.map((p) => p.cue)).toEqual(['needsAttention'])
   })
 
   it('cues review done when a turn finishes or fails', () => {
@@ -129,6 +173,16 @@ describe('SoundCues', () => {
     cues.sessionChanged('a', 'awaiting_feedback')
     expect(played).toEqual([])
     cues.sessionChanged('b', 'awaiting_feedback')
+    expect(played.map((p) => p.cue)).toEqual(['reviewDone'])
+  })
+
+  it('waits for author sessions too in last mode', () => {
+    const { cues, played } = setup({ reviewDoneSound: 'last' })
+    cues.sessionChanged('reviewing:a', 'running')
+    cues.sessionChanged('authored:a', 'running')
+    cues.sessionChanged('reviewing:a', 'awaiting_feedback')
+    expect(played).toEqual([])
+    cues.sessionChanged('authored:a', 'error')
     expect(played.map((p) => p.cue)).toEqual(['reviewDone'])
   })
 

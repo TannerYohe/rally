@@ -51,6 +51,8 @@ async function syncAndPush(clone: CloneInfo, at: string) {
   return { ...(await pushClone(integrated.clone, at)), rewritten: integrated.rewritten }
 }
 
+const diffFiles = (diff: string) => [...diff.matchAll(/^diff --git a\/(\S+) b\//gm)].map((match) => match[1])
+
 const source = { headUrl: `file://${remote}`, branch: 'feature', baseUrl: `file://${remote}`, baseBranch: 'main' }
 
 beforeAll(() => {
@@ -244,13 +246,14 @@ describe('prClone', () => {
 
     it('diffs only commits Rally made after the branch was force-pushed', async () => {
       const { forced, forcePush } = await forcedBranch()
+      const pre = await cloneBranch(join(root, 'force-diff-pre'), forced)
+      commitFile(pre.path, 'dropped.txt', 'dropped\n')
+      git(pre.path, 'push', 'origin', `HEAD:refs/heads/${forced.branch}`)
       const clone = await cloneBranch(join(root, 'force-diff'), forced)
       commitFile(clone.path, 'ours.txt', 'ours\n')
       await forcePush('theirs-forced.txt')
       git(clone.path, 'fetch', 'origin')
-      const diff = await cloneDiff(clone)
-      expect(diff).toContain('ours.txt')
-      expect(diff).not.toContain('theirs-forced.txt')
+      expect(diffFiles(await cloneDiff(clone))).toEqual(['ours.txt'])
     })
 
     it('pairs old and new shas when the force-pushed head already contains one of the replayed commits', async () => {
@@ -271,6 +274,21 @@ describe('prClone', () => {
       expect(git(clone.path, 'log', '-1', '--format=%s', rewritten[first.oid]).trim()).toBe('change first.txt')
       expect(rewritten[first.oid]).not.toBe(first.oid)
       expect(git(clone.path, 'log', '-1', '--format=%P', rewritten[second.oid]).trim()).toBe(rewritten[first.oid])
+    })
+
+    it('replays and records the new synced head when integrating, without pushing anything', async () => {
+      const { forced, forcePush } = await forcedBranch()
+      const clone = await cloneBranch(join(root, 'force-integrate'), forced)
+      commitFile(clone.path, 'kept.txt', 'kept\n')
+      const [mine] = await localCommits(clone)
+      const head = await forcePush('r.txt')
+
+      const { clone: integrated, rewritten } = await integrateRemote(clone)
+      expect(integrated.syncedHead).toBe(head)
+      expect(Object.keys(rewritten)).toEqual([mine.oid])
+      expect(git(clone.path, 'log', '-1', '--format=%P', rewritten[mine.oid]).trim()).toBe(head)
+      expect((await localCommits(integrated)).map((c) => c.oid)).toEqual([rewritten[mine.oid]])
+      expect(git(root, '--git-dir', remote, 'rev-parse', forced.branch).trim()).toBe(head)
     })
 
     it('refuses and restores the clone when the replay conflicts', async () => {

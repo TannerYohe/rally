@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { canPush, cloneChangeCount, committableFiles, shortSha } from '@shared/authorSession'
+import { EMPTY_DIFF, MAX_DIFF_CHARS } from '@shared/diff'
 import type { AuthorSession, DiffResult } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { NO_CHANGES_MESSAGE } from '../lib/authorView'
@@ -7,7 +8,7 @@ import { age, fullTime, plural } from '../lib/format'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 import { DiffView } from './DiffView'
 
-const TRUNCATED_NOTE = 'This diff is cut off at 400,000 characters, so it leaves out some changes.'
+const TRUNCATED_NOTE = `This diff is cut off at ${MAX_DIFF_CHARS.toLocaleString('en-US')} characters, so it leaves out some changes.`
 
 const MERGE_BUTTON_CLASS = 'rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-amber-500/30 hover:bg-amber-500/25 disabled:opacity-40'
 
@@ -25,7 +26,7 @@ interface LoadedDiff extends DiffResult {
   error: string | null
 }
 
-const NO_DIFF: LoadedDiff = { diff: '', truncated: false, error: null }
+const NO_DIFF: LoadedDiff = { ...EMPTY_DIFF, error: null }
 
 /** Loads the diff whenever reloadKey changes, and shows nothing while it is empty. */
 function useDiff(sessionId: string, reloadKey: string, load: (sessionId: string) => Promise<DiffResult>): LoadedDiff {

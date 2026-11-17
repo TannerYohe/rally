@@ -1,3 +1,4 @@
+import type { SessionState } from './prList'
 import { soundPlayback, type Config, type Phase, type Pr, type PrListKind, type SessionStatus, type SoundCue, type SoundPlayback } from '@shared/types'
 
 export const ATTENTION_PHASES: Record<PrListKind, Phase[]> = {
@@ -104,4 +105,32 @@ export class SoundCues {
     const config = this.config()
     if (cueEnabled(cue, config)) this.play(soundPlayback(cue, config))
   }
+}
+
+interface CueList {
+  get(): { prs: PrFields[] }
+  on(event: 'changed', listener: (state: { prs: PrFields[] }) => void): unknown
+  setSessionLookup(lookup: (key: string) => SessionState | null): void
+}
+
+interface CueSessions {
+  sessionState(key: string): SessionState | null
+  on(event: 'changed', listener: (session: { prKey: string; status: SessionStatus }) => void): unknown
+  on(event: 'removed', listener: (prKey: string) => void): unknown
+}
+
+type CueSources = Record<PrListKind, { list: CueList; sessions: CueSessions }>
+
+/** Connects each PR list to its sessions, then plays cues for changes after the phase recompute that connecting causes. */
+export function connectSoundCues(sources: CueSources, config: () => Config, play: (playback: SoundPlayback) => void): SoundCues {
+  const kinds = Object.keys(sources) as PrListKind[]
+  for (const kind of kinds) sources[kind].list.setSessionLookup((key) => sources[kind].sessions.sessionState(key))
+  const cues = new SoundCues({ reviewing: sources.reviewing.list.get().prs, authored: sources.authored.list.get().prs }, config, play)
+  for (const kind of kinds) {
+    const { list, sessions } = sources[kind]
+    list.on('changed', (state) => cues.prsChanged(kind, state.prs))
+    sessions.on('changed', (session) => cues.sessionChanged(`${kind}:${session.prKey}`, session.status))
+    sessions.on('removed', (prKey) => cues.sessionRemoved(`${kind}:${prKey}`))
+  }
+  return cues
 }

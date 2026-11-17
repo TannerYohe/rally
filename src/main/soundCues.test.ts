@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type Config, type MyReview, type Phase, type Pr, type PrFeedback, type SoundPlayback } from '@shared/types'
-import { cueEnabled, prListCue, snapshotPrs, SoundCues } from './soundCues'
+import { EventEmitter } from 'node:events'
+import { connectSoundCues, cueEnabled, prListCue, snapshotPrs, SoundCues } from './soundCues'
 
 type PrFields = Pick<Pr, 'id' | 'phase' | 'isDraft' | 'hidden' | 'myReviews' | 'feedback'>
 
@@ -226,5 +227,56 @@ describe('SoundCues', () => {
     cues.sessionRemoved('b')
     cues.sessionChanged('a', 'awaiting_feedback')
     expect(played.map((p) => p.cue)).toEqual(['reviewDone'])
+  })
+})
+
+describe('connectSoundCues', () => {
+  class FakeList extends EventEmitter {
+    constructor(
+      public prs: PrFields[],
+      private readonly recomputed: PrFields[],
+    ) {
+      super()
+    }
+
+    get() {
+      return { prs: this.prs }
+    }
+
+    setSessionLookup(): void {
+      this.prs = this.recomputed
+      this.emit('changed', { prs: this.prs })
+    }
+  }
+
+  class FakeSessions extends EventEmitter {
+    sessionState() {
+      return null
+    }
+  }
+
+  function connect() {
+    const played: SoundPlayback[] = []
+    const reviewing = new FakeList([pr('pending_changes')], [pr('awaiting_rereview')])
+    const authored = new FakeList([pr('awaiting_reviews', { id: 'mine' })], [pr('needs_response', { id: 'mine' })])
+    const reviewSessions = new FakeSessions()
+    connectSoundCues(
+      { reviewing: { list: reviewing, sessions: reviewSessions }, authored: { list: authored, sessions: new FakeSessions() } },
+      () => DEFAULT_CONFIG,
+      (playback) => played.push(playback),
+    )
+    return { played, reviewing, reviewSessions }
+  }
+
+  it('plays nothing for the phase recompute when the lists connect to their sessions', () => {
+    expect(connect().played).toEqual([])
+  })
+
+  it('plays cues for list and session changes after connecting', () => {
+    const { played, reviewing, reviewSessions } = connect()
+    reviewing.emit('changed', { prs: [pr('approved', { myReviews: [approval(3)] })] })
+    reviewSessions.emit('changed', { prKey: 'acme/api#1', status: 'running' })
+    reviewSessions.emit('changed', { prKey: 'acme/api#1', status: 'awaiting_feedback' })
+    expect(played.map((p) => p.cue)).toEqual(['approved', 'reviewDone'])
   })
 })

@@ -10,7 +10,7 @@ import { fetchFeedbackItems } from './github/authorFeedback'
 import { github, resetGithubClient } from './github/client'
 import { classifyGithubFailure } from './github/failure'
 import { authoredPrList, prList, prLists } from './prList'
-import { SoundCues } from './soundCues'
+import { connectSoundCues } from './soundCues'
 import { configFile } from './store'
 import { appInfo, updater } from './update/updater'
 
@@ -78,31 +78,20 @@ export function registerIpc(): void {
   for (const list of Object.values(prLists)) {
     list.on('changed', (state) => broadcast(IPC.prsChanged, { list: list.kind, state }))
   }
-  prList.setSessionLookup((key) => reviewSessions.sessionState(key))
-  authoredPrList.setSessionLookup((key) => authorSessions.sessionState(key))
-  const soundCues = new SoundCues(
-    { reviewing: prList.get().prs, authored: authoredPrList.get().prs },
+  connectSoundCues(
+    { reviewing: { list: prList, sessions: reviewSessions }, authored: { list: authoredPrList, sessions: authorSessions } },
     () => configFile.get(),
     (playback) => broadcast(IPC.soundCue, playback),
   )
-  for (const list of Object.values(prLists)) list.on('changed', (state) => soundCues.prsChanged(list.kind, state.prs))
   reviewSessions.on('changed', (session) => {
     broadcast(IPC.sessionChanged, session)
-    soundCues.sessionChanged(`reviewing:${session.prKey}`, session.status)
     prList.reapplyPhases()
   })
-  reviewSessions.on('removed', (key) => {
-    soundCues.sessionRemoved(`reviewing:${key}`)
-    prList.reapplyPhases()
-  })
+  reviewSessions.on('removed', () => prList.reapplyPhases())
   authorSessions.on('changed', (session) => {
     broadcast(IPC.authorSessionChanged, session)
-    soundCues.sessionChanged(`authored:${session.prKey}`, session.status)
     authoredPrList.reapplyPhases()
   })
-  authorSessions.on('removed', (key) => {
-    soundCues.sessionRemoved(`authored:${key}`)
-    authoredPrList.reapplyPhases()
-  })
+  authorSessions.on('removed', () => authoredPrList.reapplyPhases())
   updater.on('changed', (state) => broadcast(IPC.updateChanged, state))
 }

@@ -662,6 +662,15 @@ describe('starting a review of several PRs', () => {
     await vi.waitFor(() => expect(session(42).status).toBe('awaiting_feedback'))
   })
 
+  it('lists a PR linked twice with different casing once', async () => {
+    mocks.query.mockImplementation(async function* () {
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+    const started = await reviewSessions.start(storedSession(54).pr, [docs(13), { ...docs(13), owner: 'Acme', repo: 'Docs' }])
+    expect(started.members?.map((m) => m.repo)).toEqual(['api', 'docs'])
+    await vi.waitFor(() => expect(session(54).status).toBe('awaiting_feedback'))
+  })
+
   it('refuses while a member has a turn running', async () => {
     let finish: () => void = () => {}
     mocks.query.mockImplementation(async function* () {

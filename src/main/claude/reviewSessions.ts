@@ -127,8 +127,8 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   }
 
   /**
-   * Starts a review of the PR and the PRs linked with it. A PR belongs to one session at a time, so this replaces any
-   * session a member already has, and refuses while one of them is running a turn, posting, or resolving threads.
+   * Starts a review of the PR and the PRs linked with it, replacing any session a member already has and refusing while
+   * one of them is running a turn, posting, resolving threads, or has posted to only some of its PRs.
    */
   async start(pr: PrRef, linked: PrRef[] = []): Promise<ReviewSession> {
     const members = [pr, ...linked].filter((member, index, all) => all.findIndex((other) => keyOf(other) === keyOf(member)) === index)
@@ -140,6 +140,8 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     if (same && this.isTurnRunning(same.id)) return same
     const busy = covering.find((session) => this.isTurnRunning(session.id) || this.publishing.has(session.id) || session.resolvingThreads)
     if (busy) throw new Error(`The review of ${busy.prKey} is still running. Wait for it to finish or cancel it, then start again.`)
+    const partlyPosted = covering.find(isPartlyPosted)
+    if (partlyPosted) throw new Error(`Some PRs in the review of ${partlyPosted.prKey} already posted. Submit the rest or skip them, then start again.`)
     for (const session of covering) this.remove(session)
     this.add({ ...this.newSessionCore(pr, 'running'), ...(members.length > 1 && { members }), drafts: null, submitted: null })
     const session = this.sessions.get(key)!
@@ -245,6 +247,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const session = this.byId(sessionId)
     if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
     if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
+    if (isPartlyPosted(session)) throw new Error('Some PRs in this review already posted. Submit the rest or skip them before discarding it.')
     this.remove(session)
   }
 

@@ -168,6 +168,11 @@ mocks.stored = [
   storedUnit(45),
   storedUnit(46),
   storedUnit(47),
+  storedSession(50),
+  storedDocs(10),
+  storedSession(51),
+  storedDocs(11),
+  storedSession(52, { status: 'error', members: [storedSession(52).pr, docs(12)], memberSubmits: { 'acme/docs#12': { submitted: SUBMITTED } } }),
 ]
 
 const { PARTLY_POSTED_ERROR, reviewSessions } = await import('./reviewSessions')
@@ -661,4 +666,25 @@ describe('starting a review of several PRs', () => {
     await vi.waitFor(() => expect(reviewSessions.getByPr('acme/docs#9')?.status).toBe('awaiting_feedback'))
   })
 
+  it('refuses while a member is posting or resolving threads', async () => {
+    let finishPost: (review: SubmittedReview) => void = () => {}
+    mocks.submitReview.mockReturnValueOnce(new Promise((resolve) => (finishPost = resolve)))
+    const posting = reviewSessions.submit('test-docs-10', [{ prKey: 'acme/docs#10', event: 'COMMENT' }], NO_CHANGES, [])
+    await expect(reviewSessions.start(storedSession(50).pr, [docs(10)])).rejects.toThrow('The review of acme/docs#10 is still running')
+    finishPost(SUBMITTED)
+    await posting
+
+    let finishResolve: (value: { resolved: string[]; failed: [] }) => void = () => {}
+    mocks.resolveOwnThreads.mockReturnValueOnce(new Promise((resolve) => (finishResolve = resolve)))
+    const resolving = reviewSessions.resolveThreads('test-docs-11', ['T1'])
+    await expect(reviewSessions.start(storedSession(51).pr, [docs(11)])).rejects.toThrow('The review of acme/docs#11 is still running')
+    finishResolve({ resolved: ['T1'], failed: [] })
+    await resolving
+  })
+
+  it('refuses to replace or discard a unit that posted to only some of its PRs', async () => {
+    await expect(reviewSessions.start(storedSession(52).pr, [docs(12)])).rejects.toThrow('Some PRs in the review of acme/api#52 already posted')
+    expect(() => reviewSessions.discard('test-session-52')).toThrow('Submit the rest or skip them before discarding it')
+    expect(reviewSessions.getByPr('acme/docs#12')?.id).toBe('test-session-52')
+  })
 })

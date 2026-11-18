@@ -44,7 +44,6 @@ export interface TurnSetup {
 export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter {
   protected sessions: Map<string, S>
   protected controllers = new Map<string, AbortController>()
-  /** Sessions Rally is writing to GitHub for, outside a Claude turn. */
   /** Sessions running a git or GitHub action outside a turn. */
   protected busy = new Set<string>()
   private pendingFlush: NodeJS.Timeout | null = null

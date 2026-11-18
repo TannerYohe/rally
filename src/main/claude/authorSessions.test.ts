@@ -89,6 +89,12 @@ vi.mock('./authorTools', () => ({
   },
 }))
 
+/** Returns a stored session saved before sessions had description fields. */
+function legacySession(number: number): AuthorSession {
+  const { description: _description, descriptionUpdatedAt: _updatedAt, ...rest } = stored(number)
+  return rest as AuthorSession
+}
+
 mocks.stored = [
   stored(1, { status: 'running' }),
   stored(2, { status: 'submitting' }),
@@ -177,6 +183,7 @@ mocks.stored = [
   }),
   stored(68, { description: descriptionDraft(), status: 'error', error: 'Rally couldn\'t update the PR description: timeout' }),
   stored(69, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], description: descriptionDraft(), status: 'error', error: 'rejected' }),
+  legacySession(70),
   stored(63),
   stored(64),
   stored(65),
@@ -702,6 +709,11 @@ describe('description updates', () => {
     expect(mocks.fetchDescription).not.toHaveBeenCalled()
     expect(mocks.updateDescription).not.toHaveBeenCalled()
     expect(mocks.refreshOne).not.toHaveBeenCalled()
+  })
+
+  it('restores a session saved before description updates with none pending', () => {
+    expect(session(70)).toMatchObject({ description: null, descriptionUpdatedAt: null })
+    expect(authorSessions.sessionState('acme/api#70')).toMatchObject({ active: false })
   })
 
   it('clears a draft GitHub already has without updating it again', async () => {

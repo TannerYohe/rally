@@ -19,4 +19,17 @@ describe('lineDiff', () => {
       { kind: 'context', text: 'b' },
     ])
   })
+
+  it('keeps a long shared header and footer as context around a change', () => {
+    const header = Array.from({ length: 3000 }, (_, n) => `header ${n}`)
+    const footer = Array.from({ length: 3000 }, (_, n) => `footer ${n}`)
+    const diff = lineDiff([...header, 'old', ...footer].join('\n'), [...header, 'new', ...footer].join('\n'))
+    expect(diff).toHaveLength(6002)
+    expect(diff.slice(2999, 3003)).toEqual([
+      { kind: 'context', text: 'header 2999' },
+      { kind: 'remove', text: 'old' },
+      { kind: 'add', text: 'new' },
+      { kind: 'context', text: 'footer 0' },
+    ])
+  })
 })

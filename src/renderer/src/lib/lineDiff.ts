@@ -10,6 +10,16 @@ const splitLines = (text: string) => (text === '' ? [] : text.replaceAll('\r\n',
 export function lineDiff(before: string, after: string): LineChange[] {
   const a = splitLines(before)
   const b = splitLines(after)
+  let start = 0
+  while (start < a.length && start < b.length && a[start] === b[start]) start++
+  let end = 0
+  while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++
+  const context = (lines: string[]) => lines.map((text): LineChange => ({ kind: 'context', text }))
+  return [...context(a.slice(0, start)), ...changedRun(a.slice(start, a.length - end), b.slice(start, b.length - end)), ...context(a.slice(a.length - end))]
+}
+
+/** Returns the diff of two runs of lines from a longest-common-subsequence table. */
+function changedRun(a: string[], b: string[]): LineChange[] {
   const common = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0))
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {

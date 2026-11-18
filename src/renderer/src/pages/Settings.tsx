@@ -32,7 +32,7 @@ import { useFailedInstall, useUpdateState } from '../lib/hooks'
 import { blocksLeavingSettings, sectionFromParam, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from '../lib/settingsSections'
 import { SKIN_IDS, SKINS, parseSkinId, useSkinPreview } from '../lib/skins'
 import { playSound } from '../lib/sounds'
-import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
+import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 
 const SECTION_NAV: Record<SettingsSection, { label: string; icon: ReactNode }> = {
   'pull-requests': { label: 'Pull requests', icon: <PullRequestIcon /> },
@@ -650,7 +650,6 @@ function GithubStatus({ health }: { health: Health | null }) {
   }
 }
 
-const FIELD_CLASS = 'rounded-md bg-ink-950/60 px-2.5 py-1.5 text-sm text-ink-100 outline-none ring-1 ring-ink-800 focus:ring-secondary-400/50'
 
 function SectionHeader({ title, children }: { title: string; children: ReactNode }) {
   return (

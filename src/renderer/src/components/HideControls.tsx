@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { HIDE_MODE_LABELS, type Phase, type PrHide, type PrListKind } from '@shared/types'
 import { age, fullTime } from '../lib/format'
+import { SMALL_BUTTON_CLASS } from '../lib/theme'
 
-const BUTTON_CLASS = 'rounded-md px-2 py-0.5 text-xs text-ink-400 ring-1 ring-ink-800 hover:bg-ink-800 hover:text-ink-100'
 
 const SNOOZE_TITLES: Record<PrListKind, string> = {
   reviewing: 'Hide until the author pushes new commits or requests your review',
@@ -43,7 +43,7 @@ export function HideControls({ list, ids, hidden, phase, className = '' }: Props
         <span className="text-xs text-ink-500" title={fullTime(hidden.at)}>
           {HIDE_MODE_LABELS[hidden.mode]} · {age(hidden.at)} ago
         </span>
-        <button className={BUTTON_CLASS} onClick={() => run(() => window.rally.unhidePr(list, ids))}>
+        <button className={SMALL_BUTTON_CLASS} onClick={() => run(() => window.rally.unhidePr(list, ids))}>
           Unhide
         </button>
       </div>
@@ -53,13 +53,13 @@ export function HideControls({ list, ids, hidden, phase, className = '' }: Props
     <div className={`flex items-center gap-1.5 ${className}`}>
       {errorNote}
       <button
-        className={BUTTON_CLASS}
+        className={SMALL_BUTTON_CLASS}
         title={SNOOZE_TITLES[list]}
         onClick={() => run(() => window.rally.hidePr(list, ids, 'snooze'))}
       >
         Snooze
       </button>
-      <button className={BUTTON_CLASS} title="Hide until you unhide it" onClick={() => run(() => window.rally.hidePr(list, ids, 'indefinite'))}>
+      <button className={SMALL_BUTTON_CLASS} title="Hide until you unhide it" onClick={() => run(() => window.rally.hidePr(list, ids, 'indefinite'))}>
         Hide
       </button>
     </div>

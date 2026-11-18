@@ -17,6 +17,7 @@ import {
   type ReviewThread,
   type SubmittedReview,
   type ThreadResolution,
+  uniquePrs,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import {
@@ -129,7 +130,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
 
   /** Starts a review of the PR and its linked PRs, replacing their sessions unless one is busy or partly posted. */
   async start(pr: PrRef, linked: PrRef[] = []): Promise<ReviewSession> {
-    const members = [pr, ...linked].filter((member, index, all) => all.findIndex((other) => keyOf(other) === keyOf(member)) === index)
+    const members = uniquePrs([pr, ...linked])
     const key = keyOf(pr)
     const covering = distinctSessions(members.map((member) => this.getByPr(keyOf(member))))
     const same = covering.find((session) => session.prKey === key && sessionMembers(session).length === members.length)

@@ -553,6 +553,11 @@ export function isSamePr(a: PrCoords, b: PrCoords): boolean {
   return a.number === b.number && isSameRepo(a, b)
 }
 
+/** Returns each PR once, in order, comparing owner and repo case-insensitively. */
+export function uniquePrs<T extends PrCoords>(prs: T[]): T[] {
+  return prs.filter((pr, index) => prs.findIndex((other) => isSamePr(other, pr)) === index)
+}
+
 export function prKey(owner: string, repo: string, number: number): string {
   return `${owner}/${repo}#${number}`
 }

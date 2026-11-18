@@ -4,6 +4,7 @@ import {
   isSamePr,
   keyOf,
   toPrRef,
+  uniquePrs,
   type HideMode,
   type MyReview,
   type Phase,
@@ -82,10 +83,6 @@ interface PrListSource {
 interface LinkTarget {
   node: LinkNode
   ref: PrRef
-}
-
-function uniqueCoords(coords: PrCoords[]): PrCoords[] {
-  return coords.filter((c, index) => coords.findIndex((other) => isSamePr(other, c)) === index)
 }
 
 function unreciprocatedTargets(prs: Pr[]): Map<string, LinkTarget> {
@@ -206,7 +203,7 @@ class PrList extends EventEmitter {
     let frontier = known
     for (let round = 0; round < MAX_LINK_ROUNDS && frontier.length > 0; round++) {
       const handTargets = frontier.flatMap((node) => handLinkedKeys(node.key, handLinks).flatMap((key) => parsePrRef(key) ?? []))
-      const wanted = uniqueCoords([...frontier.flatMap((node) => node.targets), ...handTargets]).filter(
+      const wanted = uniquePrs([...frontier.flatMap((node) => node.targets), ...handTargets]).filter(
         (coords) => !known.some((node) => isSamePr(node.coords, coords)),
       )
       if (wanted.length === 0) break

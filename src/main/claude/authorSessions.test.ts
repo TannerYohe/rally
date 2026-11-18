@@ -591,7 +591,7 @@ describe('self-review', () => {
     expect(session(30).selfReview?.findings).toEqual([])
   })
 
-  it('drops the earlier self-review findings and their responses when a new one publishes', async () => {
+  it('drops the earlier self-review findings and their responses, and gives the new findings new ids, when a new one publishes', async () => {
     const sessionId = session(31).id
     finishTurn(() => mocks.handlers!.onSelfReview({ ...drafts, comments: [{ ...drafts.comments[0], body: 'Different problem' }] }))
     await authorSessions.feedback(sessionId, 'review again')
@@ -599,7 +599,12 @@ describe('self-review', () => {
     expect(session(31).items.map((i) => i.id)).toEqual(['T1'])
     expect(Object.keys(session(31).responses)).toEqual(['T1'])
     expect(session(31).selfReview?.findings[0]).toMatchObject({ comments: [{ body: 'Different problem' }] })
-    expect(session(31).selfReview?.findings[0].id).not.toBe('self-1')
+    const firstId = session(31).selfReview!.findings[0].id
+
+    finishTurn(() => mocks.handlers!.onSelfReview({ ...drafts, comments: [{ ...drafts.comments[0], body: 'Different problem' }] }))
+    await authorSessions.feedback(sessionId, 'review again')
+    await vi.waitFor(() => expect(session(31).status).toBe('awaiting_feedback'))
+    expect(session(31).selfReview?.findings[0].id).not.toBe(firstId)
   })
 
   it('maps draft comments to findings with ids scoped to the review', () => {

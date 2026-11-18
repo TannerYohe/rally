@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { topLevelMutationFields } from './graphqlMutations'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
-import { GITHUB_URL_PREFIXES, NO_GITHUB_REMOTES, type GithubRemotes } from '../git/githubRemotes'
+import { GITHUB_URL_PREFIXES, githubRepoOf, NO_GITHUB_REMOTES, type GithubRemotes } from '../git/githubRemotes'
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
@@ -127,7 +127,7 @@ const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and re
 
 const GIT_PUSH_REASON = 'git push is not permitted in Rally. Rally pushes once the user approves the diff.'
 
-const GIT_CONFIG_REASON = 'Rally blocks git aliases, URL rewrite rules, and remote push URLs, since they can push around its guardrails.'
+const GIT_CONFIG_REASON = 'Rally blocks git aliases, URL rewrite rules, and changes to remote URLs, since they can push around its guardrails.'
 
 const GIT_CONFIG_ENV_REASON = "Rally blocks changing the GIT_CONFIG_* environment, which carries its push URL rewrite."
 
@@ -508,27 +508,42 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
 
 /**
  * Under open access, blocks git push and send-pack, and git config that could push under another name or around Rally's push URL rewrite:
- * aliases, URL rewrite rules, and remote push URLs.
+ * aliases, URL rewrite rules, remote URLs, and remote push URLs. Adding a remote is allowed when its URL is not GitHub or the rewrite covers it.
  */
 function decideOpenGit(args: string[], state: ShellState): ToolDecision {
   const { configs, subcommand, rest } = parseGit(args, state)
   if (subcommand === 'push' || subcommand === 'send-pack') return deny(GIT_PUSH_REASON)
   const setsGuardedKey = subcommand === 'config' && rest.some(isGuardedGitKey) && !rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))
-  const setsPushUrl = subcommand === 'remote' && rest[0] === 'set-url' && rest.includes('--push')
-  if (configs.some(isGuardedGitKey) || setsGuardedKey || setsPushUrl) return deny(GIT_CONFIG_REASON)
+  const operands = rest.filter((a) => !a.startsWith('-'))
+  const changesRemoteUrl = subcommand === 'remote' && (operands[0] === 'set-url' || (operands[0] === 'add' && isUncoveredGithubUrl(operands.at(-1) ?? '')))
+  if (configs.some(isGuardedGitKey) || setsGuardedKey || changesRemoteUrl) return deny(GIT_CONFIG_REASON)
   return ALLOW
 }
 
-const isGuardedGitKey = (word: string) => /^(?:alias\.|url\.|remote\..+\.pushurl(?:=|$))/i.test(word)
+const isGuardedGitKey = (word: string) => /^(?:alias\.|url\.|remote\..+\.(?:push)?url(?:=|$))/i.test(word)
+
+const isUncoveredGithubUrl = (url: string) => githubRepoOf(url) !== null && !GITHUB_URL_PREFIXES.some((prefix) => url.startsWith(prefix))
 
 /** Under open access, blocks commands that set, clear, or drop the git config environment carrying Rally's push URL rewrite. */
 function touchesGitConfigEnv(program: string, args: string[]): boolean {
   switch (program) {
     case 'unset':
     case 'export':
+    case 'declare':
+    case 'typeset':
+    case 'local':
+    case 'readonly':
       return args.some((a) => GIT_CONFIG_ENV.test(a))
     case 'env':
-      return args.some((a, i) => GIT_CONFIG_ENV.test(a) || a === '-i' || a === '--ignore-environment' || (a === '-u' && GIT_CONFIG_ENV.test(args[i + 1] ?? '')))
+      return args.some(
+        (a, i) =>
+          GIT_CONFIG_ENV.test(a) ||
+          ['-', '-i', '--ignore-environment'].includes(a) ||
+          (['-u', '--unset'].includes(a) && GIT_CONFIG_ENV.test(args[i + 1] ?? '')) ||
+          GIT_CONFIG_ENV.test(a.replace(/^(?:-u|--unset=)/, '')),
+      )
+    case 'exec':
+      return args.includes('-c')
     default:
       return false
   }

@@ -184,6 +184,7 @@ mocks.stored = [
   stored(68, { description: descriptionDraft(), status: 'error', error: 'Rally couldn\'t update the PR description: timeout' }),
   stored(69, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], description: descriptionDraft(), status: 'error', error: 'rejected' }),
   legacySession(70),
+  stored(71),
   stored(63),
   stored(64),
   stored(65),
@@ -652,6 +653,16 @@ describe('description updates', () => {
     expect(await mocks.handlers!.onDescription({ title: 'Fix', body: 'Old body\n' })).toContain('nothing to update')
     expect(session(63).description).toBeNull()
     expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: false })
+  })
+
+  it('logs and reports a proposal Rally couldn\'t compare with GitHub', async () => {
+    mocks.fetchDescription.mockRejectedValue(new Error('Not Found'))
+    finishTurn()
+    await authorSessions.feedback(session(71).id, 'update the description')
+    await vi.waitFor(() => expect(session(71).status).toBe('awaiting_feedback'))
+    await expect(mocks.handlers!.onDescription({ title: 'Fix the bug', body: 'New body' })).rejects.toThrow('Not Found')
+    expect(console.error).toHaveBeenCalledWith('Reading the PR description for a proposed update failed', expect.objectContaining({ pr: pr(71).url }))
+    expect(session(71).description).toBeNull()
   })
 
   it('asks Claude to update the description from the clone, quoting the current one', async () => {

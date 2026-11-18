@@ -324,7 +324,14 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   /** Saves the title and description Claude proposed, with GitHub's current ones as the base, or drops the draft when they already match. */
   private async receiveDescription(sessionId: string, proposed: PrDescription): Promise<string> {
-    const current = await fetchDescription(this.byId(sessionId).pr)
+    const { pr } = this.byId(sessionId)
+    let current: PrDescription
+    try {
+      current = await fetchDescription(pr)
+    } catch (error) {
+      console.error('Reading the PR description for a proposed update failed', { pr: pr.url, sessionId, error })
+      throw error
+    }
     if (sameDescription(proposed, current)) {
       this.patch(sessionId, () => ({ description: null }), true)
       return 'The proposed title and description match GitHub, so there is nothing to update.'

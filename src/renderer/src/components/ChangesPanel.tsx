@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { canPush, cloneChangeCount, committableFiles, normalizedDescription, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF, MAX_DIFF_CHARS } from '@shared/diff'
 import type { AuthorSession, DescriptionDraft, DiffResult, PrDescription } from '@shared/types'
@@ -8,7 +8,7 @@ import { age, fullTime, plural } from '../lib/format'
 import { lineDiff } from '../lib/lineDiff'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 import { BodyTextarea } from './BodyTextarea'
-import { DiffView, LINE_STYLES } from './DiffView'
+import { DiffLines, DiffView } from './DiffView'
 
 const TRUNCATED_NOTE = `This diff is cut off at ${MAX_DIFF_CHARS.toLocaleString('en-US')} characters, so it leaves out some changes.`
 
@@ -152,6 +152,10 @@ const LINE_PREFIX = { add: '+', remove: '-', context: ' ' } as const
 function DescriptionDiff({ base, next }: { base: PrDescription; next: PrDescription }) {
   const before = normalizedDescription(base)
   const after = normalizedDescription(next)
+  const bodyLines = useMemo(
+    () => lineDiff(before.body, after.body).map((line) => ({ kind: line.kind, text: `${LINE_PREFIX[line.kind]} ${line.text}` })),
+    [before.body, after.body],
+  )
   return (
     <div className="space-y-2">
       {before.title !== after.title && (
@@ -163,13 +167,7 @@ function DescriptionDiff({ base, next }: { base: PrDescription; next: PrDescript
       {before.body === after.body ? (
         <p className="text-xs text-ink-500">The description body is unchanged.</p>
       ) : (
-        <pre className="overflow-x-auto rounded-lg border border-white/5 bg-ink-950 py-1 text-xs leading-5">
-          {lineDiff(before.body, after.body).map((line, index) => (
-            <div key={index} className={`whitespace-pre-wrap px-3 ${LINE_STYLES[line.kind]}`}>
-              {LINE_PREFIX[line.kind]} {line.text}
-            </div>
-          ))}
-        </pre>
+        <DiffLines lines={bodyLines} className="whitespace-pre-wrap rounded-lg border border-white/5 bg-ink-950 py-1" />
       )}
     </div>
   )

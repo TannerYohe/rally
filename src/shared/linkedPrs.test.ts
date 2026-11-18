@@ -41,6 +41,28 @@ describe('parseLinkedPrs', () => {
     expect(parse(body).map((r) => r.repo)).toEqual(['web', 'worker'])
   })
 
+  it('reads past an intro paragraph and a loose list under a heading', () => {
+    const intro = ['## Related PRs', '', 'This change spans two repos:', '', '- https://github.com/acme/web/pull/2'].join('\n')
+    expect(parse(intro).map((r) => r.repo)).toEqual(['web'])
+    const loose = ['## Related PRs', '', '- https://github.com/acme/web/pull/2', '', '- acme/cli#3', '', 'Other: acme/other#4'].join('\n')
+    expect(parse(loose).map((r) => r.repo)).toEqual(['web', 'cli'])
+  })
+
+  it('ends a Label: block at a blank line', () => {
+    expect(parse(['Related PRs:', '- acme/web#2', '', '- acme/cli#3'].join('\n')).map((r) => r.repo)).toEqual(['web'])
+  })
+
+  it('reads headings with closing hashes', () => {
+    expect(parse('## Related PRs ##\nacme/web#3').map((r) => r.repo)).toEqual(['web'])
+    expect(parse('##\nacme/web#3')).toEqual([])
+  })
+
+  it('parses a heading with a long run of spaces in linear time', () => {
+    const started = Date.now()
+    parse(`# a${' '.repeat(50_000)}x\n## Related PRs${' '.repeat(50_000)}#\nacme/web#3`)
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
   it('stops the block at the next heading', () => {
     const body = ['### Linked pull requests', 'acme/web#3', '### Testing', 'acme/other#4'].join('\n')
     expect(parse(body).map((r) => r.repo)).toEqual(['web'])

@@ -6,7 +6,8 @@ export const MAX_LINK_TARGETS = 5
 
 const PR_URL = /https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)[^\s)>\]]*/gi
 const PR_SHORT_REF = /(?<![\w./-])([A-Za-z\d][\w.-]*)\/([\w.-]+)#(\d+)\b/g
-const HEADING = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/
+const HEADING_OPENER = /^ {0,3}#{1,6}(?:[ \t]+|$)/
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/
 const LABEL = /^\s*(?:[-*+]\s+|>\s*)*[*_]{0,2}([^:\n]{1,80}?)[*_]{0,2}\s*:(?!\/\/)[*_]{0,2}(.*)$/
 
 function coords(owner: string, repo: string, number: string): PrCoords {
@@ -76,24 +77,54 @@ function matchesMarker(label: string, markers: string[]): boolean {
   })
 }
 
+/** Returns a Markdown heading's text without its opening and closing # runs, or null when the line isn't a heading. */
+function headingText(line: string): string | null {
+  const opener = HEADING_OPENER.exec(line)
+  if (!opener) return null
+  const text = line.slice(opener[0].length).trimEnd()
+  let closer = text.length
+  while (closer > 0 && text[closer - 1] === '#') closer--
+  if (closer === text.length) return text
+  if (closer === 0) return ''
+  const before = text[closer - 1]
+  return before === ' ' || before === '\t' ? text.slice(0, closer).trimEnd() : text
+}
+
+type MarkerLine = { kind: 'heading' | 'label'; hasText: boolean }
+
 /** Returns whether a line is a heading or Label: line naming a marker, and whether the line itself carries text after its label. */
-function markerLine(line: string, markers: string[]): { hasText: boolean } | null {
-  const heading = HEADING.exec(line)
-  if (heading) return matchesMarker(heading[1], markers) ? { hasText: prRefsIn(line).length > 0 } : null
+function markerLine(line: string, markers: string[]): MarkerLine | null {
+  const heading = headingText(line)
+  if (heading !== null) return matchesMarker(heading, markers) ? { kind: 'heading', hasText: prRefsIn(line).length > 0 } : null
   const label = LABEL.exec(line)
-  if (label && matchesMarker(label[1], markers)) return { hasText: Boolean(label[2].trim()) || prRefsIn(line).length > 0 }
+  if (label && matchesMarker(label[1], markers)) return { kind: 'label', hasText: Boolean(label[2].trim()) || prRefsIn(line).length > 0 }
   return null
 }
 
-/** Returns the text a marker covers: its own line, then the block below it up to the next heading or blank line. */
-function markedText(lines: string[], start: number, hasText: boolean): string {
+/** Returns the index of the first non-blank line at or after index, or lines.length when there is none. */
+function nextNonBlank(lines: string[], index: number): number {
+  while (index < lines.length && !lines[index].trim()) index++
+  return index
+}
+
+/** Returns a marker's line and the block below it up to the next heading or blank line, where a heading's block runs past a blank line until it has a PR reference and the next line doesn't continue a list. */
+function markedText(lines: string[], start: number, marker: MarkerLine): string {
   const covered = [lines[start]]
-  let index = start + 1
-  if (!hasText) while (index < lines.length && !lines[index].trim()) index++
-  for (; index < lines.length; index++) {
+  let hasRef = marker.hasText
+  let index = marker.hasText ? start + 1 : nextNonBlank(lines, start + 1)
+  while (index < lines.length) {
     const line = lines[index]
-    if (!line.trim() || HEADING.test(line)) break
+    if (headingText(line) !== null) break
+    if (!line.trim()) {
+      if (marker.kind === 'label') break
+      const next = nextNonBlank(lines, index)
+      if (next === lines.length || (hasRef && !LIST_ITEM.test(lines[next]))) break
+      index = next
+      continue
+    }
     covered.push(line)
+    hasRef ||= prRefsIn(line).length > 0
+    index++
   }
   return covered.join('\n')
 }
@@ -105,7 +136,7 @@ export function parseLinkedPrs(body: string, self: PrCoords, markers: string[]):
   lines.forEach((line, index) => {
     const marker = markerLine(line, markers)
     if (!marker) return
-    for (const ref of prRefsIn(markedText(lines, index, marker.hasText))) {
+    for (const ref of prRefsIn(markedText(lines, index, marker))) {
       const sameRepo = ref.owner.toLowerCase() === self.owner.toLowerCase() && ref.repo.toLowerCase() === self.repo.toLowerCase()
       if (sameRepo || targets.some((t) => isSamePr(t, ref))) continue
       targets.push(ref)

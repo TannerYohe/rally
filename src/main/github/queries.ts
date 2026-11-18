@@ -47,13 +47,6 @@ const SEARCH_QUERY = `
   ${PR_FIELDS}
 `
 
-const SINGLE_QUERY = `
-  query($owner: String!, $repo: String!, $number: Int!, $viewer: String!, $authored: Boolean!) {
-    repository(owner: $owner, name: $repo) { pullRequest(number: $number) { ...PrFields } }
-  }
-  ${PR_FIELDS}
-`
-
 const OLDER_REVIEWS_QUERY = `
   query($id: ID!, $viewer: String!, $before: String!) {
     node(id: $id) {
@@ -355,19 +348,4 @@ export async function fetchPrs(coords: PrCoords[], kind: PrListKind): Promise<{ 
     }
   }
   return { viewer: gh.login, lookups }
-}
-
-export async function fetchPr(owner: string, repo: string, number: number, kind: PrListKind): Promise<GithubPr> {
-  const gh = await github()
-  const response = await gh.graphql<{ repository: { pullRequest: RawPr } }>(SINGLE_QUERY, {
-    owner,
-    repo,
-    number,
-    viewer: gh.login,
-    authored: isAuthored(kind),
-    request: timeoutRequest(),
-  })
-  const raw = response.repository.pullRequest
-  const [myReviews] = await myReviewsOf(gh, [raw], kind)
-  return toPr(raw, gh.login, myReviews)
 }

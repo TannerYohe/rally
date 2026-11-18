@@ -21,19 +21,20 @@ const mocks = vi.hoisted(() => {
       authoredHiddenPrsFile: file<Record<string, unknown>>({}),
     },
     searchPrs: vi.fn(),
-    fetchPr: vi.fn(),
     fetchPrs: vi.fn(),
     summarizePr: vi.fn(),
   }
 })
 
 vi.mock('./store', () => mocks.store)
-vi.mock('./github/queries', () => ({ searchPrs: mocks.searchPrs, fetchPr: mocks.fetchPr, fetchPrs: mocks.fetchPrs }))
+vi.mock('./github/queries', () => ({ searchPrs: mocks.searchPrs, fetchPrs: mocks.fetchPrs }))
 vi.mock('./github/search', () => ({ buildSearchQueries: () => ['query'], AUTHORED_SEARCH_QUERIES: ['authored'] }))
 vi.mock('./claude/summarize', () => ({ summarizePr: mocks.summarizePr }))
 
 const { authoredPrList, prList } = await import('./prList')
 const { newHide, UNLISTED_HIDE_RETENTION_DAYS } = await import('./hiddenPrs')
+
+const fetched = (...prs: GithubPr[]) => ({ viewer: 'me', lookups: prs.map((pr) => ({ status: 'found' as const, pr })) })
 
 function githubPr(overrides: Partial<GithubPr> = {}): GithubPr {
   return {
@@ -87,7 +88,7 @@ describe('prList', () => {
 
   it('keeps other summaries when refreshing one PR', async () => {
     mocks.store.summariesFile.set({ 'pr1:old': 'stale', 'other:h': 'other' })
-    mocks.fetchPr.mockResolvedValue(githubPr())
+    mocks.fetchPrs.mockResolvedValue(fetched(githubPr()))
     await prList.refreshOne('acme', 'api', 1)
     expect(mocks.store.summariesFile.get()).toEqual({ 'pr1:old': 'stale', 'other:h': 'other' })
   })
@@ -96,7 +97,7 @@ describe('prList', () => {
     let finishSearch: (value: unknown) => void = () => {}
     mocks.searchPrs.mockReturnValue(new Promise((resolve) => (finishSearch = resolve)))
     const refreshing = prList.refresh()
-    mocks.fetchPr.mockResolvedValue(githubPr({ title: 'Fresh' }))
+    mocks.fetchPrs.mockResolvedValue(fetched(githubPr({ title: 'Fresh' })))
     await prList.refreshOne('acme', 'api', 1)
     finishSearch({ viewer: 'me', prs: [githubPr({ title: 'Stale' }), githubPr({ id: 'pr2', number: 2 })] })
     await refreshing
@@ -104,7 +105,7 @@ describe('prList', () => {
   })
 
   it('uses the search result over a PR refreshed before the full refresh started', async () => {
-    mocks.fetchPr.mockResolvedValue(githubPr({ title: 'Older' }))
+    mocks.fetchPrs.mockResolvedValue(fetched(githubPr({ title: 'Older' })))
     await prList.refreshOne('acme', 'api', 1)
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [githubPr({ title: 'Newer' })] })
     await prList.refresh()
@@ -133,7 +134,7 @@ describe('prList', () => {
     await prList.refresh()
     expect(prList.get().prs[0].hidden).toMatchObject({ mode: 'snooze' })
 
-    mocks.fetchPr.mockResolvedValue(githubPr({ headRefOid: 'newer' }))
+    mocks.fetchPrs.mockResolvedValue(fetched(githubPr({ headRefOid: 'newer' })))
     await prList.refreshOne('acme', 'api', 1)
     expect(prList.get().prs[0].hidden).toBeNull()
     expect(mocks.store.hiddenPrsFile.get()).toEqual({})
@@ -144,7 +145,7 @@ describe('prList', () => {
     await prList.refresh()
     prList.hide(['pr2'], 'snooze')
 
-    mocks.fetchPr.mockResolvedValue(githubPr())
+    mocks.fetchPrs.mockResolvedValue(fetched(githubPr()))
     await prList.refreshOne('acme', 'api', 1)
     expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr2'])
   })
@@ -289,7 +290,7 @@ describe('prList', () => {
     await authoredPrList.refresh()
     expect(pruner).toHaveBeenCalledWith(new Set(['acme/api#7']))
 
-    mocks.fetchPr.mockResolvedValue(githubPr({ number: 7 }))
+    mocks.fetchPrs.mockResolvedValue(fetched(githubPr({ number: 7 })))
     await authoredPrList.refreshOne('acme', 'api', 7)
     expect(pruner).toHaveBeenCalledTimes(1)
   })
@@ -304,7 +305,7 @@ describe('prList', () => {
       await prList.refresh()
       expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['acme/web#2'], ['acme/api#1']])
 
-      mocks.fetchPr.mockResolvedValue(web({ title: 'Fresh' }))
+      mocks.fetchPrs.mockResolvedValue(fetched(web({ title: 'Fresh' })))
       await prList.refreshOne('acme', 'web', 2)
       expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['acme/web#2'], ['acme/api#1']])
     })
@@ -438,6 +439,35 @@ describe('prList', () => {
         await prList.refresh()
 
         expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['acme/web#2'], ['acme/api#1']])
+      })
+
+      it('refreshes every member together in one update and keeps the companion', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockResolvedValueOnce(fetched(web()))
+        await prList.refresh()
+        const changed = vi.fn()
+        prList.on('changed', changed)
+
+        mocks.fetchPrs.mockResolvedValueOnce(fetched(api({ title: 'API fresh' }), web({ title: 'Web fresh' })))
+        await prList.refreshMany([{ owner: 'acme', repo: 'api', number: 1 }, { owner: 'acme', repo: 'web', number: 2 }])
+        prList.off('changed', changed)
+
+        expect(changed).toHaveBeenCalledTimes(1)
+        expect(prList.get().prs.map((pr) => [pr.title, pr.companion, pr.linkedPrs])).toEqual([
+          ['API fresh', undefined, ['acme/web#2']],
+          ['Web fresh', true, ['acme/api#1']],
+        ])
+      })
+
+      it('drops a PR that closed and keeps one whose lookup failed when refreshing members', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' }), web({ body: '' })] })
+        await prList.refresh()
+
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'gone' }, { status: 'unknown' }] })
+        await prList.refreshMany([{ owner: 'acme', repo: 'api', number: 1 }, { owner: 'acme', repo: 'web', number: 2 }])
+
+        expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['web'])
       })
 
       it('never fetches companions for the authored list', async () => {

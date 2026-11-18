@@ -21,7 +21,7 @@ import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase } from './github/authorPhase'
 import { computePhase } from './github/phase'
 import { sameLogin } from './github/logins'
-import { fetchPr, fetchPrs, searchPrs, type GithubPr } from './github/queries'
+import { fetchPrs, searchPrs, type GithubPr } from './github/queries'
 import { AUTHORED_SEARCH_QUERIES, buildSearchQueries } from './github/search'
 import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
 import type { JsonFile } from './jsonFile'
@@ -225,15 +225,30 @@ class PrList extends EventEmitter {
     return [...fetched.values()].filter((pr) => memberKeys.has(keyOf(pr)))
   }
 
-  /** Fetches one PR; a full refresh already in flight keeps this newer copy instead of its own. */
   async refreshOne(owner: string, repo: string, number: number): Promise<void> {
+    await this.refreshMany([{ owner, repo, number }])
+  }
+
+  /** Fetches PRs together and updates the list once; a full refresh already in flight keeps these newer copies instead of its own. */
+  async refreshMany(refs: PrCoords[]): Promise<void> {
     const startedDuringRefresh = this.state.refreshing ? this.refreshGeneration : null
-    const fetched = await fetchPr(owner, repo, number, this.kind)
-    if (this.state.refreshing && this.refreshGeneration === startedDuringRefresh) this.fetchedDuringRefresh.set(fetched.id, fetched)
-    const [fresh] = this.decorate([fetched], false)
-    const prs = this.settle(
-      this.state.prs.some((p) => p.id === fresh.id) ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p)) : [...this.state.prs, fresh],
+    const { lookups } = await fetchPrs(refs, this.kind)
+    const fetched = lookups.flatMap((lookup) => (lookup.status === 'found' ? [lookup.pr] : []))
+    const gone = refs.filter((_, i) => lookups[i].status === 'gone')
+    const unknown = refs.filter((_, i) => lookups[i].status === 'unknown')
+    if (unknown.length > 0) console.warn('Refreshing PRs left some unchanged after lookup errors', { prs: unknown.map(keyOf) })
+    if (this.state.refreshing && this.refreshGeneration === startedDuringRefresh) for (const pr of fetched) this.fetchedDuringRefresh.set(pr.id, pr)
+    const companionIds = new Set(this.state.prs.filter((pr) => pr.companion).map((pr) => pr.id))
+    const fresh = this.decorate(
+      fetched.map((pr) => (companionIds.has(pr.id) ? { ...pr, companion: true } : pr)),
+      false,
     )
+    const freshIds = new Set(fresh.map((pr) => pr.id))
+    const kept = this.state.prs.filter((pr) => !gone.some((ref) => isSamePr(ref, pr)))
+    const prs = this.settle([
+      ...kept.map((pr) => (freshIds.has(pr.id) ? fresh.find((f) => f.id === pr.id)! : pr)),
+      ...fresh.filter((pr) => !kept.some((k) => k.id === pr.id)),
+    ])
     this.update({ prs })
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }

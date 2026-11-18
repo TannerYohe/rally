@@ -7,7 +7,15 @@ vi.mock('./client', async (importOriginal) => ({
   github: async () => ({ graphql, login: 'me' }),
 }))
 
-const { fetchPr, fetchPrs, isReplyOnly, SEARCH_PAGES, searchPrs } = await import('./queries')
+const { fetchPrs, isReplyOnly, SEARCH_PAGES, searchPrs } = await import('./queries')
+
+const single = (raw: object) => ({ p0: { pullRequest: { ...raw, state: 'OPEN' } } })
+
+async function fetchOne(number: number, kind: 'reviewing' | 'authored') {
+  const { lookups } = await fetchPrs([{ owner: 'acme', repo: 'api', number }], kind)
+  if (lookups[0].status !== 'found') throw new Error(`PR ${number} was ${lookups[0].status}`)
+  return lookups[0].pr
+}
 
 const reply = { replyTo: { id: 'c1' } }
 const inline = { replyTo: null }
@@ -59,7 +67,7 @@ function olderPage<T extends { id: string; body: string }>(reviews: T[], startCu
   return { node: { reviews: { pageInfo: { hasPreviousPage, startCursor }, nodes } } }
 }
 
-describe('fetchPr', () => {
+describe('fetching one PR', () => {
   beforeEach(() => graphql.mockReset())
 
   it('carries each review database id and reply-only flag into myReviews', async () => {
@@ -67,10 +75,10 @@ describe('fetchPr', () => {
       realReview({ id: 'PRR_1', databaseId: 101, state: 'APPROVED', body: 'ok' }),
       { ...replyReview(0), id: 'PRR_2', databaseId: 5787412470, submittedAt: '2026-11-05T15:24:38Z' },
     ])
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: raw } })
+    graphql.mockResolvedValueOnce(single(raw))
     graphql.mockResolvedValueOnce({ nodes: [{ id: 'PRR_2', comments: { nodes: [reply] } }] })
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(pr.myReviews).toEqual([
       { databaseId: 101, state: 'APPROVED', submittedAt: '2026-11-04T00:00:00Z', commitOid: 'old', replyOnly: false },
@@ -85,11 +93,11 @@ describe('fetchPr', () => {
     const newest = Array.from({ length: 20 }, (_, i) => replyReview(i + 20))
     const olderReplies = Array.from({ length: 5 }, (_, i) => replyReview(i + 10))
     const real = realReview()
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c20' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr(newest, { hasPreviousPage: true, startCursor: 'c20' })))
     graphql.mockResolvedValueOnce(commentsFor(newest))
     graphql.mockResolvedValueOnce(olderPage([real, ...olderReplies], 'c0'))
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(graphql.mock.calls[2][1]).toMatchObject({ id: 'PR_12', viewer: 'me', before: 'c20' })
     expect(graphql.mock.calls[2][0]).toMatch(/reviews\(author: \$viewer, last: 20, before: \$before\)/)
@@ -105,12 +113,12 @@ describe('fetchPr', () => {
     const newest = Array.from({ length: 20 }, (_, i) => replyReview(i + 40))
     const middle = Array.from({ length: 20 }, (_, i) => replyReview(i + 20))
     const real = realReview({ state: 'APPROVED', body: '' })
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c40' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr(newest, { hasPreviousPage: true, startCursor: 'c40' })))
     graphql.mockResolvedValueOnce(commentsFor(newest))
     graphql.mockResolvedValueOnce(olderPage(middle, 'c20'))
     graphql.mockResolvedValueOnce(olderPage([real], 'c0'))
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(graphql.mock.calls.slice(2).map((call) => call[1].before)).toEqual(['c40', 'c20'])
     expect(pr.myReviews).toHaveLength(41)
@@ -119,11 +127,11 @@ describe('fetchPr', () => {
 
   it('stops paging after 10 pages when every page is replies', async () => {
     const newest = [replyReview(0)]
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c0' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr(newest, { hasPreviousPage: true, startCursor: 'c0' })))
     graphql.mockResolvedValueOnce(commentsFor(newest))
     for (let page = 1; page <= 10; page++) graphql.mockResolvedValueOnce(olderPage([replyReview(page)], `c${page}`))
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(graphql).toHaveBeenCalledTimes(2 + 9)
     expect(pr.myReviews).toHaveLength(10)
@@ -135,11 +143,11 @@ describe('fetchPr', () => {
     const dismissed = { id: 'PRR_dismissed', databaseId: 9, state: 'DISMISSED', submittedAt: '2026-11-04T12:00:00Z', body: 'x', commit: { oid: 'old' } }
     const real = realReview()
     const replies = [replyReview(1), replyReview(2)]
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr([dismissed, ...replies, pending], { hasPreviousPage: true, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr([dismissed, ...replies, pending], { hasPreviousPage: true, startCursor: 'c1' })))
     graphql.mockResolvedValueOnce(commentsFor(replies))
     graphql.mockResolvedValueOnce(olderPage([real], 'c0', false))
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(graphql.mock.calls[2][1]).toMatchObject({ before: 'c1' })
     expect(pr.myReviews.map((r) => r.databaseId)).toEqual([7, 9, 1001, 1002, 8])
@@ -148,10 +156,10 @@ describe('fetchPr', () => {
   it('stops paging without a warning when the newest page of replies is my whole history', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const newest = [replyReview(1), replyReview(2)]
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: false, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr(newest, { hasPreviousPage: false, startCursor: 'c1' })))
     graphql.mockResolvedValueOnce(commentsFor(newest))
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(graphql).toHaveBeenCalledTimes(2)
     expect(warn).not.toHaveBeenCalled()
@@ -161,10 +169,10 @@ describe('fetchPr', () => {
 
   it('does not page back when the window holds a real review', async () => {
     const reviews = [realReview({ state: 'APPROVED', body: '' }), replyReview(1)]
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(reviews, { hasPreviousPage: true, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr(reviews, { hasPreviousPage: true, startCursor: 'c1' })))
     graphql.mockResolvedValueOnce(commentsFor([replyReview(1)]))
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(graphql).toHaveBeenCalledTimes(2)
     expect(pr.myReviews).toHaveLength(2)
@@ -173,11 +181,11 @@ describe('fetchPr', () => {
   it('keeps the reviews fetched so far when an older page fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const newest = [replyReview(1), replyReview(2)]
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr(newest, { hasPreviousPage: true, startCursor: 'c1' })))
     graphql.mockResolvedValueOnce(commentsFor(newest))
     graphql.mockRejectedValueOnce(new Error('socket hang up'))
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(pr.myReviews.map((r) => r.databaseId)).toEqual([1001, 1002])
     expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ pr: 'https://github.com/acme/api/pull/12' }))
@@ -187,11 +195,11 @@ describe('fetchPr', () => {
   it('keeps the reviews fetched so far when the PR is gone on an older page', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const newest = [replyReview(1)]
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: rawPr(newest, { hasPreviousPage: true, startCursor: 'c1' }) } })
+    graphql.mockResolvedValueOnce(single(rawPr(newest, { hasPreviousPage: true, startCursor: 'c1' })))
     graphql.mockResolvedValueOnce(commentsFor(newest))
     graphql.mockResolvedValueOnce({ node: null })
 
-    const pr = await fetchPr('acme', 'api', 12, 'reviewing')
+    const pr = await fetchOne(12, 'reviewing')
 
     expect(pr.myReviews.map((r) => r.databaseId)).toEqual([1001])
     expect(warn).toHaveBeenCalledWith(expect.any(String), { pr: 'https://github.com/acme/api/pull/12' })
@@ -213,9 +221,9 @@ describe('fetchPr', () => {
       comments: { pageInfo: { hasPreviousPage: false }, nodes: [{ url: 'https://github.com/acme/api/pull/13#issuecomment-1', body: 'Why?', createdAt: '', author: { login: 'carol', __typename: 'User' }, reactionGroups: [] }] },
       allReviews: { pageInfo: { hasPreviousPage: true }, nodes: [] },
     }
-    graphql.mockResolvedValueOnce({ repository: { pullRequest: raw } })
+    graphql.mockResolvedValueOnce(single(raw))
 
-    const pr = await fetchPr('acme', 'api', 13, 'authored')
+    const pr = await fetchOne(13, 'authored')
 
     expect(graphql.mock.calls.at(-1)![1]).toMatchObject({ authored: true })
     expect(pr.feedback).toEqual({

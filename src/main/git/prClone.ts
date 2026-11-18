@@ -85,18 +85,22 @@ export async function syncClone(clone: CloneInfo): Promise<CloneInfo> {
 
 /**
  * Fetches the head and base branches and fast-forwards the worktree to GitHub's head when it is behind, leaving it alone when it has diverged
- * or the fast-forward would touch uncommitted edits. Records GitHub's head as synced once the worktree contains it.
+ * or the fast-forward would touch uncommitted edits. Records GitHub's head as synced once the worktree contains it. A worktree Rally hasn't
+ * synced before, and that has diverged, counts as synced at the GitHub head it last fetched, so a force push since then is detected.
  */
 export async function syncWorktree(clone: CloneInfo): Promise<CloneInfo> {
-  await fetchHeadAndBase(clone)
   const remote = remoteRef(clone)
+  const lastFetched = clone.syncedHead ? null : await revParse(clone.path, remote).catch(() => null)
+  await fetchHeadAndBase(clone)
   if (await isAncestor(clone, 'HEAD', remote)) {
     await git(clone.path, ['merge', '--ff-only', remote]).catch((error: unknown) => {
       console.warn('Fast-forwarding the worktree to GitHub failed', { path: clone.path, branch: clone.branch, error })
     })
   }
   if (await isAncestor(clone, remote)) return { ...clone, syncedHead: await revParse(clone.path, remote) }
-  return { ...clone, syncedHead: clone.syncedHead ?? (await git(clone.path, ['merge-base', 'HEAD', remote])).trim() }
+  if (clone.syncedHead) return clone
+  if (lastFetched && (await isAncestor(clone, lastFetched))) return { ...clone, syncedHead: lastFetched }
+  return { ...clone, syncedHead: (await git(clone.path, ['merge-base', 'HEAD', remote])).trim() }
 }
 
 /** The rev-list arguments for the checkout's commits that GitHub doesn't have. */

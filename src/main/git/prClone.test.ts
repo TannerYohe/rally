@@ -317,6 +317,23 @@ describe('prClone', () => {
     expect((await localCommits(synced)).map((c) => c.oid)).toEqual([localHead])
   })
 
+  it('detects a force push on the first sync of a worktree still on the old history', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt5'), source)
+    const other = await cloneBranch(join(root, 'session-wt6'), source)
+    const oldHead = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    git(other.path, 'commit', '--amend', '-m', 'rewritten')
+    git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
+
+    const synced = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(synced.syncedHead).toBe(oldHead)
+    expect(await localCommits(synced)).toEqual([])
+    const { clone: integrated } = await integrateRemote(synced)
+    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(git(other.path, 'rev-parse', 'HEAD').trim())
+    expect(await localCommits(integrated)).toEqual([])
+    git(other.path, 'reset', '--hard', oldHead)
+    git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
+  })
+
   it('finds the newest commit made since a point, and not on GitHub, that touches a file', async () => {
     const clone = await cloneBranch(join(root, 'session-touch'), source)
     const start = git(clone.path, 'rev-parse', 'HEAD').trim()

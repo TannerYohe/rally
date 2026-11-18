@@ -83,24 +83,35 @@ export async function syncClone(clone: CloneInfo): Promise<CloneInfo> {
   return { ...clone, syncedHead: await revParse(clone.path, 'HEAD') }
 }
 
+/** Whether a worktree holds GitHub's head after syncing, or why it doesn't. */
+export type WorktreeSyncState = 'synced' | 'diverged' | 'fast_forward_failed'
+
+export interface WorktreeSync {
+  clone: CloneInfo
+  state: WorktreeSyncState
+}
+
 /**
  * Fetches the head and base branches and fast-forwards the worktree to GitHub's head when it is behind, leaving it alone when it has diverged
  * or the fast-forward would touch uncommitted edits. Records GitHub's head as synced once the worktree contains it. A worktree Rally hasn't
  * synced before, and that has diverged, counts as synced at the GitHub head it last fetched, so a force push since then is detected.
  */
-export async function syncWorktree(clone: CloneInfo): Promise<CloneInfo> {
+export async function syncWorktree(clone: CloneInfo): Promise<WorktreeSync> {
   const remote = remoteRef(clone)
   const lastFetched = clone.syncedHead ? null : await revParse(clone.path, remote).catch(() => null)
   await fetchHeadAndBase(clone)
+  let state: WorktreeSyncState = 'diverged'
   if (await isAncestor(clone, 'HEAD', remote)) {
     await git(clone.path, ['merge', '--ff-only', remote]).catch((error: unknown) => {
       console.warn('Fast-forwarding the worktree to GitHub failed', { path: clone.path, branch: clone.branch, error })
+      state = 'fast_forward_failed'
     })
   }
-  if (await isAncestor(clone, remote)) return { ...clone, syncedHead: await revParse(clone.path, remote) }
-  if (clone.syncedHead) return clone
-  if (lastFetched && (await isAncestor(clone, lastFetched))) return { ...clone, syncedHead: lastFetched }
-  return { ...clone, syncedHead: (await git(clone.path, ['merge-base', 'HEAD', remote])).trim() }
+  if (await isAncestor(clone, remote)) return { clone: { ...clone, syncedHead: await revParse(clone.path, remote) }, state: 'synced' }
+  if (state === 'diverged') console.info('Leaving a worktree that has diverged from GitHub as is', { path: clone.path, branch: clone.branch })
+  if (clone.syncedHead) return { clone, state }
+  if (lastFetched && (await isAncestor(clone, lastFetched))) return { clone: { ...clone, syncedHead: lastFetched }, state }
+  return { clone: { ...clone, syncedHead: (await git(clone.path, ['merge-base', 'HEAD', remote])).trim() }, state }
 }
 
 /** The rev-list arguments for the checkout's commits that GitHub doesn't have. */

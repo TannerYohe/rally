@@ -38,6 +38,7 @@ import {
   UncommittedChangesError,
   uncommittedDiff,
   uncommittedPaths,
+  type WorktreeSyncState,
 } from '../git/prClone'
 import { checkoutWorktree, removeRallyWorktree } from '../git/localWorktree'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
@@ -62,6 +63,29 @@ const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp 
 const WORKTREE_GONE_ERROR = 'The worktree for this PR is gone. Send a message or run actions to check the branch out again; commits on the branch are kept.'
 const WORKTREE_CLEARED_ERROR = 'The worktree for this PR was removed, and its uncommitted edits with it.'
 const DISCARD_CHANGED_ERROR = 'The uncommitted files changed since Rally last read them. Check the list in the Changes tab and discard again.'
+const LOCAL_CLONE_RECOVERY = 'Fix the clone, or remove its folder from Settings → Local repo folders so Rally uses a temp clone.'
+const SYNC_WARNINGS: Record<WorktreeSyncState, string | null> = {
+  synced: null,
+  diverged: "The worktree has commits GitHub doesn't, and GitHub has commits it doesn't, so Rally left it as is. Push merges GitHub's commits in.",
+  fast_forward_failed: "Rally couldn't fast-forward the worktree to GitHub's head, likely because uncommitted edits touch the same files, so Claude works on older code.",
+}
+
+/** Why a turn runs in the checkout it does. */
+type CheckoutReason = 'temp_clone_has_work' | 'fork' | 'no_local_clone' | 'worktree'
+
+const CHECKOUT_REASONS: Record<CheckoutReason, string> = {
+  temp_clone_has_work: 'Temp clone, which holds unpushed work',
+  fork: 'Temp clone, since the PR comes from a fork',
+  no_local_clone: 'Temp clone, since no local repo folder holds the repo',
+  worktree: 'Worktree',
+}
+
+interface Checkout {
+  clone: CloneInfo
+  reason: CheckoutReason
+  warning: string | null
+}
+
 const PROJECT_SETTINGS: SettingSource[] = ['user', 'project', 'local']
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
@@ -213,6 +237,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         this.turnStartHeads.set(sessionId, await headOf(clone))
         void this.runTurn(sessionId, prompt(clone), mode)
       } catch (error) {
+        console.error('Checking out the PR branch for a turn failed', { pr: this.byId(sessionId).pr.url, sessionId, error })
         if (this.byId(sessionId).status === 'running') this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
         throw error
       }
@@ -456,7 +481,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       if (!session.clone) return
       await removeRallyWorktree(session.clone, { dropWork: true }).catch((error: unknown) => {
         console.error('Removing the worktree Rally added failed', { pr: session.pr.url, path: session.clone?.path, error })
-        throw new Error(`Rally couldn't remove the worktree at ${session.clone?.path}: ${errorMessage(error)} Remove it with \`git worktree remove --force\`, then start over again.`)
+        throw new Error(`Rally couldn't remove the worktree at ${session.clone?.path}. Remove it with \`git worktree remove --force\`, then start over again. ${errorMessage(error)}`)
       })
     })
     this.remove(session)
@@ -567,15 +592,18 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   private async prepareClone(sessionId: string): Promise<CloneInfo> {
-    const { clone } = this.byId(sessionId)
+    const { clone, pr } = this.byId(sessionId)
     const stepId = randomUUID()
     const label = clone ? 'Updating the PR branch' : 'Checking out the PR branch'
     this.append(sessionId, { kind: 'step', id: stepId, label, detail: '', done: false, at: now() })
     let detail = ''
     try {
-      const next = await this.checkOut(sessionId)
+      const checkout = await this.checkOut(sessionId)
+      const next = checkout.clone
+      console.info('Checked out the PR branch for a turn', { pr: pr.url, sessionId, kind: next.kind ?? 'temp_clone', path: next.path, reason: checkout.reason })
       this.patch(sessionId, () => ({ clone: next }), true)
-      detail = next.path
+      detail = `${CHECKOUT_REASONS[checkout.reason]}: ${next.path}`
+      if (checkout.warning) this.append(sessionId, { kind: 'warning', id: randomUUID(), label: checkout.warning, detail: next.path, at: now() })
       return next
     } finally {
       this.patch(sessionId, (s) => ({ timeline: s.timeline.map((e) => (e.id === stepId && e.kind === 'step' ? { ...e, detail, done: true } : e)) }))
@@ -587,23 +615,37 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
    * Otherwise Rally uses the local worktree for the branch, adding one when needed, and clones into the temp folder only when no
    * configured folder holds the repo or the PR comes from a fork.
    */
-  private async checkOut(sessionId: string): Promise<CloneInfo> {
+  private async checkOut(sessionId: string): Promise<Checkout> {
     const { clone, pr, commits } = this.byId(sessionId)
     const tempClone = clone && !isWorktree(clone) ? clone : null
     if (tempClone && existsSync(tempClone.path)) {
-      if ((await localCommits(tempClone)).length > 0 || (await uncommittedPaths(tempClone)).length > 0) return syncClone(tempClone)
+      if ((await localCommits(tempClone)).length > 0 || (await uncommittedPaths(tempClone)).length > 0) {
+        return { clone: await syncClone(tempClone), reason: 'temp_clone_has_work', warning: null }
+      }
     } else if (tempClone && commits.length > 0) {
       this.assertCloneFolder(sessionId)
     } else if (tempClone) {
       this.cloneFolderGone(sessionId)
     }
     const source = await fetchCloneSource(pr)
-    const target = { repo: `${pr.owner}/${pr.repo}`, branch: source.branch, baseBranch: source.baseBranch }
-    const worktree = source.headUrl === source.baseUrl ? await checkoutWorktree(configFile.get().localRepoFolders, target) : null
-    if (!worktree) return tempClone && existsSync(tempClone.path) ? syncClone(tempClone) : cloneBranch(sessionDir(sessionId), source)
+    const repo = `${pr.owner}/${pr.repo}`
+    const fork = source.headUrl !== source.baseUrl
+    const worktree = fork
+      ? null
+      : await checkoutWorktree(configFile.get().localRepoFolders, { repo, branch: source.branch, baseBranch: source.baseBranch }).catch((error: unknown) => {
+          throw new Error(`Rally couldn't check out ${source.branch} from your clone of ${repo}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
+        })
+    if (!worktree) {
+      const next = tempClone && existsSync(tempClone.path) ? await syncClone(tempClone) : await cloneBranch(sessionDir(sessionId), source)
+      return { clone: next, reason: fork ? 'fork' : 'no_local_clone', warning: null }
+    }
     if (tempClone) await rm(tempClone.path, { recursive: true, force: true })
     const previous = clone?.path === worktree.path ? clone : undefined
-    return syncWorktree({ ...worktree, syncedHead: previous?.syncedHead, createdBranch: previous?.createdBranch || worktree.createdBranch })
+    const merged = { ...worktree, syncedHead: previous?.syncedHead, createdBranch: previous?.createdBranch || worktree.createdBranch }
+    const { clone: synced, state } = await syncWorktree(merged).catch((error: unknown) => {
+      throw new Error(`Rally couldn't update the worktree at ${worktree.path}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
+    })
+    return { clone: synced, reason: 'worktree', warning: SYNC_WARNINGS[state] }
   }
 
   private async refreshClone(sessionId: string): Promise<void> {

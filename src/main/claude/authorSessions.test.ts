@@ -145,6 +145,9 @@ mocks.stored = [
   stored(66, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
   stored(67, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
   stored(68, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
+  stored(69),
+  stored(70),
+  stored(71, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, syncedHead: 'prev' } }),
   stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
     clone: { ...CLONE, syncedHead: 'old-head' },
@@ -219,7 +222,7 @@ beforeEach(() => {
   mocks.cloneBranch.mockResolvedValue(CLONE)
   mocks.syncClone.mockImplementation(async (clone) => clone)
   mocks.checkoutWorktree.mockResolvedValue(null)
-  mocks.syncWorktree.mockImplementation(async (clone) => ({ ...clone, syncedHead: 'synced' }))
+  mocks.syncWorktree.mockImplementation(async (clone) => ({ clone: { ...clone, syncedHead: 'synced' }, state: 'synced' }))
   mocks.localCommits.mockResolvedValue([])
   mocks.uncommittedPaths.mockResolvedValue([])
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -746,6 +749,30 @@ describe('checking out the PR branch', () => {
     await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
     expect(turnOptions().cwd).toBe(CLONE.path)
+  })
+
+  it('notes a diverged worktree in the timeline and names the checkout in the step', async () => {
+    mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
+    mocks.syncWorktree.mockImplementation(async (clone) => ({ clone: { ...clone, syncedHead: 'base' }, state: 'diverged' }))
+    finishTurn()
+    await authorSessions.feedback('author-69', 'go')
+    await vi.waitFor(() => expect(session(69).status).toBe('awaiting_feedback'))
+    expect(session(69).timeline).toContainEqual(expect.objectContaining({ kind: 'warning', label: expect.stringContaining('Rally left it as is'), detail: WORKTREE.path }))
+    expect(session(69).timeline).toContainEqual(expect.objectContaining({ kind: 'step', detail: `Worktree: ${WORKTREE.path}` }))
+  })
+
+  it('says how to fall back to a temp clone when the local clone fails to check out', async () => {
+    mocks.checkoutWorktree.mockRejectedValue(new Error('git fetch failed: Permission denied (publickey).'))
+    await expect(authorSessions.feedback('author-70', 'go')).rejects.toThrow('remove its folder from Settings → Local repo folders')
+    expect(session(70)).toMatchObject({ status: 'error', error: expect.stringContaining('Permission denied (publickey)') })
+  })
+
+  it('keeps the branch Rally created and the synced head across turns in its worktree', async () => {
+    mocks.checkoutWorktree.mockResolvedValue({ ...WORKTREE, kind: 'rally_worktree' })
+    finishTurn()
+    await authorSessions.feedback('author-71', 'go')
+    await vi.waitFor(() => expect(session(71).status).toBe('awaiting_feedback'))
+    expect(mocks.syncWorktree).toHaveBeenCalledWith(expect.objectContaining({ createdBranch: true, syncedHead: 'prev' }))
   })
 
   it('clones into the temp folder for a PR from a fork', async () => {

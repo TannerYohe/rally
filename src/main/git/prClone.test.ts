@@ -296,10 +296,26 @@ describe('prClone', () => {
     commitFile(other.path, 'ahead.txt', 'ahead\n')
     const { push } = await syncAndPush(other, AT)
 
-    const synced = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    const { clone: synced, state } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
     expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(push.oid)
     expect(synced.syncedHead).toBe(push.oid)
+    expect(state).toBe('synced')
     expect(await uncommittedPaths(worktree)).toEqual(['wip.txt'])
+  })
+
+  it('leaves a worktree behind GitHub as is when the fast-forward would overwrite an uncommitted edit', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt7'), source)
+    const other = await cloneBranch(join(root, 'session-wt8'), source)
+    const head = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    writeFileSync(join(worktree.path, 'b.txt'), 'my edit\n')
+    commitFile(other.path, 'b.txt', 'their edit\n')
+    await syncAndPush(other, AT)
+
+    const { clone: synced, state } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(state).toBe('fast_forward_failed')
+    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(head)
+    expect(await uncommittedPaths(worktree)).toEqual(['b.txt'])
+    expect(synced.syncedHead).toBe(head)
   })
 
   it('leaves a diverged worktree alone and records where it left GitHub', async () => {
@@ -311,7 +327,8 @@ describe('prClone', () => {
     commitFile(other.path, 'remote.txt', 'remote\n')
     await syncAndPush(other, AT)
 
-    const synced = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    const { clone: synced, state } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(state).toBe('diverged')
     expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(localHead)
     expect(synced.syncedHead).toBe(forkPoint)
     expect((await localCommits(synced)).map((c) => c.oid)).toEqual([localHead])
@@ -324,7 +341,7 @@ describe('prClone', () => {
     git(other.path, 'commit', '--amend', '-m', 'rewritten')
     git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
 
-    const synced = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    const { clone: synced } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
     expect(synced.syncedHead).toBe(oldHead)
     expect(await localCommits(synced)).toEqual([])
     const { clone: integrated } = await integrateRemote(synced)

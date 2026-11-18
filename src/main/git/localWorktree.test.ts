@@ -1,8 +1,8 @@
-import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { git, seedRemote, useTestGitIdentity } from './testRepo.fixture'
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'rally-worktree-test-')))
 const home = join(root, 'home')
@@ -16,19 +16,6 @@ const src = join(home, 'src')
 const clonePath = join(src, 'api')
 const GITHUB_URL = 'git@github.com:acme/api.git'
 
-const TEST_GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: 'Test',
-  GIT_AUTHOR_EMAIL: 'test@example.com',
-  GIT_COMMITTER_NAME: 'Test',
-  GIT_COMMITTER_EMAIL: 'test@example.com',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-}
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], { cwd, env: TEST_GIT_ENV, stdio: 'pipe' }).toString()
-}
-
 function pushBranch(seed: string, branch: string): void {
   git(seed, 'checkout', '-b', branch, 'main')
   writeFileSync(join(seed, `${branch.replaceAll('/', '-')}.txt`), `${branch}\n`)
@@ -38,17 +25,11 @@ function pushBranch(seed: string, branch: string): void {
 }
 
 beforeAll(() => {
-  for (const key of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const) process.env[key] = TEST_GIT_ENV[key]
+  useTestGitIdentity()
   const seed = join(root, 'seed')
   mkdirSync(src, { recursive: true })
   mkdirSync(join(src, 'not-a-repo'))
-  git(root, 'init', '--bare', '--initial-branch=main', remote)
-  git(root, 'init', '--initial-branch=main', seed)
-  writeFileSync(join(seed, 'a.txt'), 'one\n')
-  git(seed, 'add', 'a.txt')
-  git(seed, 'commit', '-m', 'init')
-  git(seed, 'remote', 'add', 'origin', remote)
-  git(seed, 'push', 'origin', 'main')
+  seedRemote(root, remote, seed)
   for (const branch of ['mine', 'feature/new', 'local-only']) pushBranch(seed, branch)
 
   git(root, 'clone', remote, clonePath)

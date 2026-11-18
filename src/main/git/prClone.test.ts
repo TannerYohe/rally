@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,30 +23,12 @@ import {
   uncommittedPaths,
   UncommittedChangesError,
 } from './prClone'
+import { commitFile, git, seedRemote, useTestGitIdentity } from './testRepo.fixture'
 
 const root = mkdtempSync(join(tmpdir(), 'rally-clone-test-'))
 const remote = join(root, 'remote.git')
 const seed = join(root, 'seed')
 const AT = '2026-11-16T00:00:00Z'
-
-const TEST_GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: 'Test',
-  GIT_AUTHOR_EMAIL: 'test@example.com',
-  GIT_COMMITTER_NAME: 'Test',
-  GIT_COMMITTER_EMAIL: 'test@example.com',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-}
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], { cwd, env: TEST_GIT_ENV, stdio: 'pipe' }).toString()
-}
-
-function commitFile(cwd: string, name: string, content: string): void {
-  writeFileSync(join(cwd, name), content)
-  git(cwd, 'add', name)
-  git(cwd, 'commit', '-m', `change ${name}`)
-}
 
 /** Brings GitHub's commits in, then pushes, as Push does. */
 async function syncAndPush(clone: CloneInfo, at: string) {
@@ -60,12 +41,8 @@ const diffFiles = (diff: string) => [...diff.matchAll(/^diff --git a\/(\S+) b\//
 const source = { headUrl: `file://${remote}`, branch: 'feature', baseUrl: `file://${remote}`, baseBranch: 'main' }
 
 beforeAll(() => {
-  for (const key of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const) process.env[key] = TEST_GIT_ENV[key]
-  git(root, 'init', '--bare', '--initial-branch=main', remote)
-  git(root, 'init', '--initial-branch=main', seed)
-  commitFile(seed, 'a.txt', 'one\n')
-  git(seed, 'remote', 'add', 'origin', remote)
-  git(seed, 'push', 'origin', 'main')
+  useTestGitIdentity()
+  seedRemote(root, remote, seed)
   git(seed, 'checkout', '-b', 'feature')
   commitFile(seed, 'b.txt', 'two\n')
   git(seed, 'push', 'origin', 'feature')

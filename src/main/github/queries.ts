@@ -318,7 +318,8 @@ async function requestPrs(gh: GithubClient, batch: PrCoords[], kind: PrListKind)
     const partial = error instanceof GraphqlResponseError ? (error.data as MultiPrResponse | null | undefined) : undefined
     if (!partial) throw error
     const errors = (error as GraphqlResponseError<unknown>).errors ?? []
-    console.warn('GitHub PR lookup returned partial errors', { errors })
+    const unexpected = errors.filter((e) => !GONE_ERROR_TYPES.includes((e as { type?: string }).type ?? ''))
+    if (unexpected.length > 0) console.warn('GitHub PR lookup returned partial errors', { errors: unexpected })
     return { data: partial, errors }
   }
 }

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { unitMembers } from '@shared/prUnit'
-import { keyOf, prKey, REVIEW_EVENT_LABELS, toPrRef, type MemberVerdict, type Pr, type PrRef, type ReviewSession, type SubmittedReview } from '@shared/types'
+import { keyOf, prKey, priorConcernThreadIds, REVIEW_EVENT_LABELS, toPrRef, type MemberVerdict, type Pr, type PrRef, type ReviewSession, type SubmittedReview } from '@shared/types'
 import { distinctSessions, draftsForPr, emptyReviewError, isPartlyPosted, isUnitSession, memberPosted, sessionMembers } from '@shared/unitDrafts'
 import { DraftList } from '../components/DraftList'
 import { LinkPrForm, OneSidedLinks, UnlinkButton } from '../components/LinkedPrControls'
@@ -412,10 +412,10 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
                 label: <MemberLabel member={member} pr={prOf(member)} />,
                 posted: postedOf(member),
                 commentCount: keptCommentCount(draftsForPr(drafts, keyOf(member)), edits),
+                threadCount: priorConcernThreadIds(draftsForPr(drafts, keyOf(member))).filter((id) => threadResolution.selectedIds.includes(id)).length,
               }))}
               disabled={busy || resolvingThreads}
               blockedReason={submitBlockedReason(feedback)}
-              threadCount={threadResolution.selectedIds.length}
               onSubmit={submit}
             />
           )}

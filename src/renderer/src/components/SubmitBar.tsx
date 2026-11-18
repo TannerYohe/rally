@@ -1,15 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { REVIEW_EVENT_LABELS, SUBMIT_EVENT_LABELS, type MemberVerdict, type ReviewEvent, type SubmitEvent, type SubmittedReview } from '@shared/types'
+import { submitConfirmation, type SubmitCounts } from '../lib/submitConfirmation'
 
 const EVENTS: ReviewEvent[] = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES']
 const UNIT_EVENTS: SubmitEvent[] = [...EVENTS, 'SKIP']
 
-export interface SubmitMember {
-  prKey: string
+export interface SubmitMember extends SubmitCounts {
   label: ReactNode
   posted: SubmittedReview | null
-  /** Draft comments that submitting this PR would post. */
-  commentCount: number
 }
 
 interface Props {
@@ -17,29 +15,17 @@ interface Props {
   members: SubmitMember[]
   disabled: boolean
   blockedReason: string | null
-  threadCount: number
   onSubmit(verdicts: MemberVerdict[]): void
 }
 
-function confirmation(verdicts: MemberVerdict[], members: SubmitMember[], threadCount: number): string {
-  const unit = members.length > 1
-  const commentCount = verdicts
-    .filter((v) => v.event !== 'SKIP')
-    .reduce((sum, v) => sum + (members.find((m) => m.prKey === v.prKey)?.commentCount ?? 0), 0)
-  const resolve = threadCount > 0 ? `, then resolve ${threadCount} review thread(s)` : ''
-  if (!unit) return `Post ${commentCount} comment(s) and submit the review as "${SUBMIT_EVENT_LABELS[verdicts[0].event]}"${resolve}?`
-  const parts = verdicts.map((v) => (v.event === 'SKIP' ? `skip ${v.prKey}` : `submit ${v.prKey} as "${SUBMIT_EVENT_LABELS[v.event]}"`))
-  return `Post ${commentCount} comment(s), ${parts.join(', ')}${resolve}?`
-}
-
-export function SubmitBar({ members, disabled, blockedReason, threadCount, onSubmit }: Props) {
+export function SubmitBar({ members, disabled, blockedReason, onSubmit }: Props) {
   const [events, setEvents] = useState<Record<string, SubmitEvent>>({})
   const unit = members.length > 1
   const options = unit ? UNIT_EVENTS : EVENTS
   const eventOf = (prKey: string) => events[prKey] ?? 'COMMENT'
   const submit = () => {
     const verdicts = members.filter((m) => !m.posted).map((m) => ({ prKey: m.prKey, event: eventOf(m.prKey) }))
-    if (window.confirm(confirmation(verdicts, members, threadCount))) onSubmit(verdicts)
+    if (window.confirm(submitConfirmation(verdicts, members))) onSubmit(verdicts)
   }
   return (
     <div className="space-y-2 rounded-md border border-ink-800 bg-ink-900 p-3">

@@ -86,7 +86,8 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   cloneDiff: vi.fn(async () => ''),
   uncommittedDiff: mocks.uncommittedDiff,
 }))
-vi.mock('../git/localWorktree', () => ({
+vi.mock('../git/localWorktree', async (importOriginal) => ({
+  LocalCloneError: (await importOriginal<typeof import('../git/localWorktree')>()).LocalCloneError,
   checkoutWorktree: mocks.checkoutWorktree,
   removeRallyWorktree: mocks.removeRallyWorktree,
 }))
@@ -729,7 +730,7 @@ describe('checking out the PR branch', () => {
     await authorSessions.selfReview(pr(60))
     await vi.waitFor(() => expect(session(60).status).toBe('awaiting_feedback'))
 
-    expect(mocks.checkoutWorktree).toHaveBeenCalledWith(['~/src'], { repo: 'acme/api', branch: 'feature', baseBranch: 'main' })
+    expect(mocks.checkoutWorktree).toHaveBeenCalledWith(['~/src'], { repo: 'acme/api', branch: 'feature', baseBranch: 'main' }, undefined)
     expect(mocks.cloneBranch).not.toHaveBeenCalled()
     expect(session(60).clone).toEqual({ ...WORKTREE, syncedHead: 'synced', createdBranch: undefined })
     expect(turnOptions()).toMatchObject({ cwd: WORKTREE.path, settingSources: ['user', 'project', 'local'] })
@@ -796,9 +797,10 @@ describe('checking out the PR branch', () => {
     expect(session(69).timeline).toContainEqual(expect.objectContaining({ kind: 'step', detail: `Worktree: ${WORKTREE.path}` }))
   })
 
-  it('says how to fall back to a temp clone when the local clone fails to check out', async () => {
-    mocks.checkoutWorktree.mockRejectedValue(new Error('git fetch failed: Permission denied (publickey).'))
-    await expect(authorSessions.feedback('author-70', 'go')).rejects.toThrow('remove its folder from Settings → Local repo folders')
+  it('names the clone and how to fall back to temp clones when the local clone fails to check out', async () => {
+    const { LocalCloneError } = await import('../git/localWorktree')
+    mocks.checkoutWorktree.mockRejectedValue(new LocalCloneError('/home/me/src/api', new Error('git fetch failed: Permission denied (publickey).')))
+    await expect(authorSessions.feedback('author-70', 'go')).rejects.toThrow('in your clone at /home/me/src/api. Fix that clone, or remove the folder holding it')
     expect(session(70)).toMatchObject({ status: 'error', error: expect.stringContaining('Permission denied (publickey)') })
   })
 

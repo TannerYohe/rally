@@ -40,7 +40,7 @@ import {
   uncommittedPaths,
   type WorktreeSyncState,
 } from '../git/prClone'
-import { checkoutWorktree, removeRallyWorktree } from '../git/localWorktree'
+import { checkoutWorktree, LocalCloneError, removeRallyWorktree } from '../git/localWorktree'
 import { githubRemotes } from '../git/githubRemotes'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
 import { github } from '../github/client'
@@ -64,7 +64,7 @@ const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp 
 const WORKTREE_GONE_ERROR = 'The worktree for this PR is gone. Send a message or run actions to check the branch out again; commits on the branch are kept.'
 const WORKTREE_CLEARED_ERROR = 'The worktree for this PR was removed, and its uncommitted edits with it.'
 const DISCARD_CHANGED_ERROR = 'The uncommitted files changed since Rally last read them. Check the list in the Changes tab and discard again.'
-const LOCAL_CLONE_RECOVERY = 'Fix the clone, or remove its folder from Settings → Local repo folders so Rally uses a temp clone.'
+const LOCAL_CLONE_RECOVERY = 'Fix that clone, or remove the folder holding it from Settings → Local repo folders; Rally then uses temp clones for every repo in that folder.'
 const SYNC_WARNINGS: Record<WorktreeSyncState, string | null> = {
   synced: null,
   diverged: "The worktree has commits GitHub doesn't, and GitHub has commits it doesn't, so Rally left it as is. Push merges GitHub's commits in.",
@@ -634,8 +634,9 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const fork = source.headUrl !== source.baseUrl
     const worktree = fork
       ? null
-      : await checkoutWorktree(configFile.get().localRepoFolders, { repo, branch: source.branch, baseBranch: source.baseBranch }).catch((error: unknown) => {
-          throw new Error(`Rally couldn't check out ${source.branch} from your clone of ${repo}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
+      : await checkoutWorktree(configFile.get().localRepoFolders, { repo, branch: source.branch, baseBranch: source.baseBranch }, clone?.path).catch((error: unknown) => {
+          const where = error instanceof LocalCloneError ? `your clone at ${error.root}` : `your clone of ${repo}`
+          throw new Error(`Rally couldn't check out ${source.branch} in ${where}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
         })
     if (!worktree) {
       const next = tempClone && existsSync(tempClone.path) ? await syncClone(tempClone) : await cloneBranch(sessionDir(sessionId), source)

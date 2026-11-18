@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { git, seedRemote, useTestGitIdentity } from './testRepo.fixture'
+import { commitFile, git, seedRemote, useTestGitIdentity } from './testRepo.fixture'
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'rally-worktree-test-')))
 const home = join(root, 'home')
@@ -11,6 +11,7 @@ vi.mock('node:os', async (importOriginal) => ({ ...(await importOriginal<typeof 
 
 const { checkoutWorktree, findLocalClone, rallyWorktreePath, removeRallyWorktree } = await import('./localWorktree')
 const { githubRepoOf } = await import('./githubRemotes')
+const { localCommits, syncWorktree } = await import('./prClone')
 
 const remote = join(root, 'remote.git')
 const src = join(home, 'src')
@@ -19,9 +20,7 @@ const GITHUB_URL = 'git@github.com:acme/api.git'
 
 function pushBranch(seed: string, branch: string): void {
   git(seed, 'checkout', '-b', branch, 'main')
-  writeFileSync(join(seed, `${branch.replaceAll('/', '-')}.txt`), `${branch}\n`)
-  git(seed, 'add', '.')
-  git(seed, 'commit', '-m', branch)
+  commitFile(seed, `${branch.replaceAll('/', '-')}.txt`, `${branch}\n`)
   git(seed, 'push', 'origin', branch)
 }
 
@@ -59,6 +58,19 @@ describe('findLocalClone', () => {
 
   it('resolves a linked worktree to its main clone', async () => {
     expect(await findLocalClone([join(root, 'conductor')], 'acme/api')).toBe(clonePath)
+  })
+
+  it('prefers the folder named after the repo, then the clone behind a hint, over other clones with the same origin', async () => {
+    const other = join(src, 'aaa-old')
+    git(root, 'clone', remote, other)
+    git(other, 'remote', 'set-url', 'origin', GITHUB_URL)
+    try {
+      expect(await findLocalClone(['~/src'], 'acme/api')).toBe(clonePath)
+      expect(await findLocalClone(['~/src'], 'acme/api', other)).toBe(other)
+      expect(await findLocalClone([clonePath], 'acme/api', other)).toBe(clonePath)
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+    }
   })
 
   it('returns null when no folder holds the repo', async () => {
@@ -101,9 +113,7 @@ describe('checkoutWorktree', () => {
     git(seed, 'checkout', '-b', 'unpushed', 'main')
     git(seed, 'push', 'origin', 'unpushed')
     const clone = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'unpushed', baseBranch: 'main' })
-    writeFileSync(join(clone!.path, 'local.txt'), 'local\n')
-    git(clone!.path, 'add', 'local.txt')
-    git(clone!.path, 'commit', '-m', 'local')
+    commitFile(clone!.path, 'local.txt', 'local\n')
 
     await expect(removeRallyWorktree(clone!, { dropWork: false })).rejects.toThrow("has commits GitHub doesn't")
     expect(existsSync(clone!.path)).toBe(true)
@@ -133,6 +143,48 @@ describe('checkoutWorktree', () => {
     const again = await checkoutWorktree(['~/src'], target)
     expect(again).toEqual({ path: first!.path, branch: target.branch, baseRef: 'origin/main', kind: 'rally_worktree', createdBranch: false })
     expect(git(again!.path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(target.branch)
+  })
+
+  it('adds a worktree on a stale local branch without fetching, so syncing detects the force push', async () => {
+    const seed = join(root, 'seed')
+    git(seed, 'checkout', '-b', 'stale', 'main')
+    commitFile(seed, 'stale.txt', 'old\n')
+    git(seed, 'push', 'origin', 'stale')
+    git(clonePath, 'fetch', 'origin', 'stale:refs/remotes/origin/stale')
+    git(clonePath, 'branch', 'stale', 'origin/stale')
+    const oldHead = git(clonePath, 'rev-parse', 'stale').trim()
+    git(seed, 'commit', '--amend', '-m', 'rewritten')
+    git(seed, 'push', '--force', 'origin', 'stale')
+
+    const added = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'stale', baseBranch: 'main' })
+    expect(added).toMatchObject({ kind: 'rally_worktree', createdBranch: false })
+    const { clone: synced } = await syncWorktree(added!)
+    expect(synced.syncedHead).toBe(oldHead)
+    expect(await localCommits(synced)).toEqual([])
+  })
+
+  it('removes a worktree whose branch GitHub deleted after merging, counting commits up to the synced head as pushed', async () => {
+    const seed = join(root, 'seed')
+    git(seed, 'checkout', '-b', 'merged', 'main')
+    git(seed, 'push', 'origin', 'merged')
+    const added = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'merged', baseBranch: 'main' })
+    commitFile(added!.path, 'fix.txt', 'fix\n')
+    const head = git(added!.path, 'rev-parse', 'HEAD').trim()
+    git(added!.path, 'push', 'origin', 'merged')
+    git(seed, 'push', 'origin', '--delete', 'merged')
+    git(clonePath, 'fetch', '--prune', 'origin')
+
+    await expect(removeRallyWorktree(added!, { dropWork: false })).rejects.toThrow("has commits GitHub doesn't")
+    await removeRallyWorktree({ ...added!, syncedHead: head }, { dropWork: false })
+    expect(existsSync(added!.path)).toBe(false)
+  })
+
+  it('refuses to report a worktree removed when its clone is gone', async () => {
+    const orphan = join(home, 'rally-worktrees', 'acme', 'api', 'orphan')
+    mkdirSync(orphan, { recursive: true })
+    writeFileSync(join(orphan, '.git'), `gitdir: ${join(root, 'missing', '.git', 'worktrees', 'orphan')}\n`)
+    const clone = { path: orphan, branch: 'orphan', baseRef: 'origin/main', kind: 'rally_worktree' as const }
+    await expect(removeRallyWorktree(clone, { dropWork: true })).rejects.toThrow("can't find the clone")
   })
 
   it('never removes a worktree Rally did not add', async () => {

@@ -440,12 +440,19 @@ export interface LocalCommit {
   subject: string
 }
 
+/** Where the PR branch is checked out: Rally's temp clone, a worktree the user already had, or a worktree Rally added. */
+export type CheckoutKind = 'temp_clone' | 'local_worktree' | 'rally_worktree'
+
 export interface CloneInfo {
   path: string
   branch: string
   baseRef: string
   /** The branch head on GitHub when Rally last synced, merged, or pushed; commits after it are Rally's own. */
   syncedHead?: string
+  /** Absent means a temp clone. */
+  kind?: CheckoutKind
+  /** Whether Rally created the local branch when it added the worktree, so removing the worktree deletes the branch too. */
+  createdBranch?: boolean
 }
 
 export interface PushRecord {

@@ -67,7 +67,9 @@ export interface PendingConversation<C extends RawConversationComment, R extends
   reviews: R[]
 }
 
-/** Returns the PR comments and review bodies from people, not bots, that I haven't acknowledged. */
+const awaitsResponse = (review: RawReviewBody) => review.state !== 'PENDING' && review.state !== 'APPROVED'
+
+/** Returns the PR comments and non-approval review bodies from people, not bots, that I haven't acknowledged. */
 export function pendingConversation<C extends RawConversationComment, R extends RawReviewBody>(
   comments: C[],
   reviews: R[],
@@ -76,6 +78,6 @@ export function pendingConversation<C extends RawConversationComment, R extends 
   const mine = comments.filter((c) => isViewer(c.author, viewer))
   return {
     comments: comments.filter((c) => !c.isMinimized && needsAcknowledgment(c, viewer) && !conversationAcknowledged(c, mine)),
-    reviews: reviews.filter((r) => r.state !== 'PENDING' && needsAcknowledgment(r, viewer) && !conversationAcknowledged(r, mine)),
+    reviews: reviews.filter((r) => awaitsResponse(r) && needsAcknowledgment(r, viewer) && !conversationAcknowledged(r, mine)),
   }
 }

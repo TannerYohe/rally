@@ -44,7 +44,13 @@ describe('authorFeedback', () => {
             { url: `${PR}#issuecomment-2`, body: 'Coverage', createdAt: '', author: { login: 'codecov', __typename: 'Bot' } },
           ],
         },
-        allReviews: { pageInfo: {}, nodes: [{ url: `${PR}#pullrequestreview-5`, body: 'LGTM', state: 'APPROVED', submittedAt: '', author: { login: 'dan' } }] },
+        allReviews: {
+          pageInfo: {},
+          nodes: [
+            { url: `${PR}#pullrequestreview-5`, body: 'Why the retry?', state: 'COMMENTED', submittedAt: '', author: { login: 'dan' } },
+            { url: `${PR}#pullrequestreview-6`, body: 'LGTM', state: 'APPROVED', submittedAt: '', author: { login: 'erin' } },
+          ],
+        },
       }),
       'me',
     )

@@ -95,7 +95,7 @@ describe('feedbackItems', () => {
     expect(item).toMatchObject({ line: 2, outdated: true })
   })
 
-  it('lists unacknowledged PR comments and review bodies of any state', () => {
+  it('lists unacknowledged PR comments and review bodies, leaving out approvals', () => {
     const items = feedbackItems(
       [],
       [prComment(1, 'bob', 'Why not reuse the helper?'), prComment(2, 'codecov', 'Coverage', 'Bot')],
@@ -104,10 +104,9 @@ describe('feedbackItems', () => {
     )
     expect(items.map((i) => [i.id, i.kind])).toEqual([
       ['R10', 'review'],
-      ['R11', 'review'],
       ['IC1', 'comment'],
     ])
-    expect(items[2]).toMatchObject({ author: 'bob', path: null, reactionSubjectId: 'IC1', url: `${PR}#issuecomment-1` })
+    expect(items[1]).toMatchObject({ author: 'bob', path: null, reactionSubjectId: 'IC1', url: `${PR}#issuecomment-1` })
   })
 
   it('orders unanswered items by newest activity', () => {

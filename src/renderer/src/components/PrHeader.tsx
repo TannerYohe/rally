@@ -10,6 +10,7 @@ import { DiffStat } from './DiffStat'
 import { HideControls } from './HideControls'
 import { Markdown } from './Markdown'
 import { PhaseBadge } from './PhaseBadge'
+import { PrSummary } from './PrSummary'
 import { RepoChip } from './RepoChip'
 
 const BACK_LABELS: Record<PrListKind, string> = {
@@ -108,12 +109,7 @@ function MemberHeader({ pr, actions }: { pr: Pr; actions?: ReactNode }) {
         </a>
         {actions && <span className="ml-auto">{actions}</span>}
       </div>
-      {pr.summary && (
-        <p className="text-sm text-ink-300">
-          <span className="mr-2 text-secondary-400">✦</span>
-          {pr.summary}
-        </p>
-      )}
+      <PrSummary pr={pr} />
       <DescriptionAndFiles pr={pr} className="text-ink-300" />
     </li>
   )

@@ -11,6 +11,7 @@ import { HideControls } from './HideControls'
 import { PhaseBadge } from './PhaseBadge'
 import { RepoChip } from './RepoChip'
 import { SortControl } from './SortControl'
+import { PrSummary } from './PrSummary'
 import { age } from '../lib/format'
 import { usePersistentState, usePrs } from '../lib/hooks'
 import { activeFilterCount, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, type PrFilters, type PrSort } from '../lib/prFilters'
@@ -78,22 +79,6 @@ interface CardListProps {
   statusLabels: StatusLabels
 }
 
-function Summary({ pr, className }: { pr: Pr; className: string }) {
-  return (
-    <p className={`text-sm text-ink-400 ${className}`}>
-      <span className="mr-1.5 text-secondary-400">✦</span>
-      {pr.summary ??
-        (pr.summaryError ? (
-          <span className="italic text-ink-600" title={pr.summaryError}>
-            Summary unavailable
-          </span>
-        ) : (
-          <span className="italic text-ink-600">Summarizing…</span>
-        ))}
-    </p>
-  )
-}
-
 function DraftTag() {
   return (
     <span className="mr-2 rounded bg-ink-700/60 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-ink-300">
@@ -135,7 +120,7 @@ function SingleCardBody({ pr, unit, statusLabels }: { pr: Pr; unit: PrUnit; stat
         <span title={pr.updatedAt}>updated {age(pr.updatedAt)} ago</span>
         <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
       </div>
-      <Summary pr={pr} className="line-clamp-2" />
+      <PrSummary pr={pr} className="line-clamp-2" />
     </>
   )
 }
@@ -162,7 +147,7 @@ function UnitCardBody({ unit, statusLabels }: { unit: PrUnit; statusLabels: Stat
               </span>
               <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
             </div>
-            <Summary pr={pr} className="line-clamp-1 pl-1" />
+            <PrSummary pr={pr} className="line-clamp-1 pl-1" />
           </li>
         ))}
       </ul>

@@ -84,11 +84,10 @@ const FINDING_ID_PREFIX = 'self-'
 
 const isFindingId = (id: string) => id.startsWith(FINDING_ID_PREFIX)
 
-/** Turns self-review draft comments into private feedback items the author can act on. */
-export function findingsFromDrafts(drafts: Drafts, at: string): FeedbackItem[] {
-  const review = randomUUID().slice(0, 8)
+/** Turns self-review draft comments into private feedback items the author can act on, with ids scoped to the review. */
+export function findingsFromDrafts(drafts: Drafts, reviewId: string, at: string): FeedbackItem[] {
   return drafts.comments.map((comment) => ({
-    id: `${FINDING_ID_PREFIX}${review}-${comment.id}`,
+    id: `${FINDING_ID_PREFIX}${reviewId}-${comment.id}`,
     kind: 'finding',
     author: null,
     authorIsBot: false,
@@ -390,7 +389,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         )
       },
       onSelfReview: (drafts) => {
-        const selfReview = { verdict: drafts.verdict, reportMarkdown: drafts.reportMarkdown, findings: findingsFromDrafts(drafts, now()) }
+        const selfReview = { verdict: drafts.verdict, reportMarkdown: drafts.reportMarkdown, findings: findingsFromDrafts(drafts, randomUUID().slice(0, 8), now()) }
         this.patch(
           sessionId,
           (s) => ({

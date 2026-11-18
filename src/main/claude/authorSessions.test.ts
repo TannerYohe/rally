@@ -602,12 +602,8 @@ describe('self-review', () => {
     expect(session(31).selfReview?.findings[0].id).not.toBe('self-1')
   })
 
-  it('maps draft comments to findings', () => {
-    expect(findingsFromDrafts(drafts, 'now')[0]).toMatchObject({ path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
-  })
-
-  it('gives each self-review its own finding ids, so a pick on an earlier finding never matches a later one', () => {
-    expect(findingsFromDrafts(drafts, 'now')[0].id).not.toBe(findingsFromDrafts(drafts, 'now')[0].id)
+  it('maps draft comments to findings with ids scoped to the review', () => {
+    expect(findingsFromDrafts(drafts, 'r1', 'now')[0]).toMatchObject({ id: 'self-r1-1', path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
   })
 })
 

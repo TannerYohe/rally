@@ -21,6 +21,7 @@ import { errorMessage } from '@shared/errors'
 import { keyOf } from '@shared/prUnit'
 import {
   changesForPr,
+  distinctSessions,
   draftsForPr,
   emptyReviewError,
   isPartlyPosted,
@@ -133,9 +134,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   async start(pr: PrRef, linked: PrRef[] = []): Promise<ReviewSession> {
     const members = [pr, ...linked].filter((member, index, all) => all.findIndex((other) => keyOf(other) === keyOf(member)) === index)
     const key = keyOf(pr)
-    const covering = members
-      .map((member) => this.getByPr(keyOf(member)))
-      .filter((session, index, all): session is ReviewSession => session !== null && all.findIndex((other) => other?.id === session.id) === index)
+    const covering = distinctSessions(members.map((member) => this.getByPr(keyOf(member))))
     const same = covering.find((session) => session.prKey === key && sessionMembers(session).length === members.length)
     if (same && this.isTurnRunning(same.id)) return same
     const busy = covering.find((session) => this.isTurnRunning(session.id) || this.publishing.has(session.id) || session.resolvingThreads)

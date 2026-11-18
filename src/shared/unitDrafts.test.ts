@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { finalReview } from './feedback'
 import type { DraftComment, Drafts, PrRef } from './types'
-import { changesForPr, draftsForPr, isUnitSession, sessionCovers, sessionMembers, unitDraftProblems } from './unitDrafts'
+import { changesForPr, distinctSessions, draftsForPr, isUnitSession, sessionCovers, sessionMembers, unitDraftProblems } from './unitDrafts'
 
 const api: PrRef = { owner: 'acme', repo: 'api', number: 1, url: 'https://github.com/acme/api/pull/1' }
 const web: PrRef = { owner: 'acme', repo: 'web', number: 2, url: 'https://github.com/acme/web/pull/2' }
@@ -83,5 +83,13 @@ describe('unitDraftProblems', () => {
       'Draft ids must be unique across the PRs; #2 repeat.',
       'Give a verdict and review body for acme/web#2 in pr_reviews.',
     ])
+  })
+})
+
+describe('distinctSessions', () => {
+  it('keeps each session once in order and drops missing ones', () => {
+    const a = { id: 'a' }
+    const b = { id: 'b' }
+    expect(distinctSessions([a, null, b, a])).toEqual([a, b])
   })
 })

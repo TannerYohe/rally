@@ -15,6 +15,11 @@ export function sessionCovers(session: Pick<ReviewSession, 'pr' | 'members'>, pr
   return sessionMembers(session).some((member) => keyOf(member) === prKey)
 }
 
+/** Returns each session once, in order, dropping missing ones. */
+export function distinctSessions<T extends Pick<ReviewSession, 'id'>>(sessions: (T | null)[]): T[] {
+  return sessions.filter((session, index): session is T => session !== null && sessions.findIndex((other) => other?.id === session.id) === index)
+}
+
 /** Returns the review the session posted to one of its PRs, or null when that PR hasn't posted. */
 export function memberPosted(session: Pick<ReviewSession, 'memberSubmits'>, prKey: string): SubmittedReview | null {
   return session.memberSubmits?.[prKey]?.submitted ?? null

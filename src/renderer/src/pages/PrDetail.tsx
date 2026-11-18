@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { keyOf, toPrRef, unitMembers } from '@shared/prUnit'
 import { prKey, REVIEW_EVENT_LABELS, type MemberVerdict, type Pr, type PrRef, type ReviewSession, type SubmittedReview } from '@shared/types'
-import { draftsForPr, emptyReviewError, isPartlyPosted, isUnitSession, memberPosted, sessionMembers, unpostedMembers } from '@shared/unitDrafts'
+import { distinctSessions, draftsForPr, emptyReviewError, isPartlyPosted, isUnitSession, memberPosted, sessionMembers, unpostedMembers } from '@shared/unitDrafts'
 import { DraftList } from '../components/DraftList'
 import { LinkPrForm, OneSidedLinks, UnlinkButton } from '../components/LinkedPrControls'
 import { PriorConcernList } from '../components/PriorConcernList'
@@ -38,10 +38,7 @@ import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 /** Confirms discarding the unsubmitted drafts of any session that starting a review of these PRs replaces. */
 async function confirmReplacing(members: PrRef[], keep: ReviewSession | null): Promise<boolean> {
   const sessions = await Promise.all(members.map((member) => window.rally.getSession(keyOf(member))))
-  const replaced = sessions.filter(
-    (s, index): s is ReviewSession =>
-      s !== null && s.id !== keep?.id && sessions.findIndex((other) => other?.id === s.id) === index && Boolean(s.drafts) && !isSubmitted(s),
-  )
+  const replaced = distinctSessions(sessions).filter((s) => s.id !== keep?.id && Boolean(s.drafts) && !isSubmitted(s))
   if (replaced.length === 0) return true
   return window.confirm(`Starting this review discards the unsubmitted drafts of the review of ${replaced.map((s) => s.prKey).join(', ')}. Continue?`)
 }

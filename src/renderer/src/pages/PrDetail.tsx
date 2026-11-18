@@ -307,18 +307,15 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
 
       {session.submitted && (
         <div className="space-y-2 rounded-xl bg-emerald-950/70 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/20">
-          {unit ? (
-            members.map((member) => (
+          {members.map((member) => {
+            const posted = unit ? postedOf(member) : session.submitted
+            return (
               <div key={keyOf(member)} className="flex flex-wrap items-center gap-2">
-                <MemberLabel member={member} pr={prOf(member)} />
-                {postedOf(member) ? <SubmittedLine submitted={postedOf(member)!} /> : <span className="text-ink-400">Skipped.</span>}
+                {unit && <MemberLabel member={member} pr={prOf(member)} />}
+                {posted ? <SubmittedLine submitted={posted} /> : <span className="text-ink-400">Skipped.</span>}
               </div>
-            ))
-          ) : (
-            <div>
-              <SubmittedLine submitted={session.submitted} />
-            </div>
-          )}
+            )
+          })}
           <div className="flex flex-wrap items-center gap-3">
             {needsRereview && <span className="text-amber-300">{unit ? 'A PR changed since this review.' : 'The PR changed since this review.'}</span>}
             {resolvingThreads && <span className="text-ink-300">Resolving threads…</span>}
@@ -377,47 +374,31 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
       </TabPanel>
 
       <TabPanel name="Review" id="drafts" tab={reviewTab.tab}>
-        {unit ? (
-          <div className="space-y-6">
-            {!hasDrafts && <EmptyTab>Claude hasn't drafted any comments yet.</EmptyTab>}
-            {drafts &&
-              members.map((member) => {
-                const key = keyOf(member)
-                const share = draftsForPr(drafts, key)
-                const locked = busy || submitted || Boolean(postedOf(member))
-                return (
-                  <section key={key} className="space-y-2">
+        <div className={unit ? 'space-y-6' : 'space-y-2'}>
+          {!hasDrafts && <EmptyTab>Claude hasn't drafted any comments yet.</EmptyTab>}
+          {drafts &&
+            members.map((member) => {
+              const key = keyOf(member)
+              const share = draftsForPr(drafts, key)
+              const locked = busy || submitted || Boolean(postedOf(member))
+              return (
+                <section key={key} className="space-y-2">
+                  {unit && (
                     <h3 className="flex items-center gap-2 text-sm font-semibold">
                       <MemberLabel member={member} pr={prOf(member)} />
                       {postedOf(member) && <span className="text-xs font-normal text-emerald-300">posted</span>}
                     </h3>
-                    {share.comments.length === 0 ? (
-                      <EmptyTab>No draft comments on this PR.</EmptyTab>
-                    ) : (
-                      <DraftList drafts={share} edits={edits} disabled={locked} onEdit={editDraft} />
-                    )}
-                    <ReviewBodyEditor original={share.summaryBody} edit={summaryEdits[key]} disabled={locked} onEdit={(body) => editSummary(key, body)} />
-                  </section>
-                )
-              })}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {emptyTabs.drafts ? (
-              <EmptyTab>{hasDrafts ? 'No draft comments.' : "Claude hasn't drafted any comments yet."}</EmptyTab>
-            ) : (
-              drafts && <DraftList drafts={drafts} edits={edits} disabled={busy || submitted} onEdit={editDraft} />
-            )}
-            {drafts && (
-              <ReviewBodyEditor
-                original={drafts.summaryBody}
-                edit={summaryEdits[session.prKey]}
-                disabled={busy || submitted}
-                onEdit={(body) => editSummary(session.prKey, body)}
-              />
-            )}
-          </div>
-        )}
+                  )}
+                  {share.comments.length === 0 ? (
+                    <EmptyTab>{unit ? 'No draft comments on this PR.' : 'No draft comments.'}</EmptyTab>
+                  ) : (
+                    <DraftList drafts={share} edits={edits} disabled={locked} onEdit={editDraft} />
+                  )}
+                  <ReviewBodyEditor original={share.summaryBody} edit={summaryEdits[key]} disabled={locked} onEdit={(body) => editSummary(key, body)} />
+                </section>
+              )
+            })}
+        </div>
       </TabPanel>
 
       {!submitted && (

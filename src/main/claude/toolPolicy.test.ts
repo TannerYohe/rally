@@ -300,17 +300,31 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(decideToolUse('Agent', { description: 'Security lens' }, REVIEWING).allow).toBe(true)
   })
 
-  it('only lets git read in a repo Rally commits in, and leaves other temp repos alone', () => {
-    const clone = join(SESSION_CWD, 'repo')
-    const AUTHOR = { cwd: SESSION_CWD, readOnlyGitRepos: [clone] }
-    expect(bash(`git -C "${clone}" diff origin/main...HEAD`, AUTHOR)).toBe(true)
-    expect(bash(`cd repo && git log --oneline -5 && git status`, AUTHOR)).toBe(true)
-    expect(bash(`cd repo && git commit -am "fix"`, AUTHOR)).toBe(false)
-    expect(bash(`git -C "${clone}" fetch origin`, AUTHOR)).toBe(false)
-    expect(bash(`git -C "${clone}/src" checkout -- a.ts`, AUTHOR)).toBe(false)
-    expect(bash(`cd repo && gh pr checkout 12`, AUTHOR)).toBe(false)
-    expect(decideToolUse('Bash', { command: 'cd repo && git merge origin/main' }, AUTHOR)).toMatchObject({ reason: expect.stringContaining('publish_responses') })
-    expect(bash(`git -C "${WORK}/repo" commit -am "skill scratch"`, AUTHOR)).toBe(true)
-    expect(bash(`cd repo && git commit -am "fix"`)).toBe(true)
+  describe('with open access', () => {
+    const WORKTREE = join(homedir(), 'src', 'api')
+    const OPEN = { cwd: WORKTREE, access: 'open' as const }
+
+    it('allows git, tests, writes, and tools anywhere', () => {
+      expect(bash('git commit -am "fix" && git checkout -b spike && git reset --hard HEAD~1 && git fetch origin', OPEN)).toBe(true)
+      expect(bash('bundle exec rspec spec/models > tmp/rspec.log 2>&1', OPEN)).toBe(true)
+      expect(bash(`rm -rf ${WORKTREE}/tmp && echo x > ${homedir()}/notes.txt && kubectl get pods && find . -name '*.orig' -delete`, OPEN)).toBe(true)
+      expect(bash('gh pr checkout 12 && gh pr view 12', OPEN)).toBe(true)
+      expect(decideToolUse('Write', { file_path: join(WORKTREE, 'app.rb') }, OPEN).allow).toBe(true)
+      expect(decideToolUse('Monitor', {}, OPEN).allow).toBe(true)
+      expect(decideToolUse('mcp__plugin_originations_atlassian__createJiraIssue', {}, OPEN).allow).toBe(true)
+    })
+
+    it('blocks pushes and GitHub writes, even nested in other commands', () => {
+      expect(decideToolUse('Bash', { command: 'git push origin HEAD' }, OPEN)).toMatchObject({ reason: expect.stringContaining('approves the diff') })
+      expect(bash('git -C ../api push', OPEN)).toBe(false)
+      expect(bash(`bash -c 'git push --force'`, OPEN)).toBe(false)
+      expect(bash('env FOO=1 git push', OPEN)).toBe(false)
+      expect(bash(`find . -maxdepth 0 -exec git push \\;`, OPEN)).toBe(false)
+      expect(bash('gh pr comment 12 --body hi', OPEN)).toBe(false)
+      expect(bash('gh api repos/acme/api/pulls/12/reviews -f event=APPROVE', OPEN)).toBe(false)
+      expect(decideToolUse('mcp__plugin_originations_github__add_issue_comment', {}, OPEN).allow).toBe(false)
+      expect(decideToolUse('mcp__plugin_originations_github__pull_request_read', {}, OPEN).allow).toBe(true)
+      expect(decideToolUse('AskUserQuestion', {}, OPEN).allow).toBe(false)
+    })
   })
 })

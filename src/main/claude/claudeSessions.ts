@@ -13,7 +13,7 @@ import { claudeExecutable } from './executable'
 import { reviewModelOptions } from './modelOptions'
 import { RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
-import { decideToolUse } from './toolPolicy'
+import { decideToolUse, type ToolAccess } from './toolPolicy'
 
 const FLUSH_INTERVAL_MS = 200
 
@@ -30,7 +30,8 @@ export function removeSessionDir(sessionId: string): void {
 export interface TurnSetup {
   systemPromptAppend: string
   mcpServer: McpSdkServerConfigWithInstance
-  readOnlyGitRepos?: string[]
+  /** Absent means sandboxed. */
+  toolAccess?: ToolAccess
 }
 
 /** Persists one Claude session per PR and runs its turns through the Agent SDK under Rally's tool policy. */
@@ -187,7 +188,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
 
     const setup = this.turnSetup(sessionId)
     const decide = (toolName: string, input: unknown) =>
-      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd, readOnlyGitRepos: setup.readOnlyGitRepos })
+      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd, access: setup.toolAccess })
 
     const preToolUse: HookCallback = async (input) => {
       if (input.hook_event_name !== 'PreToolUse') return {}

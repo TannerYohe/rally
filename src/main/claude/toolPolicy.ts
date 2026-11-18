@@ -7,10 +7,13 @@ import { parseShellWords, splitShellCommand, type Redirect } from './shellComman
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
+/** sandboxed limits writes to the temp directory and blocks infrastructure, remote, and system commands; open allows everything except pushes and GitHub writes. */
+export type ToolAccess = 'sandboxed' | 'open'
+
 export interface PolicyContext {
   cwd: string
-  /** Repos where Rally owns commits and merges, so only git commands that read are allowed. */
-  readOnlyGitRepos?: string[]
+  /** Absent means sandboxed. */
+  access?: ToolAccess
 }
 
 interface ShellState {
@@ -99,15 +102,6 @@ const GIT_WORKTREE_COMMANDS = new Set([
   'revert', 'rm', 'stash', 'switch',
 ])
 
-const READ_ONLY_GIT_COMMANDS = new Set([
-  'status', 'diff', 'log', 'show', 'blame', 'annotate', 'grep', 'ls-files', 'ls-tree', 'rev-parse', 'rev-list', 'merge-base',
-  'cat-file', 'describe', 'shortlog', 'diff-tree', 'range-diff', 'name-rev', 'for-each-ref', 'show-ref', 'check-ignore', 'help',
-  'version',
-])
-
-const READ_ONLY_REPO_REASON =
-  'Rally commits and merges in this clone itself. For a fix item, list the files you changed with a commit message in publish_responses; otherwise say which files you changed, and the user commits them from the Changes tab.'
-
 const GH_API_VALUE_FLAGS = new Set([
   '-X', '--method', '-H', '--header', '-f', '-F', '--field', '--raw-field', '--input', '-q', '--jq', '-t', '--template',
   '-p', '--preview', '--hostname', '--cache',
@@ -126,12 +120,16 @@ const READ_METHODS = new Set(['GET', 'HEAD'])
 
 const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and replies itself when the user asks.'
 
+const GIT_PUSH_REASON = 'git push is not permitted in Rally. Rally pushes once the user approves the diff.'
+
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
 
 const WORK_STAND_IN = join(realPath(tmpdir()), 'rally-work')
 
 const deny = (reason: string): ToolDecision => ({ allow: false, reason })
 const ALLOW: ToolDecision = { allow: true }
+
+const isOpen = (context: PolicyContext) => context.access === 'open'
 
 export function decideToolUse(toolName: string, input: Record<string, unknown>, context: PolicyContext): ToolDecision {
   if (ALWAYS_ALLOWED_TOOLS.has(toolName) || toolName.startsWith(RALLY_TOOL_PREFIX) || isReadOnlyMcpTool(toolName)) {
@@ -140,18 +138,30 @@ export function decideToolUse(toolName: string, input: Record<string, unknown>, 
   if (toolName === 'AskUserQuestion') {
     return deny('AskUserQuestion is unavailable in Rally. Ask the question in plain text and end your turn.')
   }
-  if (FILE_EDIT_TOOLS.has(toolName)) return decideFileEdit(String(input.file_path ?? input.notebook_path ?? ''), context)
   if (toolName === 'Bash') return decideBash(String(input.command ?? ''), context)
+  if (isOpen(context)) return isGithubMcpWrite(toolName) ? deny(GITHUB_WRITE_REASON) : ALLOW
+  if (FILE_EDIT_TOOLS.has(toolName)) return decideFileEdit(String(input.file_path ?? input.notebook_path ?? ''), context)
   return deny(`${toolName} is not permitted in Rally review sessions.`)
 }
 
-function isReadOnlyMcpTool(toolName: string): boolean {
+function mcpToolWords(toolName: string): { server: string; words: string[] } | null {
   const match = toolName.match(/^mcp__(.+?)__(.+)$/)
-  if (!match) return false
+  if (!match) return null
   const [, server, action] = match
-  const words = action.split(/[-_]|(?=[A-Z])/).map((w) => w.toLowerCase())
-  const verb = server.toLowerCase().endsWith(words[0]) ? words[1] : words[0]
+  return { server: server.toLowerCase(), words: action.split(/[-_]|(?=[A-Z])/).map((w) => w.toLowerCase()) }
+}
+
+function isReadOnlyMcpTool(toolName: string): boolean {
+  const tool = mcpToolWords(toolName)
+  if (!tool) return false
+  const verb = tool.server.endsWith(tool.words[0]) ? tool.words[1] : tool.words[0]
   return READ_ONLY_MCP_VERBS.has(verb)
+}
+
+/** Treats a GitHub MCP tool as a write unless any word of its name is a read verb, as in pull_request_read. */
+function isGithubMcpWrite(toolName: string): boolean {
+  const tool = mcpToolWords(toolName)
+  return tool !== null && tool.server.includes('github') && !tool.words.some((word) => READ_ONLY_MCP_VERBS.has(word))
 }
 
 function decideFileEdit(path: string, context: PolicyContext): ToolDecision {
@@ -160,7 +170,7 @@ function decideFileEdit(path: string, context: PolicyContext): ToolDecision {
 }
 
 function decideBash(command: string, context: PolicyContext): ToolDecision {
-  return decideScript(command, { cwd: context.cwd, workTrusted: workIsTemp(command, context) }, context)
+  return decideScript(command, { cwd: context.cwd, workTrusted: !isOpen(context) && workIsTemp(command, context) }, context)
 }
 
 function decideScript(script: string, state: ShellState, context: PolicyContext): ToolDecision {
@@ -182,7 +192,7 @@ function workIsTemp(command: string, context: PolicyContext): boolean {
 
 function decideSegment(segment: string, state: ShellState, context: PolicyContext): ToolDecision {
   const { words, redirects } = parseShellWords(segment)
-  const unsafeRedirect = redirects.find((r) => r.operator.startsWith('>') && !isWritableTarget(r, state))
+  const unsafeRedirect = !isOpen(context) && redirects.find((r) => r.operator.startsWith('>') && !isWritableTarget(r, state))
   if (unsafeRedirect) {
     return deny(`Rally only redirects output into the temp directory, not \`${unsafeRedirect.target}\`.`)
   }
@@ -203,6 +213,7 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   const programPath = /[$`]/.test(word) ? expandPath(word, state) : word
   if (!programPath) return deny(`Rally needs to see which program \`${word}\` runs. Call it by name or path.`)
   const program = programName(programPath)
+  if (isOpen(context)) return decideOpenCommand(program, args, segment, state, context)
 
   if (REMOTE_SHELL_COMMANDS.has(program)) return deny(`\`${program}\` reaches other machines, so Rally blocks it.`)
   if (INFRASTRUCTURE_COMMANDS.has(program)) return deny(`\`${program}\` acts on live infrastructure, so Rally blocks it.`)
@@ -248,6 +259,25 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
       return requireTemp(program, args.filter((a) => a.startsWith('of=')).map((a) => a.slice(3)), state)
     case 'sed':
       return decideSed(args, state)
+    case 'find':
+      return decideFind(args, segment, state, context)
+    default:
+      return ALLOW
+  }
+}
+
+/** Under open access, checks only commands that could push or write to GitHub, following them into nested shells and wrappers. */
+function decideOpenCommand(program: string, args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
+  if (SHELLS.has(program)) return decideShell(args, state, context)
+  if (WRAPPER_COMMANDS.has(program)) return decideWrapped(args, segment, state, context)
+  if (INPUT_ARGUMENT_COMMANDS.has(program)) return decideXargs(args, segment, state, context)
+  switch (program) {
+    case 'gh':
+      return decideGh(args, state, context)
+    case 'git':
+      return decideGit(args, state, context)
+    case 'eval':
+      return decideScript(args.join(' '), { ...state }, context)
     case 'find':
       return decideFind(args, segment, state, context)
     default:
@@ -310,7 +340,7 @@ function decideFind(args: string[], segment: string, state: ShellState, context:
   const firstExpression = args.findIndex((a) => a.startsWith('-') || a === '(' || a === '!')
   const roots = args.slice(0, firstExpression < 0 ? args.length : firstExpression)
   const searchRoots = roots.length ? roots : ['.']
-  if (args.includes('-delete')) {
+  if (args.includes('-delete') && !isOpen(context)) {
     const decision = requireTemp('find -delete', searchRoots, state)
     if (!decision.allow) return decision
   }
@@ -399,15 +429,6 @@ function isTempPath(word: string, state: ShellState): boolean {
   return TEMP_ROOTS.some((root) => real.startsWith(root + sep))
 }
 
-function isInReadOnlyRepo(dir: string | null, context: PolicyContext): boolean {
-  if (!dir) return false
-  const real = realPath(dir)
-  return (context.readOnlyGitRepos ?? []).some((repo) => {
-    const root = realPath(repo)
-    return real === root || real.startsWith(root + sep)
-  })
-}
-
 function decideGit(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
   let repoDir = state.cwd
   let index = 0
@@ -419,8 +440,8 @@ function decideGit(args: string[], state: ShellState, context: PolicyContext): T
     index += inline === undefined && (GIT_REPO_FLAGS.has(flag) || GIT_VALUE_FLAGS.has(flag)) ? 2 : 1
   }
   const [subcommand, ...rest] = args.slice(index)
-  if (subcommand === 'push') return deny('git push is not permitted in Rally.')
-  if (isInReadOnlyRepo(repoDir, context) && !READ_ONLY_GIT_COMMANDS.has(subcommand)) return deny(READ_ONLY_REPO_REASON)
+  if (subcommand === 'push') return deny(GIT_PUSH_REASON)
+  if (isOpen(context)) return ALLOW
   if (subcommand === 'config' && rest.some((a) => a === '--global' || a === '--system')) {
     if (!rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return deny('Rally does not change your global git config.')
   }
@@ -432,8 +453,7 @@ function decideGit(args: string[], state: ShellState, context: PolicyContext): T
 
 function decideGh(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
   if (args[0] === 'api') return decideGhApi(args.slice(1))
-  if (args[1] === 'checkout' && isInReadOnlyRepo(state.cwd, context)) return deny(READ_ONLY_REPO_REASON)
-  if (args[1] === 'checkout' && !(state.cwd && isTempPath(state.cwd, state))) {
+  if (args[1] === 'checkout' && !isOpen(context) && !(state.cwd && isTempPath(state.cwd, state))) {
     return deny('Rally only runs `gh pr checkout` in repos under the temp directory.')
   }
   if (args[0] === 'search' || READ_ONLY_GH_VERBS.has(args[1])) return ALLOW

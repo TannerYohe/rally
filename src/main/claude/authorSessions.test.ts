@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   pushClone: vi.fn(),
   integrateRemote: vi.fn(),
   commitFiles: vi.fn(),
+  latestCommitTouching: vi.fn(async (): Promise<string | null> => null),
   commitAll: vi.fn(),
   uncommittedDiff: vi.fn(),
   concludeMerge: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   UncommittedChangesError: (await importOriginal<typeof import('../git/prClone')>()).UncommittedChangesError,
   CLONE_DIR_NAME: 'repo',
   commitFiles: mocks.commitFiles,
+  latestCommitTouching: mocks.latestCommitTouching,
   commitAll: mocks.commitAll,
   concludeMerge: mocks.concludeMerge,
   abortMerge: mocks.abortMerge,
@@ -118,6 +120,7 @@ mocks.stored = [
     },
   }),
   stored(18, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
     clone: { ...CLONE, syncedHead: 'old-head' },
     commits: [{ oid: 'aaaaaaa111', subject: 'fix' }],
@@ -220,11 +223,10 @@ describe('runActions', () => {
 
     expect(mocks.cloneBranch).toHaveBeenCalledWith(join(tmpdir(), 'rally', session(20).id), expect.objectContaining({ branch: 'feature' }))
     const [preToolUse] = mocks.query.mock.calls[0][0].options.hooks.PreToolUse[0].hooks
-    const gitCommit = (command: string) =>
+    const decide = (command: string) =>
       preToolUse({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, tool_use_id: command }, undefined, {})
-    const clonePath = join(tmpdir(), 'rally', session(20).id, 'repo')
-    expect(await gitCommit(`git -C "${clonePath}" commit -am fix`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
-    expect(await gitCommit(`git -C "${clonePath}" log -1`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } })
+    expect(await decide(`git commit -am fix && bundle exec rspec > /tmp/out.log`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } })
+    expect(await decide(`git push origin HEAD`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     const prompt = mocks.query.mock.calls[0][0].prompt as string
     expect(prompt).toContain('## Item T1: Fix')
     expect(prompt).toContain('Note from me: use camelCase')
@@ -444,6 +446,16 @@ describe('turn exits', () => {
     expect(T2).toMatchObject({ pendingCommit: false, commits: [], reply: 'Also in aaaaaaa', commitError: null })
     expect(T3).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('no changes to commit') })
     expect(T4).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('outside repository') })
+  })
+
+  it('credits a fix Claude committed itself to its newest commit touching the files', async () => {
+    mocks.commitFiles.mockResolvedValue(null)
+    mocks.latestCommitTouching.mockResolvedValueOnce('bbbbbbb123')
+    finishTurn()
+    await authorSessions.feedback('author-54', 'fix it')
+    await vi.waitFor(() => expect(session(54).status).toBe('awaiting_feedback'))
+    expect(mocks.latestCommitTouching).toHaveBeenCalledWith(expect.anything(), ['b.ts'])
+    expect(session(54).responses.T1).toMatchObject({ pendingCommit: false, commits: ['bbbbbbb123'], reply: 'Fixed in bbbbbbb', commitError: null })
   })
 })
 

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
@@ -20,13 +19,13 @@ import {
 import { errorMessage } from '@shared/errors'
 import {
   abortMerge,
-  CLONE_DIR_NAME,
   cloneBranch,
   cloneDiff,
   commitAll,
   commitFiles,
   concludeMerge,
   discardUncommitted,
+  latestCommitTouching,
   localCommits,
   MergeConflictError,
   integrateRemote,
@@ -401,7 +400,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         )
       },
     })
-    return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer, readOnlyGitRepos: [join(sessionDir(sessionId), CLONE_DIR_NAME)] }
+    return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer, toolAccess: 'open' }
   }
 
   /**
@@ -430,7 +429,10 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.patch(sessionId, (s) => ({ responses: withoutPendingCommits(s.responses) }), true)
   }
 
-  /** Commits each fix's listed files in its own commit and puts the short sha into its reply; one fix failing to commit doesn't stop the rest. */
+  /**
+   * Commits each fix's listed files in its own commit and puts the short sha into its reply; one fix failing to commit doesn't stop the rest.
+   * A fix Claude committed itself is credited to the newest unpushed commit touching its files.
+   */
   private async commitPublishedFixes(sessionId: string, clone: CloneInfo): Promise<void> {
     const committedFile = new Map<string, string>()
     for (const response of Object.values(this.byId(sessionId).responses).filter((r) => r.pendingCommit)) {
@@ -438,9 +440,13 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       try {
         const oid = await commitFiles(clone, response.files, response.commitMessage.trim() || `Address review comment ${response.itemId}`)
         if (oid) for (const file of response.files) committedFile.set(file, oid)
-        const covering = oid ?? response.files.map((file) => committedFile.get(file)).find(Boolean) ?? response.commits.at(-1) ?? null
+        const sharedCommit = response.files.map((file) => committedFile.get(file)).find(Boolean)
+        const claudeCommit = oid || sharedCommit ? null : await latestCommitTouching(clone, response.files)
+        const ownCommit = oid ?? claudeCommit
+        const covering = ownCommit ?? sharedCommit ?? response.commits.at(-1) ?? null
+        const commits = ownCommit && !response.commits.includes(ownCommit) ? [...response.commits, ownCommit] : response.commits
         update = covering
-          ? { ...response, pendingCommit: false, commits: oid ? [...response.commits, oid] : response.commits, reply: fillCommit(response.reply, covering) }
+          ? { ...response, pendingCommit: false, commits, reply: fillCommit(response.reply, covering) }
           : { ...response, pendingCommit: false, commitError: NOTHING_TO_COMMIT_ERROR }
       } catch (error) {
         console.error('Committing a fix failed', { sessionId, itemId: response.itemId, files: response.files, error })

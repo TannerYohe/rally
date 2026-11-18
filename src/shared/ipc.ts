@@ -14,7 +14,7 @@ import type {
   PrListState,
   PrRef,
   ReplyPost,
-  ReviewEvent,
+  MemberVerdict,
   ReviewSession,
   ReviewThread,
   SoundPlayback,
@@ -41,7 +41,7 @@ export interface RallyApi {
   getSession(prKey: string): Promise<ReviewSession | null>
   startReview(pr: PrRef): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
-  submitReview(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void>
+  submitReview(sessionId: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]): Promise<void>
   getReviewThreads(sessionId: string): Promise<ReviewThread[]>
   resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution>
   cancelReview(sessionId: string): Promise<void>

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_COMMENT_REVIEW_ERROR, SUBMIT_WITH_INSTRUCTIONS_ERROR, type DraftChanges } from '@shared/feedback'
-import type { DraftComment, Drafts, ReviewSession, SubmittedReview } from '@shared/types'
+import type { DraftComment, Drafts, MemberVerdict, ReviewEvent, ReviewSession, SubmitEvent, SubmittedReview } from '@shared/types'
 import type { SubmitOptions } from '../github/submitReview'
 
 const SUBMITTED: SubmittedReview = { reviewId: 1, url: 'https://github.com/acme/api/pull/1#review-1', event: 'COMMENT' }
@@ -84,6 +84,7 @@ const mocks = vi.hoisted(() => ({
   submitReview: vi.fn(),
   recordRallyReview: vi.fn(),
   describeReplies: vi.fn(),
+  refreshMany: vi.fn(async () => {}),
   onDrafts: (_drafts: Drafts) => {},
 }))
 
@@ -92,7 +93,7 @@ vi.mock('../store', () => ({
   sessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
 }))
 vi.mock('../prList', () => ({
-  prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
+  prList: { refreshMany: mocks.refreshMany, recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
 }))
 vi.mock('../github/threads', () => ({ fetchOwnThreads: mocks.fetchOwnThreads, resolveOwnThreads: mocks.resolveOwnThreads }))
 vi.mock('../github/reviewComments', async (importOriginal) => ({
@@ -142,9 +143,21 @@ mocks.stored = [
   storedUnit(30),
   storedUnit(31),
   storedUnit(32),
+  storedUnit(33),
+  storedUnit(34),
+  storedUnit(35),
+  storedUnit(36),
+  storedUnit(37, { drafts: { ...unitDrafts(37), comments: [{ ...THREAD_REPLY, id: '9' }] } }),
+  storedUnit(38, {
+    status: 'submitting',
+    memberSubmits: { 'acme/web#2': { submitted: SUBMITTED }, 'acme/api#38': { submitted: null, attemptReviewId: 66 } },
+  }),
+  storedUnit(39),
 ]
 
-const { reviewSessions } = await import('./reviewSessions')
+const { PARTLY_POSTED_ERROR, reviewSessions } = await import('./reviewSessions')
+
+const verdict = (number: number, event: SubmitEvent): MemberVerdict[] => [{ prKey: `acme/api#${number}`, event }]
 
 const session = (number: number) => reviewSessions.getByPr(`acme/api#${number}`)!
 
@@ -203,7 +216,7 @@ describe('discard', () => {
 describe('submit', () => {
   it('reports the failure and does not resolve threads when posting fails', async () => {
     mocks.submitReview.mockRejectedValue(new Error('Submitting the review failed while submitting the review: Validation Failed'))
-    await expect(reviewSessions.submit('test-session-5', 'COMMENT', NO_CHANGES, ['T1'])).rejects.toThrow('Validation Failed')
+    await expect(reviewSessions.submit('test-session-5', verdict(5, 'COMMENT'), NO_CHANGES, ['T1'])).rejects.toThrow('Validation Failed')
     expect(session(5)).toMatchObject({ status: 'error', error: expect.stringContaining('Validation Failed'), submitted: null })
     expect(session(5).threadsToResolveOnSubmit).toBeUndefined()
     expect(mocks.resolveOwnThreads).not.toHaveBeenCalled()
@@ -213,7 +226,7 @@ describe('submit', () => {
     let finish: (value: unknown) => void = () => {}
     mocks.submitReview.mockResolvedValue(SUBMITTED)
     mocks.resolveOwnThreads.mockReturnValue(new Promise((resolve) => (finish = resolve)))
-    await reviewSessions.submit('test-session-9', 'COMMENT', NO_CHANGES, ['T1'])
+    await reviewSessions.submit('test-session-9', verdict(9, 'COMMENT'), NO_CHANGES, ['T1'])
     expect(session(9).status).toBe('submitted')
     await vi.waitFor(() => expect(mocks.resolveOwnThreads).toHaveBeenCalled())
     const midResolve = { resolvingThreads: true, threadsToResolveOnSubmit: ['T1'], submitted: SUBMITTED }
@@ -226,34 +239,34 @@ describe('submit', () => {
 
   it('records the submitted review id for the PR', async () => {
     mocks.submitReview.mockResolvedValue(SUBMITTED)
-    await reviewSessions.submit('test-session-4', 'COMMENT', NO_CHANGES, [])
+    await reviewSessions.submit('test-session-4', verdict(4, 'COMMENT'), NO_CHANGES, [])
     expect(session(4).status).toBe('submitted')
     expect(mocks.recordRallyReview).toHaveBeenCalledWith('acme/api#4', SUBMITTED.reviewId)
   })
 
   it('rejects a Comment review with nothing to post before posting', async () => {
-    await expect(reviewSessions.submit('test-session-10', 'COMMENT', NO_CHANGES, ['T1'])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
+    await expect(reviewSessions.submit('test-session-10', verdict(10, 'COMMENT'), NO_CHANGES, ['T1'])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
     expect(mocks.submitReview).not.toHaveBeenCalled()
     expect(session(10).status).toBe('awaiting_feedback')
   })
 
   it('rejects free-text instructions, which only Claude can apply', async () => {
     const changes = { ...NO_CHANGES, instructions: 'Add a thank-you body.' }
-    await expect(reviewSessions.submit('test-session-12', 'COMMENT', changes, [])).rejects.toThrow(SUBMIT_WITH_INSTRUCTIONS_ERROR)
+    await expect(reviewSessions.submit('test-session-12', verdict(12, 'COMMENT'), changes, [])).rejects.toThrow(SUBMIT_WITH_INSTRUCTIONS_ERROR)
     expect(mocks.submitReview).not.toHaveBeenCalled()
     expect(session(12).status).toBe('awaiting_feedback')
   })
 
   it('rejects a Comment review once the user drops every draft and clears the body', async () => {
     const dropAll: DraftChanges = { edits: { '1': { dropped: true } }, summaryBodyEdit: '', instructions: '' }
-    await expect(reviewSessions.submit('test-session-12', 'COMMENT', dropAll, [])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
+    await expect(reviewSessions.submit('test-session-12', verdict(12, 'COMMENT'), dropAll, [])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
     expect(mocks.submitReview).not.toHaveBeenCalled()
   })
 
   it('posts the drafts with the user edits applied', async () => {
     mocks.submitReview.mockResolvedValue(SUBMITTED)
     const changes: DraftChanges = { edits: { '1': { body: 'Rewritten.' } }, summaryBodyEdit: 'New body', instructions: '' }
-    await reviewSessions.submit('test-session-12', 'REQUEST_CHANGES', changes, [])
+    await reviewSessions.submit('test-session-12', verdict(12, 'REQUEST_CHANGES'), changes, [])
     expect(mocks.submitReview).toHaveBeenCalledWith(
       expect.objectContaining({ owner: 'acme', repo: 'api', number: 12 }),
       'REQUEST_CHANGES',
@@ -264,8 +277,8 @@ describe('submit', () => {
 
   it('posts an empty review when the event is not Comment, and a Comment whose only content is a thread reply', async () => {
     mocks.submitReview.mockResolvedValue(SUBMITTED)
-    await reviewSessions.submit('test-session-10', 'APPROVE', NO_CHANGES, [])
-    await reviewSessions.submit('test-session-11', 'COMMENT', NO_CHANGES, [])
+    await reviewSessions.submit('test-session-10', verdict(10, 'APPROVE'), NO_CHANGES, [])
+    await reviewSessions.submit('test-session-11', verdict(11, 'COMMENT'), NO_CHANGES, [])
     expect(mocks.submitReview).toHaveBeenCalledTimes(2)
     expect(session(10).status).toBe('submitted')
     expect(session(11).status).toBe('submitted')
@@ -274,7 +287,7 @@ describe('submit', () => {
   it('checks the saved attempt when a submit was interrupted by Rally closing', async () => {
     expect(session(13)).toMatchObject({ status: 'error', error: expect.stringContaining('Rally closed while submitting') })
     mocks.submitReview.mockResolvedValue(SUBMITTED)
-    await reviewSessions.submit('test-session-13', 'COMMENT', NO_CHANGES, [])
+    await reviewSessions.submit('test-session-13', verdict(13, 'COMMENT'), NO_CHANGES, [])
     expect(mocks.submitReview.mock.calls[0][3]).toMatchObject({ attemptReviewId: 55 })
     expect(session(13).submitAttemptReviewId).toBeUndefined()
   })
@@ -284,12 +297,12 @@ describe('submit', () => {
       options.onPendingReview(88)
       throw new Error('timeout')
     })
-    await expect(reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('timeout')
+    await expect(reviewSessions.submit('test-session-14', verdict(14, 'COMMENT'), NO_CHANGES, [])).rejects.toThrow('timeout')
     expect(mocks.submitReview.mock.calls[0][3]).toMatchObject({ attemptReviewId: null })
-    expect(session(14).submitAttemptReviewId).toBe(88)
+    expect(session(14).memberSubmits?.['acme/api#14']).toEqual({ submitted: null, attemptReviewId: 88, error: 'timeout' })
 
     mocks.submitReview.mockResolvedValue(SUBMITTED)
-    await reviewSessions.submit('test-session-14', 'COMMENT', NO_CHANGES, [])
+    await reviewSessions.submit('test-session-14', verdict(14, 'COMMENT'), NO_CHANGES, [])
     expect(mocks.submitReview.mock.calls[1][3]).toMatchObject({ attemptReviewId: 88 })
   })
 
@@ -299,16 +312,16 @@ describe('submit', () => {
       options.onPendingReview(null)
       throw new Error('Validation Failed')
     })
-    await expect(reviewSessions.submit('test-session-16', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('Validation Failed')
-    expect(session(16).submitAttemptReviewId).toBeUndefined()
+    await expect(reviewSessions.submit('test-session-16', verdict(16, 'COMMENT'), NO_CHANGES, [])).rejects.toThrow('Validation Failed')
+    expect(session(16).memberSubmits?.['acme/api#16']?.attemptReviewId).toBeUndefined()
   })
 
   it('blocks another submit, a feedback turn, and discarding while posting', async () => {
     let finish: (value: SubmittedReview) => void = () => {}
     mocks.submitReview.mockReturnValue(new Promise((resolve) => (finish = resolve)))
-    const pending = reviewSessions.submit('test-session-15', 'COMMENT', NO_CHANGES, [])
+    const pending = reviewSessions.submit('test-session-15', verdict(15, 'COMMENT'), NO_CHANGES, [])
     expect(session(15).status).toBe('submitting')
-    await expect(reviewSessions.submit('test-session-15', 'COMMENT', NO_CHANGES, [])).rejects.toThrow('already posting')
+    await expect(reviewSessions.submit('test-session-15', verdict(15, 'COMMENT'), NO_CHANGES, [])).rejects.toThrow('already posting')
     await expect(reviewSessions.feedback('test-session-15', 'one more thing')).rejects.toThrow('already posting')
     expect(() => reviewSessions.discard('test-session-15')).toThrow('Wait for Rally to finish submitting')
     finish(SUBMITTED)
@@ -320,7 +333,7 @@ describe('submit', () => {
   it('resolves the selected threads once the review is submitted', async () => {
     mocks.submitReview.mockResolvedValue(SUBMITTED)
     mocks.resolveOwnThreads.mockResolvedValue({ resolved: ['T1'], failed: [] })
-    await reviewSessions.submit('test-session-8', 'COMMENT', NO_CHANGES, ['T1'])
+    await reviewSessions.submit('test-session-8', verdict(8, 'COMMENT'), NO_CHANGES, ['T1'])
     await vi.waitFor(() => expect(session(8).threadResolution?.resolved).toEqual(['T1']))
     expect(session(8).status).toBe('submitted')
     expect(mocks.resolveOwnThreads).toHaveBeenCalledWith(expect.anything(), ['T1'])
@@ -488,5 +501,83 @@ describe('a review of several PRs', () => {
       ['web', ['2']],
     ])
     expect(session(32).drafts?.prReviews).toHaveLength(2)
+  })
+})
+
+describe('submitting a review of several PRs', () => {
+  const unitVerdicts = (number: number, api: SubmitEvent, web: SubmitEvent): MemberVerdict[] => [
+    { prKey: `acme/api#${number}`, event: api },
+    { prKey: 'acme/web#2', event: web },
+  ]
+  const review = (id: number, event: ReviewEvent): SubmittedReview => ({ reviewId: id, url: `https://github.com/r/${id}`, event })
+  const postedRepos = () => mocks.submitReview.mock.calls.map(([pr, event]) => `${pr.repo}:${event}`)
+
+  beforeEach(() => mocks.refreshMany.mockClear())
+
+  it('posts each PR its own review, Request changes before Approve, then refreshes every PR', async () => {
+    mocks.submitReview.mockImplementation(async (pr: { repo: string }, event: ReviewEvent) => review(pr.repo === 'web' ? 2 : 1, event))
+    await reviewSessions.submit('test-session-33', unitVerdicts(33, 'APPROVE', 'REQUEST_CHANGES'), NO_CHANGES, [])
+    expect(postedRepos()).toEqual(['web:REQUEST_CHANGES', 'api:APPROVE'])
+    expect(mocks.submitReview.mock.calls[0][2]).toEqual({ body: 'Web body', inline: [], replies: [unitDrafts(33).comments[1]], folded: [] })
+    expect(mocks.submitReview.mock.calls[1][2]).toMatchObject({ body: 'API body', replies: [unitDrafts(33).comments[0]] })
+    expect(mocks.recordRallyReview).toHaveBeenCalledWith('acme/web#2', 2)
+    expect(mocks.recordRallyReview).toHaveBeenCalledWith('acme/api#33', 1)
+    expect(session(33)).toMatchObject({ status: 'submitted', submitted: review(1, 'APPROVE') })
+    expect(session(33).memberSubmits).toEqual({ 'acme/web#2': { submitted: review(2, 'REQUEST_CHANGES') }, 'acme/api#33': { submitted: review(1, 'APPROVE') } })
+    expect(mocks.refreshMany).toHaveBeenCalledWith([expect.objectContaining({ number: 33 }), expect.objectContaining({ repo: 'web' })])
+  })
+
+  it('stops at the first failure, blocks Claude turns, and retries only the PRs still missing', async () => {
+    mocks.submitReview.mockImplementationOnce(async () => review(2, 'REQUEST_CHANGES')).mockRejectedValueOnce(new Error('rate limited'))
+    await expect(reviewSessions.submit('test-session-34', unitVerdicts(34, 'APPROVE', 'REQUEST_CHANGES'), NO_CHANGES, [])).rejects.toThrow('rate limited')
+    expect(session(34)).toMatchObject({ status: 'error', error: 'acme/api#34: rate limited', submitted: null })
+    expect(session(34).memberSubmits?.['acme/api#34']).toMatchObject({ submitted: null, error: 'rate limited' })
+    await expect(reviewSessions.feedback('test-session-34', 'tweak 1')).rejects.toThrow(PARTLY_POSTED_ERROR)
+
+    mocks.submitReview.mockResolvedValueOnce(review(1, 'APPROVE'))
+    await reviewSessions.submit('test-session-34', unitVerdicts(34, 'APPROVE', 'COMMENT'), NO_CHANGES, [])
+    expect(postedRepos()).toEqual(['web:REQUEST_CHANGES', 'api:APPROVE', 'api:APPROVE'])
+    expect(session(34)).toMatchObject({ status: 'submitted', submitted: review(1, 'APPROVE') })
+  })
+
+  it('skips a PR and refuses to skip every PR', async () => {
+    await expect(reviewSessions.submit('test-session-35', unitVerdicts(35, 'SKIP', 'SKIP'), NO_CHANGES, [])).rejects.toThrow('at least one PR')
+    mocks.submitReview.mockResolvedValue(review(1, 'COMMENT'))
+    await reviewSessions.submit('test-session-35', unitVerdicts(35, 'COMMENT', 'SKIP'), NO_CHANGES, [])
+    expect(postedRepos()).toEqual(['api:COMMENT'])
+    expect(session(35).status).toBe('submitted')
+  })
+
+  it('checks every PR before anything posts', async () => {
+    const emptyWeb: DraftChanges = { edits: { '2': { dropped: true } }, summaryBodyEdit: undefined, summaryBodyEdits: { 'acme/web#2': '' }, instructions: '' }
+    await expect(reviewSessions.submit('test-session-36', unitVerdicts(36, 'APPROVE', 'COMMENT'), emptyWeb, [])).rejects.toThrow(
+      `acme/web#2: ${EMPTY_COMMENT_REVIEW_ERROR}`,
+    )
+    await expect(reviewSessions.submit('test-session-36', [{ prKey: 'acme/api#36', event: 'APPROVE' }], NO_CHANGES, [])).rejects.toThrow(
+      'Pick a verdict for acme/web#2.',
+    )
+    await expect(reviewSessions.submit('test-session-37', unitVerdicts(37, 'APPROVE', 'APPROVE'), NO_CHANGES, [])).rejects.toThrow('Draft #9 names no PR')
+    expect(mocks.submitReview).not.toHaveBeenCalled()
+    expect(session(36).status).toBe('awaiting_feedback')
+  })
+
+  it('resumes a unit Rally closed while posting, checking the saved attempt and posting nothing twice', async () => {
+    expect(session(38)).toMatchObject({ status: 'error', error: expect.stringContaining('Rally closed while submitting') })
+    mocks.submitReview.mockResolvedValue(review(1, 'COMMENT'))
+    await reviewSessions.submit('test-session-38', unitVerdicts(38, 'COMMENT', 'COMMENT'), NO_CHANGES, [])
+    expect(postedRepos()).toEqual(['api:COMMENT'])
+    expect(mocks.submitReview.mock.calls[0][3]).toMatchObject({ attemptReviewId: 66 })
+    expect(session(38).status).toBe('submitted')
+  })
+
+  it('resolves each selected thread on its own PR once every PR posted', async () => {
+    mocks.submitReview.mockImplementation(async (_pr, event: ReviewEvent) => review(1, event))
+    mocks.resolveOwnThreads.mockImplementation(async (_pr, ids: string[]) => {
+      expect(mocks.submitReview).toHaveBeenCalledTimes(2)
+      return { resolved: ids, failed: [] }
+    })
+    await reviewSessions.submit('test-session-39', unitVerdicts(39, 'COMMENT', 'COMMENT'), NO_CHANGES, ['T-api', 'T-web'])
+    await vi.waitFor(() => expect(session(39).threadResolution?.resolved).toEqual(['T-api', 'T-web']))
+    expect(mocks.resolveOwnThreads).toHaveBeenCalledTimes(2)
   })
 })

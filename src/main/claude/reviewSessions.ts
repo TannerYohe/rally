@@ -10,6 +10,8 @@ import {
 import {
   priorConcernThreadIds,
   type Drafts,
+  type MemberSubmit,
+  type MemberVerdict,
   prKey,
   type PrRef,
   type ReviewEvent,
@@ -20,7 +22,7 @@ import {
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { keyOf } from '@shared/prUnit'
-import { draftsForPr, sessionMembers, withMemberComments } from '@shared/unitDrafts'
+import { changesForPr, draftsForPr, isUnitSession, sessionMembers, unitDraftProblems, withMemberComments } from '@shared/unitDrafts'
 import { describeReplies, needsReplyTargets } from '../github/reviewComments'
 import { submitReview } from '../github/submitReview'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
@@ -31,6 +33,44 @@ import { APP_PROTOCOL, reviewPrompt } from './prompts'
 import { createRallyServer } from './rallyTools'
 
 const ACTIVE_STATUSES = new Set(['running', 'submitting'])
+
+const SUBMIT_ORDER: ReviewEvent[] = ['REQUEST_CHANGES', 'COMMENT', 'APPROVE']
+
+export const PARTLY_POSTED_ERROR =
+  'Some PRs in this review already posted, so Claude can no longer change its drafts. Submit again to post the rest, or skip them.'
+
+interface MemberPost {
+  member: PrRef
+  event: ReviewEvent
+  review: FinalReview
+}
+
+/** Checks every PR still to post before anything posts, and returns the posts in submit order. */
+function submitPlan(session: ReviewSession, drafts: Drafts, verdicts: MemberVerdict[], changes: DraftChanges): MemberPost[] {
+  const unit = isUnitSession(session)
+  const members = sessionMembers(session)
+  if (unit) {
+    const problems = unitDraftProblems(drafts, members.map(keyOf))
+    if (problems.length > 0) throw new Error(`Ask Claude to fix its drafts before submitting: ${problems.join(' ')}`)
+  }
+  const remaining = members.filter((member) => !session.memberSubmits?.[keyOf(member)]?.submitted)
+  const posts = remaining.flatMap((member): MemberPost[] => {
+    const key = keyOf(member)
+    const event = verdicts.find((v) => v.prKey === key)?.event
+    if (!event) throw new Error(`Pick a verdict for ${key}.`)
+    if (event === 'SKIP') {
+      if (!unit) throw new Error('Pick Comment, Approve, or Request changes.')
+      return []
+    }
+    const memberDrafts = draftsForPr(drafts, key)
+    const memberChanges = changesForPr(changes, key)
+    if (isEmptyCommentReview(event, memberDrafts, memberChanges)) throw new Error(unit ? `${key}: ${EMPTY_COMMENT_REVIEW_ERROR}` : EMPTY_COMMENT_REVIEW_ERROR)
+    return [{ member, event, review: finalReview(memberDrafts, memberChanges) }]
+  })
+  const anyPosted = remaining.length < members.length
+  if (posts.length === 0 && !anyPosted) throw new Error('Pick Comment, Approve, or Request changes for at least one PR.')
+  return posts.sort((a, b) => SUBMIT_ORDER.indexOf(a.event) - SUBMIT_ORDER.indexOf(b.event))
+}
 
 function failedResolution(threadIds: string[], error: string): ThreadResolution {
   return { at: now(), resolved: [], failed: threadIds.map((threadId) => ({ threadId, error })) }
@@ -84,30 +124,50 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     return this.sessions.get(key)!
   }
 
-  async submit(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
+  /**
+   * Posts a review to each PR that hasn't posted yet, Request changes first, then Comment, then Approve, stopping at the
+   * first failure so an approval never lands without its blocking sibling. A retry posts only the PRs still missing.
+   */
+  async submit(sessionId: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
-    const { drafts, pr, submitted, submitAttemptReviewId } = this.byId(sessionId)
-    if (submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
-    if (!drafts) throw new Error('Claude has not drafted this review yet.')
+    const session = this.byId(sessionId)
+    if (session.submitted) throw new Error('This review was already submitted. Start a follow-up review instead.')
+    if (!session.drafts) throw new Error('Claude has not drafted this review yet.')
     const blocked = submitBlockedReason(changes.instructions)
     if (blocked) throw new Error(blocked)
-    if (isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
+    const posts = submitPlan(session, session.drafts, verdicts, changes)
     await this.whilePublishing(sessionId, async () => {
       this.patch(sessionId, () => ({ status: 'submitting', error: null, threadsToResolveOnSubmit: resolveThreadIds }), true)
-      await this.post(sessionId, pr, event, finalReview(drafts, changes), submitAttemptReviewId ?? null)
+      for (const post of posts) await this.postMember(sessionId, post)
+      this.finishSubmit(sessionId)
     })
   }
 
-  private async post(sessionId: string, pr: PrRef, event: ReviewEvent, review: FinalReview, attemptReviewId: number | null): Promise<void> {
-    const onPendingReview = (reviewId: number | null) => this.patch(sessionId, () => ({ submitAttemptReviewId: reviewId ?? undefined }), true)
+  private async postMember(sessionId: string, { member, event, review }: MemberPost): Promise<void> {
+    const key = keyOf(member)
+    const session = this.byId(sessionId)
+    const isPrimary = key === session.prKey
+    const attemptReviewId = session.memberSubmits?.[key]?.attemptReviewId ?? (isPrimary ? session.submitAttemptReviewId : undefined) ?? null
+    const setMember = (result: MemberSubmit) =>
+      this.patch(
+        sessionId,
+        (s) => ({ memberSubmits: { ...s.memberSubmits, [key]: result }, ...(isPrimary && { submitAttemptReviewId: undefined }) }),
+        true,
+      )
+    const onPendingReview = (reviewId: number | null) => setMember({ submitted: null, attemptReviewId: reviewId ?? undefined })
     let submitted: SubmittedReview
     try {
-      submitted = await submitReview(pr, event, review, { attemptReviewId, onPendingReview })
+      submitted = await submitReview(member, event, review, { attemptReviewId, onPendingReview })
     } catch (error) {
-      this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error), threadsToResolveOnSubmit: undefined }), true)
+      const message = errorMessage(error)
+      const pending = this.find(sessionId)?.memberSubmits?.[key]?.attemptReviewId
+      setMember({ submitted: null, attemptReviewId: pending, error: message })
+      const sessionError = isUnitSession(session) ? `${key}: ${message}` : message
+      this.patch(sessionId, () => ({ status: 'error', error: sessionError, threadsToResolveOnSubmit: undefined }), true)
       throw error
     }
-    this.completeSubmit(sessionId, submitted)
+    setMember({ submitted })
+    prList.recordRallyReview(key, submitted.reviewId)
   }
 
   async threads(sessionId: string): Promise<ReviewThread[]> {
@@ -151,6 +211,14 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     return session.drafts && draftsForPr(session.drafts, keyOf(member))
   }
 
+  /** Blocks Claude turns once some PRs of a unit posted, so the drafts behind those posts can't change before the rest post. */
+  protected assertCanStartTurn(sessionId: string): void {
+    super.assertCanStartTurn(sessionId)
+    const session = this.byId(sessionId)
+    const anyPosted = Object.values(session.memberSubmits ?? {}).some((result) => result.submitted)
+    if (anyPosted && !session.submitted) throw new Error(PARTLY_POSTED_ERROR)
+  }
+
   discard(sessionId: string): void {
     const session = this.byId(sessionId)
     if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
@@ -186,9 +254,12 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     }
   }
 
-  private completeSubmit(sessionId: string, submitted: SubmittedReview): void {
-    const session = this.find(sessionId)
-    if (session) prList.recordRallyReview(session.prKey, submitted.reviewId)
+  /** Marks the session submitted once every PR posted or was skipped, then resolves the selected threads and refreshes the PRs. */
+  private finishSubmit(sessionId: string): void {
+    const session = this.byId(sessionId)
+    const members = sessionMembers(session)
+    const posted = members.flatMap((member) => session.memberSubmits?.[keyOf(member)]?.submitted ?? [])
+    const submitted = session.memberSubmits?.[session.prKey]?.submitted ?? posted[0]
     this.patch(sessionId, () => ({ status: 'submitted', submitted, submitAttemptReviewId: undefined }), true)
     const threadIds = this.find(sessionId)?.threadsToResolveOnSubmit ?? []
     const clearPending = () => this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }), true)
@@ -203,10 +274,8 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
         .finally(clearPending)
     }
     removeSessionDir(sessionId)
-    const pr = this.find(sessionId)?.pr
-    if (!pr) return
-    prList.refreshOne(pr.owner, pr.repo, pr.number).catch((error) => {
-      console.error('PR refresh after submit failed', { pr: pr.url, error })
+    prList.refreshMany(members).catch((error) => {
+      console.error('PR refresh after submit failed', { prs: members.map((m) => m.url), error })
     })
   }
 }

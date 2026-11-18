@@ -240,6 +240,16 @@ export const REVIEW_EVENT_LABELS: Record<ReviewEvent, string> = {
   REQUEST_CHANGES: 'Request changes',
 }
 
+/** A review event, or Skip to post nothing to that PR of a review of several PRs. */
+export type SubmitEvent = ReviewEvent | 'SKIP'
+
+export const SUBMIT_EVENT_LABELS: Record<SubmitEvent, string> = { ...REVIEW_EVENT_LABELS, SKIP: 'Skip' }
+
+export interface MemberVerdict {
+  prKey: string
+  event: SubmitEvent
+}
+
 export type Severity = 'blocker' | 'high' | 'medium' | 'nit'
 
 export interface RepliedComment {

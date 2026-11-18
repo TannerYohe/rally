@@ -129,7 +129,7 @@ function ReviewPanel({ session, needsRereview, prUpdatedAt, onDiscarded, onStart
   const submit = (event: ReviewEvent) =>
     run(async () => {
       if (drafts && isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-      await window.rally.submitReview(session.id, event, changes, threadResolution.selectedIds)
+      await window.rally.submitReview(session.id, [{ prKey: session.prKey, event }], changes, threadResolution.selectedIds)
     })
   const startOver = () => {
     if (window.confirm('Discard this review session and its drafts?')) void window.rally.discardSession(session.id).then(onDiscarded)

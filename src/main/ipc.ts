@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import type { DraftChanges } from '@shared/feedback'
 import type { PrCoords } from '@shared/linkedPrs'
 import { IPC } from '@shared/ipc'
-import type { ActionRequest, Config, Health, HideMode, PrListKind, PrRef, ReplyPost, ReviewEvent } from '@shared/types'
+import type { ActionRequest, Config, Health, HideMode, MemberVerdict, PrListKind, PrRef, ReplyPost } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { authorSessions } from './claude/authorSessions'
@@ -47,8 +47,8 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.open(key))
   ipcMain.handle(IPC.startReview, (_event, pr: PrRef) => reviewSessions.start(pr))
   ipcMain.handle(IPC.sendFeedback, (_event, id: string, message: string) => reviewSessions.feedback(id, message))
-  ipcMain.handle(IPC.submitReview, (_event, id: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]) =>
-    reviewSessions.submit(id, event, changes, resolveThreadIds),
+  ipcMain.handle(IPC.submitReview, (_event, id: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]) =>
+    reviewSessions.submit(id, verdicts, changes, resolveThreadIds),
   )
   ipcMain.handle(IPC.getReviewThreads, (_event, id: string) => reviewSessions.threads(id))
   ipcMain.handle(IPC.resolveThreads, (_event, id: string, threadIds: string[]) => reviewSessions.resolveThreads(id, threadIds))

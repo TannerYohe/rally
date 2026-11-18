@@ -175,13 +175,11 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     )
   }
 
-  /** Returns the conversation to resume, or undefined to start a new one when there is none or it ran in another folder, since Claude Code keeps each conversation with its folder. */
+  /** Returns the conversation to resume, or undefined when there is none or it ran in another folder. */
   private resumableConversation(sessionId: string, cwd: string): string | undefined {
     const session = this.find(sessionId)
     if (!session?.sdkSessionId) return undefined
-    if ((session.sdkCwd ?? sessionDir(sessionId)) === cwd) return session.sdkSessionId
-    this.append(sessionId, { kind: 'warning', id: randomUUID(), label: NEW_CONVERSATION_WARNING, detail: cwd, at: now() })
-    return undefined
+    return (session.sdkCwd ?? sessionDir(sessionId)) === cwd ? session.sdkSessionId : undefined
   }
 
   protected async runTurn(sessionId: string, prompt: string, mode: TurnMode): Promise<void> {
@@ -204,6 +202,9 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     const setup = this.turnSetup(sessionId)
     const cwd = setup.cwd ?? scratch
     const resume = this.resumableConversation(sessionId, cwd)
+    if (!resume && this.find(sessionId)?.sdkSessionId) {
+      this.append(sessionId, { kind: 'warning', id: randomUUID(), label: NEW_CONVERSATION_WARNING, detail: cwd, at: now() })
+    }
     const decide = (toolName: string, input: unknown) =>
       decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd, access: setup.toolAccess })
 

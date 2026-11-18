@@ -147,6 +147,8 @@ mocks.stored = [
   stored(68, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
   stored(69),
   stored(70),
+  stored(72, { sdkSessionId: 'temp-conversation' }),
+  stored(73, { clone: WORKTREE, sdkSessionId: 'worktree-conversation', sdkCwd: WORKTREE.path }),
   stored(71, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, syncedHead: 'prev' } }),
   stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
@@ -749,6 +751,29 @@ describe('checking out the PR branch', () => {
     await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
     expect(turnOptions().cwd).toBe(CLONE.path)
+  })
+
+  it('resumes the conversation in the same folder, records the folder it ran in, and adds no warning', async () => {
+    mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
+    mocks.query.mockImplementation(async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'next-conversation' }
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+    await authorSessions.feedback('author-73', 'carry on')
+    await vi.waitFor(() => expect(session(73).status).toBe('awaiting_feedback'))
+    expect(turnOptions().resume).toBe('worktree-conversation')
+    expect(session(73)).toMatchObject({ sdkSessionId: 'next-conversation', sdkCwd: WORKTREE.path })
+    expect(session(73).timeline).not.toContainEqual(expect.objectContaining({ kind: 'warning' }))
+  })
+
+  it('resumes a conversation saved before sdkCwd existed when the turn runs in the session folder', async () => {
+    mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'fork', branch: 'feature', baseBranch: 'main', baseUrl: 'upstream' })
+    mocks.cloneBranch.mockResolvedValue({ ...CLONE, path: join(tmpdir(), 'rally', 'author-72') })
+    mkdirSync(join(tmpdir(), 'rally', 'author-72'), { recursive: true })
+    finishTurn()
+    await authorSessions.feedback('author-72', 'carry on')
+    await vi.waitFor(() => expect(session(72).status).toBe('awaiting_feedback'))
+    expect(turnOptions().resume).toBe('temp-conversation')
   })
 
   it('notes a diverged worktree in the timeline and names the checkout in the step', async () => {

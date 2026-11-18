@@ -425,15 +425,17 @@ export interface MemberSubmit {
 }
 
 export interface ReviewSession extends SessionCore {
-  /** Every PR the session reviews, starting with pr; absent for a session that reviews pr alone. */
-  members?: PrRef[]
+  /** Every PR the session reviews, starting with pr; a single-PR review has one member. */
+  members: PrRef[]
   drafts: Drafts | null
-  /** Set once every PR the session reviews has posted or been skipped. */
+  /** The session PR's posted review, or the first posted one when it was skipped, set once every PR posted or was skipped. */
   submitted: SubmittedReview | null
-  memberSubmits?: Record<string, MemberSubmit>
+  /** How submitting each member went, keyed by PR key. */
+  memberSubmits: Record<string, MemberSubmit>
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]
+  /** A pending review id saved by older versions, which loading moves into memberSubmits. */
   submitAttemptReviewId?: number
 }
 

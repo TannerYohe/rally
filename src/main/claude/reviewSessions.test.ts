@@ -54,18 +54,21 @@ function unitDrafts(number: number): Drafts {
   }
 }
 
-function storedUnit(number: number, overrides: Partial<ReviewSession> = {}): ReviewSession {
+/** A session as an older version stored it, without members or per-PR submit state. */
+type StoredSession = Omit<ReviewSession, 'members' | 'memberSubmits'> & Partial<Pick<ReviewSession, 'members' | 'memberSubmits'>>
+
+function storedUnit(number: number, overrides: Partial<ReviewSession> = {}): StoredSession {
   const base = storedSession(number)
   return { ...base, members: [base.pr, WEB], drafts: unitDrafts(number), ...overrides }
 }
 
 const docs = (number: number) => ({ owner: 'acme', repo: 'docs', number, url: `https://github.com/acme/docs/pull/${number}` })
 
-function storedDocs(number: number, overrides: Partial<ReviewSession> = {}): ReviewSession {
+function storedDocs(number: number, overrides: Partial<ReviewSession> = {}): StoredSession {
   return storedSession(number, { id: `test-docs-${number}`, pr: docs(number), prKey: `acme/docs#${number}`, ...overrides })
 }
 
-function storedSession(number: number, overrides: Partial<ReviewSession> = {}): ReviewSession {
+function storedSession(number: number, overrides: Partial<ReviewSession> = {}): StoredSession {
   return {
     id: `test-session-${number}`,
     pr: { owner: 'acme', repo: 'api', number, url: `https://github.com/acme/api/pull/${number}` },
@@ -83,7 +86,7 @@ function storedSession(number: number, overrides: Partial<ReviewSession> = {}): 
 }
 
 const mocks = vi.hoisted(() => ({
-  stored: [] as ReviewSession[],
+  stored: [] as { id: string }[],
   resolveOwnThreads: vi.fn(),
   fetchOwnThreads: vi.fn(),
   query: vi.fn(),
@@ -96,7 +99,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../store', () => ({
   configFile: { get: () => ({ reviewSkill: 'review-pr' }) },
-  sessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
+  sessionsDir: { readAll: () => mocks.stored as unknown as ReviewSession[], write: vi.fn(), remove: vi.fn() },
 }))
 vi.mock('../prList', () => ({
   prList: { refreshMany: mocks.refreshMany, recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
@@ -173,6 +176,8 @@ mocks.stored = [
   storedSession(51),
   storedDocs(11),
   storedSession(53, { status: 'submitting', submitAttemptReviewId: 77 }),
+  storedSession(55, { status: 'submitting', submitAttemptReviewId: 88 }),
+  storedSession(56, { status: 'submitted', submitted: SUBMITTED }),
   storedSession(52, { status: 'error', members: [storedSession(52).pr, docs(12)], memberSubmits: { 'acme/docs#12': { submitted: SUBMITTED } } }),
 ]
 
@@ -370,6 +375,12 @@ describe('submit', () => {
 })
 
 describe('restoring sessions', () => {
+  it('gives a session saved by an older version its PR as the only member', () => {
+    expect(session(56)).toMatchObject({ members: [storedSession(56).pr], memberSubmits: { 'acme/api#56': { submitted: SUBMITTED } } })
+    expect(session(55).memberSubmits).toEqual({ 'acme/api#55': { submitted: null, attemptReviewId: 88 } })
+    expect(session(55).submitAttemptReviewId).toBeUndefined()
+  })
+
   it('reports the selection of a session saved mid-resolve after submit and clears the thread flags', () => {
     expect(session(6).resolvingThreads).toBe(false)
     expect(session(6).threadsToResolveOnSubmit).toBeUndefined()

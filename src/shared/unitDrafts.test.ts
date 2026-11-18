@@ -26,15 +26,15 @@ const unitDrafts: Drafts = {
 }
 
 describe('sessionMembers', () => {
-  it('treats a session without members as reviewing its own PR', () => {
-    expect(sessionMembers({ pr: api })).toEqual([api])
-    expect(isUnitSession({ pr: api })).toBe(false)
-    expect(isUnitSession({ pr: api, members: [api, web] })).toBe(true)
+  it('treats a session with one member as a single-PR review', () => {
+    expect(sessionMembers({ members: [api] })).toEqual([api])
+    expect(isUnitSession({ members: [api] })).toBe(false)
+    expect(isUnitSession({ members: [api, web] })).toBe(true)
   })
 
   it('covers every member key', () => {
-    expect(sessionCovers({ pr: api, members: [api, web] }, WEB)).toBe(true)
-    expect(sessionCovers({ pr: api }, WEB)).toBe(false)
+    expect(sessionCovers({ members: [api, web] }, WEB)).toBe(true)
+    expect(sessionCovers({ members: [api] }, WEB)).toBe(false)
   })
 })
 

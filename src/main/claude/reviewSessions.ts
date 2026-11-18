@@ -97,8 +97,20 @@ function restoreThreadState(stored: ReviewSession): ReviewSession {
 const INTERRUPTED_SUBMIT_ERROR =
   'Rally closed while submitting this review. Submit again; Rally checks whether the earlier attempt went through first.'
 
+type StoredReviewSession = Omit<ReviewSession, 'members' | 'memberSubmits'> & Partial<Pick<ReviewSession, 'members' | 'memberSubmits'>>
+
+/** Gives a session saved by an older version its members and per-PR submit state, as a unit of one. */
+function withUnitShape(stored: StoredReviewSession): ReviewSession {
+  const { submitAttemptReviewId, ...session } = stored
+  const memberSubmits = { ...(stored.memberSubmits ?? (stored.submitted ? { [stored.prKey]: { submitted: stored.submitted } } : {})) }
+  if (submitAttemptReviewId !== undefined && !memberSubmits[stored.prKey]) {
+    memberSubmits[stored.prKey] = { submitted: null, attemptReviewId: submitAttemptReviewId }
+  }
+  return { ...session, members: stored.members ?? [stored.pr], memberSubmits }
+}
+
 function restoreSession(stored: ReviewSession): ReviewSession {
-  const session = restoreThreadState(stored)
+  const session = restoreThreadState(withUnitShape(stored))
   if (!ACTIVE_STATUSES.has(session.status)) return session
   if (session.submitted) return { ...session, status: 'submitted', error: null }
   if (session.status === 'submitting') return { ...session, status: 'error', error: INTERRUPTED_SUBMIT_ERROR }
@@ -140,7 +152,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const partlyPosted = covering.find(isPartlyPosted)
     if (partlyPosted) throw new Error(`Some PRs in the review of ${partlyPosted.prKey} already posted. Submit the rest or skip them, then start again.`)
     for (const session of covering) this.remove(session)
-    this.add({ ...this.newSessionCore(pr, 'running'), ...(members.length > 1 && { members }), drafts: null, submitted: null })
+    this.add({ ...this.newSessionCore(pr, 'running'), members, memberSubmits: {}, drafts: null, submitted: null })
     const session = this.sessions.get(key)!
     void this.runTurn(session.id, reviewPrompt(members, configFile.get().reviewSkill), 'review')
     return this.sessions.get(key)!
@@ -165,21 +177,15 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   private async postMember(sessionId: string, { member, event, review }: MemberPost): Promise<void> {
     const key = keyOf(member)
     const session = this.byId(sessionId)
-    const isPrimary = key === session.prKey
-    const attemptReviewId = session.memberSubmits?.[key]?.attemptReviewId ?? (isPrimary ? session.submitAttemptReviewId : undefined) ?? null
-    const setMember = (result: MemberSubmit) =>
-      this.patch(
-        sessionId,
-        (s) => ({ memberSubmits: { ...s.memberSubmits, [key]: result }, ...(isPrimary && { submitAttemptReviewId: undefined }) }),
-        true,
-      )
+    const attemptReviewId = session.memberSubmits[key]?.attemptReviewId ?? null
+    const setMember = (result: MemberSubmit) => this.patch(sessionId, (s) => ({ memberSubmits: { ...s.memberSubmits, [key]: result } }), true)
     const onPendingReview = (reviewId: number | null) => setMember({ submitted: null, attemptReviewId: reviewId ?? undefined })
     let submitted: SubmittedReview
     try {
       submitted = await submitReview(member, event, review, { attemptReviewId, onPendingReview })
     } catch (error) {
       const message = errorMessage(error)
-      const pending = this.find(sessionId)?.memberSubmits?.[key]?.attemptReviewId ?? attemptReviewId ?? undefined
+      const pending = this.find(sessionId)?.memberSubmits[key]?.attemptReviewId ?? attemptReviewId ?? undefined
       setMember({ submitted: null, attemptReviewId: pending, error: message })
       const sessionError = isUnitSession(session) ? `${key}: ${message}` : message
       this.patch(sessionId, () => ({ status: 'error', error: sessionError, threadsToResolveOnSubmit: undefined }), true)
@@ -285,7 +291,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const postedMembers = members.filter((member) => memberPosted(session, keyOf(member)))
     const posted = postedMembers.flatMap((member) => memberPosted(session, keyOf(member)) ?? [])
     const submitted = memberPosted(session, session.prKey) ?? posted[0]
-    this.patch(sessionId, () => ({ status: 'submitted', submitted, submitAttemptReviewId: undefined }), true)
+    this.patch(sessionId, () => ({ status: 'submitted', submitted }), true)
     const postedThreadIds = new Set(postedMembers.flatMap((member) => priorConcernThreadIds(this.memberDrafts(session, member))))
     const threadIds = (session.threadsToResolveOnSubmit ?? []).filter((id) => postedThreadIds.has(id))
     const clearPending = () => this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }), true)

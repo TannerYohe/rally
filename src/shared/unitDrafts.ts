@@ -2,15 +2,15 @@ import { EMPTY_COMMENT_REVIEW_ERROR, isEmptyCommentReview, type DraftChanges } f
 import { keyOf, type Drafts, type MemberVerdict, type PrRef, type ReviewSession, type SubmittedReview } from './types'
 
 /** Returns every PR a review session covers, its own PR first. */
-export function sessionMembers(session: Pick<ReviewSession, 'pr' | 'members'>): PrRef[] {
-  return session.members ?? [session.pr]
+export function sessionMembers(session: Pick<ReviewSession, 'members'>): PrRef[] {
+  return session.members
 }
 
-export function isUnitSession(session: Pick<ReviewSession, 'pr' | 'members'>): boolean {
+export function isUnitSession(session: Pick<ReviewSession, 'members'>): boolean {
   return sessionMembers(session).length > 1
 }
 
-export function sessionCovers(session: Pick<ReviewSession, 'pr' | 'members'>, prKey: string): boolean {
+export function sessionCovers(session: Pick<ReviewSession, 'members'>, prKey: string): boolean {
   return sessionMembers(session).some((member) => keyOf(member) === prKey)
 }
 
@@ -21,16 +21,16 @@ export function distinctSessions<T extends Pick<ReviewSession, 'id'>>(sessions: 
 
 /** Returns the review the session posted to one of its PRs, or null when that PR hasn't posted. */
 export function memberPosted(session: Pick<ReviewSession, 'memberSubmits'>, prKey: string): SubmittedReview | null {
-  return session.memberSubmits?.[prKey]?.submitted ?? null
+  return session.memberSubmits[prKey]?.submitted ?? null
 }
 
 /** Returns the session's PRs that haven't posted yet, its own PR first. */
-export function unpostedMembers(session: Pick<ReviewSession, 'pr' | 'members' | 'memberSubmits'>): PrRef[] {
+export function unpostedMembers(session: Pick<ReviewSession, 'members' | 'memberSubmits'>): PrRef[] {
   return sessionMembers(session).filter((member) => !memberPosted(session, keyOf(member)))
 }
 
 /** Returns whether some of the session's PRs posted while the session isn't marked submitted. */
-export function isPartlyPosted(session: Pick<ReviewSession, 'pr' | 'members' | 'memberSubmits' | 'submitted'>): boolean {
+export function isPartlyPosted(session: Pick<ReviewSession, 'members' | 'memberSubmits' | 'submitted'>): boolean {
   return !session.submitted && unpostedMembers(session).length < sessionMembers(session).length
 }
 

@@ -100,7 +100,7 @@ describe('feedbackItems', () => {
     const items = feedbackItems(
       [],
       [prComment(1, 'bob', 'Why not reuse the helper?'), prComment(2, 'codecov', 'Coverage', 'Bot')],
-      [review(10, 'CHANGES_REQUESTED', 'carol'), review(11, 'APPROVED', 'dan', 'LGTM, one nit'), review(12, 'APPROVED', 'erin', '')],
+      [review(10, 'CHANGES_REQUESTED', 'carol'), review(11, 'APPROVED', 'dan', 'LGTM, one nit'), review(12, 'COMMENTED', 'erin', '')],
       'me',
     )
     expect(items.map((i) => [i.id, i.kind])).toEqual([

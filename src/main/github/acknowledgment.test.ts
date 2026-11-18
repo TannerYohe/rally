@@ -43,7 +43,7 @@ describe('pendingConversation', () => {
     ]
     const reviews = [
       review(10, 'bob', 'Overall looks good, a few questions'),
-      review(11, 'carol', '', { state: 'APPROVED' }),
+      review(11, 'carol', ''),
       review(12, 'dan', 'Looks right, but why the retry?', { state: 'CHANGES_REQUESTED' }),
       review(14, 'erin', 'LGTM, one nit', { state: 'APPROVED' }),
       review(15, 'frank', 'LGTM', { state: 'DISMISSED' }),

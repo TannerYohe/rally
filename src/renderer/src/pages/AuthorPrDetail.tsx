@@ -9,7 +9,7 @@ import { PrHeader } from '../components/PrHeader'
 import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
-import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
+import { actionRequests, AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
 import { age, fullTime, plural } from '../lib/format'
 import { useActionRunner, useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
@@ -59,7 +59,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
 
   const rows = feedbackRows(feedback.items, session)
   const { open: openRows, waiting: waitingRows } = splitWaitingRows(rows)
-  const requests = Object.entries(picks).map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
+  const requests = actionRequests(picks, rows)
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
   const unpushed = session?.commits.length ?? 0
   const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null
@@ -105,6 +105,14 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
     })
   }
 
+  const dropPick = (id: string) => setPicks(({ [id]: _removed, ...rest }) => rest)
+  const dismiss = (id: string) =>
+    session &&
+    run(async () => {
+      await window.rally.dismissFinding(session.id, id)
+      dropPick(id)
+    })
+
   const card = (row: FeedbackRow) => {
     const id = row.item.id
     return (
@@ -115,11 +123,11 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
         replyEdit={replyEdits[id]}
         resolve={resolve[id] ?? false}
         disabled={busy}
-        onPick={(pick) => setPicks(({ [id]: _removed, ...rest }) => (pick ? { ...rest, [id]: pick } : rest))}
+        onPick={(pick) => (pick ? setPicks((current) => ({ ...current, [id]: pick })) : dropPick(id))}
         onReplyEdit={(body) => setReplyEdits(({ [id]: _removed, ...rest }) => (body === undefined ? rest : { ...rest, [id]: body }))}
         onResolve={(value) => setResolve((current) => ({ ...current, [id]: value }))}
         onDropReply={() => session && run(() => window.rally.discardAuthorReply(session.id, id))}
-        onDismiss={() => session && run(() => window.rally.dismissFinding(session.id, id))}
+        onDismiss={() => dismiss(id)}
         onAcknowledge={() => acknowledge(id)}
       />
     )

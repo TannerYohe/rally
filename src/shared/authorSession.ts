@@ -73,7 +73,7 @@ export function canPush(session: Pick<AuthorSession, 'commits' | 'mergeConflicts
   return (session.commits.length > 0 || session.description !== null) && session.mergeConflicts.length === 0
 }
 
-/** Returns the description with line endings normalized and outer whitespace trimmed, so GitHub's CRLF bodies compare equal to Claude's. */
+/** Returns the description with line endings normalized and outer whitespace trimmed. */
 export function normalizedDescription(description: PrDescription): PrDescription {
   return { title: description.title.trim(), body: description.body.replaceAll('\r\n', '\n').trim() }
 }
@@ -87,9 +87,9 @@ export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {
   return item.kind !== 'finding'
 }
 
-/** Returns whether Claude finished an action on a self-review finding, so the author can resolve it. */
+/** Returns whether Claude finished an action on a self-review finding without a commit failure, so the author can resolve it. */
 export function isFindingHandled(response: ItemResponse | null | undefined): boolean {
-  return response !== null && response !== undefined && !response.pendingCommit
+  return response !== null && response !== undefined && !response.pendingCommit && response.commitError === null
 }
 
 /** Returns the ids of the self-review findings Claude finished an action on. */

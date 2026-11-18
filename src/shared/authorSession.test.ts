@@ -55,11 +55,12 @@ describe('pendingReplies on findings', () => {
 })
 
 describe('handledFindingIds', () => {
-  it('lists findings Claude answered, leaving out ones without a response or still waiting on a commit', () => {
-    const findings = ['self-1', 'self-2', 'self-3'].map((id) => item(id, 'finding'))
+  it('lists findings Claude answered, leaving out ones without a response, still waiting on a commit, or whose commit failed', () => {
+    const findings = ['self-1', 'self-2', 'self-3', 'self-4'].map((id) => item(id, 'finding'))
     const responses = {
       'self-1': itemResponse('self-1', '', { action: 'push_back' }),
       'self-2': itemResponse('self-2', '', { action: 'fix', pendingCommit: true }),
+      'self-4': itemResponse('self-4', '', { action: 'fix', commitError: 'Nothing to commit' }),
       T1: itemResponse('T1', 'Done'),
     }
     expect(handledFindingIds({ selfReview: { verdict: '', reportMarkdown: '', findings }, responses })).toEqual(['self-1'])

@@ -99,8 +99,16 @@ export async function syncWorktree(clone: CloneInfo): Promise<CloneInfo> {
   return { ...clone, syncedHead: clone.syncedHead ?? (await git(clone.path, ['merge-base', 'HEAD', remote])).trim() }
 }
 
+/** The rev-list arguments for the checkout's commits that GitHub doesn't have. */
+const unpushedRange = (clone: CloneInfo) => ['HEAD', `^${remoteRef(clone)}`, `^${syncedRef(clone)}`]
+
+/** Returns the checkout's HEAD commit. */
+export function headOf(clone: CloneInfo): Promise<string> {
+  return revParse(clone.path, 'HEAD')
+}
+
 async function commitList(clone: CloneInfo, extra: string[]): Promise<LocalCommit[]> {
-  const out = await git(clone.path, ['log', `--format=%H${FIELD_SEPARATOR}%s`, ...extra, 'HEAD', `^${remoteRef(clone)}`, `^${syncedRef(clone)}`])
+  const out = await git(clone.path, ['log', `--format=%H${FIELD_SEPARATOR}%s`, ...extra, ...unpushedRange(clone)])
   return out
     .split('\n')
     .filter(Boolean)
@@ -206,10 +214,10 @@ export async function commitFiles(clone: CloneInfo, files: string[], message: st
   return (await git(clone.path, ['rev-parse', 'HEAD'])).trim()
 }
 
-/** Returns the newest commit GitHub doesn't have yet that touches any of the files, or null when there is none. */
-export async function latestCommitTouching(clone: CloneInfo, files: string[]): Promise<string | null> {
+/** Returns the newest commit made after `since`, and not on GitHub, that touches any of the files, or null when there is none. */
+export async function latestCommitTouching(clone: CloneInfo, files: string[], since: string): Promise<string | null> {
   if (files.length === 0) return null
-  const out = await git(clone.path, ['log', '-1', '--format=%H', 'HEAD', `^${remoteRef(clone)}`, `^${syncedRef(clone)}`, '--', ...files])
+  const out = await git(clone.path, ['log', '-1', '--format=%H', ...unpushedRange(clone), `^${since}`, '--', ...files])
   return out.trim() || null
 }
 

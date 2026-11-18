@@ -317,14 +317,19 @@ describe('prClone', () => {
     expect((await localCommits(synced)).map((c) => c.oid)).toEqual([localHead])
   })
 
-  it('finds the newest unpushed commit that touches a file', async () => {
+  it('finds the newest commit made since a point, and not on GitHub, that touches a file', async () => {
     const clone = await cloneBranch(join(root, 'session-touch'), source)
-    expect(await latestCommitTouching(clone, ['x.txt'])).toBeNull()
+    const start = git(clone.path, 'rev-parse', 'HEAD').trim()
+    expect(await latestCommitTouching(clone, ['x.txt'], start)).toBeNull()
+    expect(await latestCommitTouching(clone, ['b.txt'], 'origin/main')).toBeNull()
     commitFile(clone.path, 'x.txt', 'one\n')
+    const turnStart = git(clone.path, 'rev-parse', 'HEAD').trim()
     commitFile(clone.path, 'y.txt', 'two\n')
-    const [, xCommit] = await localCommits(clone)
-    expect(await latestCommitTouching(clone, ['x.txt'])).toBe(xCommit.oid)
-    expect(await latestCommitTouching(clone, [])).toBeNull()
+    const [yCommit, xCommit] = await localCommits(clone)
+    expect(await latestCommitTouching(clone, ['x.txt'], start)).toBe(xCommit.oid)
+    expect(await latestCommitTouching(clone, ['x.txt'], turnStart)).toBeNull()
+    expect(await latestCommitTouching(clone, ['x.txt', 'y.txt'], turnStart)).toBe(yCommit.oid)
+    expect(await latestCommitTouching(clone, [], start)).toBeNull()
   })
 
   describe('after a force push', () => {

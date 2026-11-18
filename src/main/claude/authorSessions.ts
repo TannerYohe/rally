@@ -27,6 +27,7 @@ import {
   commitFiles,
   concludeMerge,
   discardUncommitted,
+  headOf,
   latestCommitTouching,
   localCommits,
   MergeConflictError,
@@ -155,6 +156,9 @@ function rewriteCommits(responses: Record<string, ItemResponse>, rewritten: Reco
 const knownItemIds = (session: AuthorSession) => new Set([...session.items, ...(session.selfReview?.findings ?? [])].map((i) => i.id))
 
 class AuthorSessions extends ClaudeSessions<AuthorSession> {
+  /** The checkout's HEAD when each running turn started, so a fix is credited only to a commit made during its turn. */
+  private readonly turnStartHeads = new Map<string, string>()
+
   constructor() {
     super(authorSessionsDir, restoreAuthorSession)
   }
@@ -206,6 +210,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       try {
         this.patch(sessionId, () => ({ status: 'running', error: null }), true)
         const clone = await this.prepareClone(sessionId)
+        this.turnStartHeads.set(sessionId, await headOf(clone))
         void this.runTurn(sessionId, prompt(clone), mode)
       } catch (error) {
         if (this.byId(sessionId).status === 'running') this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
@@ -497,6 +502,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
    */
   protected async turnEnded(sessionId: string, succeeded: boolean, mode: TurnMode): Promise<void> {
     const session = this.find(sessionId)
+    const turnStart = this.turnStartHeads.get(sessionId)
+    this.turnStartHeads.delete(sessionId)
     if (!session) return
     if (!succeeded) this.dropPendingCommits(sessionId)
     const clone = session.clone
@@ -511,7 +518,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         const merged = await concludeMerge(clone, session.mergeConflicts)
         this.patch(sessionId, () => ({ mergeConflicts: [], clone: merged }), true)
       } else if (succeeded) {
-        await this.commitPublishedFixes(sessionId, clone)
+        await this.commitPublishedFixes(sessionId, clone, turnStart)
       }
     } finally {
       await this.refreshClone(sessionId)
@@ -524,9 +531,9 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   /**
    * Commits each fix's listed files in its own commit and puts the short sha into its reply; one fix failing to commit doesn't stop the rest.
-   * A fix Claude committed itself is credited to the newest unpushed commit touching its files.
+   * A fix Claude committed itself is credited to the newest unpushed commit made during the turn that touches its files.
    */
-  private async commitPublishedFixes(sessionId: string, clone: CloneInfo): Promise<void> {
+  private async commitPublishedFixes(sessionId: string, clone: CloneInfo, turnStart: string | undefined): Promise<void> {
     const committedFile = new Map<string, string>()
     for (const response of Object.values(this.byId(sessionId).responses).filter((r) => r.pendingCommit)) {
       let update: ItemResponse
@@ -534,7 +541,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         const oid = await commitFiles(clone, response.files, response.commitMessage.trim() || `Address review comment ${response.itemId}`)
         if (oid) for (const file of response.files) committedFile.set(file, oid)
         const sharedCommit = response.files.map((file) => committedFile.get(file)).find(Boolean)
-        const claudeCommit = oid || sharedCommit ? null : await latestCommitTouching(clone, response.files)
+        const claudeCommit = oid || sharedCommit || !turnStart ? null : await latestCommitTouching(clone, response.files, turnStart)
         const ownCommit = oid ?? claudeCommit
         const covering = ownCommit ?? sharedCommit ?? response.commits.at(-1) ?? null
         const commits = ownCommit && !response.commits.includes(ownCommit) ? [...response.commits, ownCommit] : response.commits

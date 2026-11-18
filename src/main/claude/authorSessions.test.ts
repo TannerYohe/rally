@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   integrateRemote: vi.fn(),
   commitFiles: vi.fn(),
   latestCommitTouching: vi.fn(async (): Promise<string | null> => null),
+  headOf: vi.fn(async () => 'turn-start'),
   commitAll: vi.fn(),
   uncommittedDiff: vi.fn(),
   concludeMerge: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   CLONE_DIR_NAME: 'repo',
   commitFiles: mocks.commitFiles,
   latestCommitTouching: mocks.latestCommitTouching,
+  headOf: mocks.headOf,
   commitAll: mocks.commitAll,
   concludeMerge: mocks.concludeMerge,
   abortMerge: mocks.abortMerge,
@@ -497,13 +499,13 @@ describe('turn exits', () => {
     expect(T4).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('outside repository') })
   })
 
-  it('credits a fix Claude committed itself to its newest commit touching the files', async () => {
+  it('credits a fix Claude committed itself to its newest commit of the turn touching the files', async () => {
     mocks.commitFiles.mockResolvedValue(null)
     mocks.latestCommitTouching.mockResolvedValueOnce('bbbbbbb123')
     finishTurn()
     await authorSessions.feedback('author-54', 'fix it')
     await vi.waitFor(() => expect(session(54).status).toBe('awaiting_feedback'))
-    expect(mocks.latestCommitTouching).toHaveBeenCalledWith(expect.anything(), ['b.ts'])
+    expect(mocks.latestCommitTouching).toHaveBeenCalledWith(expect.anything(), ['b.ts'], 'turn-start')
     expect(session(54).responses.T1).toMatchObject({ pendingCommit: false, commits: ['bbbbbbb123'], reply: 'Fixed in bbbbbbb', commitError: null })
   })
 })

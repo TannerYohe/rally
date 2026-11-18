@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { unitMembers } from '@shared/prUnit'
 import { keyOf, prKey, REVIEW_EVENT_LABELS, toPrRef, type MemberVerdict, type Pr, type PrRef, type ReviewSession, type SubmittedReview } from '@shared/types'
-import { distinctSessions, draftsForPr, emptyReviewError, isPartlyPosted, isUnitSession, memberPosted, sessionMembers, unpostedMembers } from '@shared/unitDrafts'
+import { distinctSessions, draftsForPr, emptyReviewError, isPartlyPosted, isUnitSession, memberPosted, sessionMembers } from '@shared/unitDrafts'
 import { DraftList } from '../components/DraftList'
 import { LinkPrForm, OneSidedLinks, UnlinkButton } from '../components/LinkedPrControls'
 import { PriorConcernList } from '../components/PriorConcernList'
@@ -192,8 +192,6 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
   const unit = members.length > 1
   const prOf = (member: PrRef) => memberPrs.find((pr) => keyOf(pr) === keyOf(member))
   const postedOf = (member: PrRef) => memberPosted(session, keyOf(member))
-  const pending = unpostedMembers(session)
-  const anyPosted = pending.length < members.length
   const partlyPosted = isPartlyPosted(session)
   const changes: DraftChanges = unit
     ? { edits, summaryBodyEdit: undefined, summaryBodyEdits: summaryEdits, instructions: feedback }
@@ -226,7 +224,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
       setFeedback('')
     })
 
-  const canSend = !busy && !anyPosted && Boolean(message)
+  const canSend = !busy && !partlyPosted && Boolean(message)
   const sendMessage = async (text: string) => {
     reviewTab.follow()
     if (!(await run(() => window.rally.sendFeedback(session.id, text)))) reviewTab.sendFailed()
@@ -261,7 +259,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
               </span>
               <button
                 className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-40"
-                disabled={busy || resolvingThreads || anyPosted}
+                disabled={busy || resolvingThreads || partlyPosted}
                 title="Send Claude a turn to pull in the commits, comments, and reviews since its last successful turn and update the review, along with any pending edits and feedback"
                 onClick={pullChanges}
               >
@@ -401,7 +399,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
           <Composer
             value={feedback}
             placeholder='Feedback for Claude, e.g. "drop 2, make 1 shorter, is finding 4 real?"'
-            disabled={busy || anyPosted}
+            disabled={busy || partlyPosted}
             canSend={canSend}
             sendLabel="Send to Claude"
             onChange={setFeedback}

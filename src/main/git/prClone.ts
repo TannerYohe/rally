@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MAX_DIFF_CHARS } from '@shared/diff'
 import { plural } from '@shared/format'
@@ -164,9 +165,9 @@ export async function cloneDiff(clone: CloneInfo): Promise<DiffResult> {
   return displayDiff(await git(clone.path, [...DISPLAY_DIFF_COMMAND, `${syncedRef(clone)}...HEAD`]))
 }
 
-/** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index for display. */
+/** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index in the temp folder for display. */
 export async function uncommittedDiff(clone: CloneInfo): Promise<DiffResult> {
-  const env = { GIT_INDEX_FILE: join(clone.path, '.git', `rally-uncommitted-${randomUUID()}.index`) }
+  const env = { GIT_INDEX_FILE: join(tmpdir(), `rally-uncommitted-${randomUUID()}.index`) }
   try {
     await git(clone.path, ['read-tree', 'HEAD'], LOCAL_TIMEOUT_MS, env)
     await git(clone.path, ['add', '-A', '--', '.'], LOCAL_TIMEOUT_MS, env)

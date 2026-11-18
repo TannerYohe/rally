@@ -157,7 +157,17 @@ describe('prClone', () => {
     expect(diff).toContain('+two')
     expect(diff).toContain('deleted file mode')
     expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('')
-    expect(readdirSync(join(clone.path, '.git')).filter((name) => name.startsWith('rally-uncommitted-'))).toEqual([])
+    expect(readdirSync(tmpdir()).filter((name) => name.startsWith('rally-uncommitted-'))).toEqual([])
+  })
+
+  it('diffs uncommitted edits in a linked worktree, where .git is a file', async () => {
+    const clone = await cloneBranch(join(root, 'session-linked'), source)
+    const linked = join(root, 'session-linked-wt')
+    git(clone.path, 'worktree', 'add', '-b', 'linked', linked)
+    writeFileSync(join(linked, 'edit.txt'), 'edit\n')
+
+    const { diff } = await uncommittedDiff({ ...clone, path: linked, branch: 'linked', kind: 'local_worktree' })
+    expect(diff).toContain('diff --git a/edit.txt b/edit.txt')
   })
 
   it('lists renamed files once and keeps names with spaces or accents unquoted', async () => {

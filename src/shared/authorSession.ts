@@ -5,10 +5,6 @@ export const COMMIT_PLACEHOLDER = '{commit}'
 
 export const shortSha = (oid: string) => oid.slice(0, 7)
 
-export const FINDING_ID_PREFIX = 'self-'
-
-export const isFindingId = (id: string) => id.startsWith(FINDING_ID_PREFIX)
-
 /** Returns a new author session with nothing cloned, answered, or queued yet. */
 export function newAuthorSession(core: SessionCore): AuthorSession {
   return {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { actionableItems, canReplyTo, COMMIT_PLACEHOLDER, FINDING_ID_PREFIX, hasPendingWork, hasUnsharedWork, isFindingId, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { actionableItems, canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
@@ -79,6 +79,10 @@ function restoreAuthorSession(stored: AuthorSession): AuthorSession {
       return session
   }
 }
+
+const FINDING_ID_PREFIX = 'self-'
+
+const isFindingId = (id: string) => id.startsWith(FINDING_ID_PREFIX)
 
 /** Turns self-review draft comments into private feedback items the author can act on. */
 export function findingsFromDrafts(drafts: Drafts, at: string): FeedbackItem[] {

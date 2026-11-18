@@ -225,9 +225,9 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   const operands = args.filter((a) => !a.startsWith('-'))
   switch (program) {
     case 'gh':
-      return decideGh(args, state, context)
+      return decideGh(args, state)
     case 'git':
-      return decideGit(args, state, context)
+      return decideGit(args, state)
     case 'curl':
       return decideRequest(program, args, CURL_METHOD_FLAGS, CURL_BODY_FLAGS)
     case 'wget':
@@ -273,9 +273,9 @@ function decideOpenCommand(program: string, args: string[], segment: string, sta
   if (INPUT_ARGUMENT_COMMANDS.has(program)) return decideXargs(args, segment, state, context)
   switch (program) {
     case 'gh':
-      return decideGh(args, state, context)
+      return decideOpenGh(args)
     case 'git':
-      return decideGit(args, state, context)
+      return decideOpenGit(args, state)
     case 'eval':
       return decideScript(args.join(' '), { ...state }, context)
     case 'find':
@@ -429,7 +429,14 @@ function isTempPath(word: string, state: ShellState): boolean {
   return TEMP_ROOTS.some((root) => real.startsWith(root + sep))
 }
 
-function decideGit(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
+interface GitInvocation {
+  repoDir: string | null
+  subcommand: string
+  rest: string[]
+}
+
+/** Splits git's arguments into the repo it runs in, the subcommand, and the subcommand's arguments. */
+function parseGit(args: string[], state: ShellState): GitInvocation {
   let repoDir = state.cwd
   let index = 0
   while (index < args.length && args[index].startsWith('-')) {
@@ -439,9 +446,13 @@ function decideGit(args: string[], state: ShellState, context: PolicyContext): T
     }
     index += inline === undefined && (GIT_REPO_FLAGS.has(flag) || GIT_VALUE_FLAGS.has(flag)) ? 2 : 1
   }
-  const [subcommand, ...rest] = args.slice(index)
+  const [subcommand = '', ...rest] = args.slice(index)
+  return { repoDir, subcommand, rest }
+}
+
+function decideGit(args: string[], state: ShellState): ToolDecision {
+  const { repoDir, subcommand, rest } = parseGit(args, state)
   if (subcommand === 'push') return deny(GIT_PUSH_REASON)
-  if (isOpen(context)) return ALLOW
   if (subcommand === 'config' && rest.some((a) => a === '--global' || a === '--system')) {
     if (!rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return deny('Rally does not change your global git config.')
   }
@@ -451,11 +462,21 @@ function decideGit(args: string[], state: ShellState, context: PolicyContext): T
   return ALLOW
 }
 
-function decideGh(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
-  if (args[0] === 'api') return decideGhApi(args.slice(1))
-  if (args[1] === 'checkout' && !isOpen(context) && !(state.cwd && isTempPath(state.cwd, state))) {
+/** Under open access, blocks only git push. */
+function decideOpenGit(args: string[], state: ShellState): ToolDecision {
+  return parseGit(args, state).subcommand === 'push' ? deny(GIT_PUSH_REASON) : ALLOW
+}
+
+function decideGh(args: string[], state: ShellState): ToolDecision {
+  if (args[1] === 'checkout' && !(state.cwd && isTempPath(state.cwd, state))) {
     return deny('Rally only runs `gh pr checkout` in repos under the temp directory.')
   }
+  return decideOpenGh(args)
+}
+
+/** Under open access, blocks gh commands that write to GitHub. */
+function decideOpenGh(args: string[]): ToolDecision {
+  if (args[0] === 'api') return decideGhApi(args.slice(1))
   if (args[0] === 'search' || READ_ONLY_GH_VERBS.has(args[1])) return ALLOW
   return deny(`\`gh ${args.slice(0, 2).join(' ')}\` is not permitted in Rally.`)
 }

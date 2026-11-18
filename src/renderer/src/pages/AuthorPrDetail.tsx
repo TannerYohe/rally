@@ -9,7 +9,7 @@ import { PrHeader } from '../components/PrHeader'
 import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
-import { actionRequests, AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, withoutFindingPicks, type ActionPick, type AuthorTab, type FeedbackRow } from '../lib/authorView'
+import { actionRequests, AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, type ActionPick, type AuthorTab, type FeedbackRow } from '../lib/authorView'
 import { age, fullTime, plural } from '../lib/format'
 import { useActionRunner, useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
@@ -81,11 +81,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
     })
   const primary = () => (requests.length > 0 ? runActions() : sendMessage(message))
   const canRunPrimary = !busy && (requests.length > 0 || (session !== null && Boolean(message.trim())))
-  const selfReview = () =>
-    run(async () => {
-      onSession(await window.rally.startSelfReview(prRef))
-      setPicks(withoutFindingPicks)
-    })
+  const selfReview = () => run(async () => onSession(await window.rally.startSelfReview(prRef)))
   const push = () => session && run(() => window.rally.pushAuthorCommits(session.id))
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${repliesLabel} to GitHub as you?`)) return

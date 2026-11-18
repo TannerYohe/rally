@@ -1,4 +1,4 @@
-import { actionableItems, canReplyTo, isFindingId, isReplyPending, pendingReplies } from '@shared/authorSession'
+import { actionableItems, canReplyTo, isReplyPending, pendingReplies } from '@shared/authorSession'
 import type { ActionRequest, AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, ResponseAction, SessionStatus } from '@shared/types'
 
 export interface ActionPick {
@@ -38,11 +38,6 @@ export function actionRequests(picks: Record<string, ActionPick>, open: Feedback
   return Object.entries(picks)
     .filter(([itemId]) => actionable.has(itemId))
     .map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
-}
-
-/** Returns the picks without those on self-review findings. */
-export function withoutFindingPicks<T>(picks: Record<string, T>): Record<string, T> {
-  return Object.fromEntries(Object.entries(picks).filter(([itemId]) => !isFindingId(itemId)))
 }
 
 export interface SplitRows {

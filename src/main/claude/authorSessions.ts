@@ -441,7 +441,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       if (!session.clone) return
       await removeRallyWorktree(session.clone, { dropWork: true }).catch((error: unknown) => {
         console.error('Removing the worktree Rally added failed', { pr: session.pr.url, path: session.clone?.path, error })
-        throw new Error(`Rally couldn't remove the worktree at ${session.clone?.path}. Remove it with \`git worktree remove --force\`, then start over again. ${errorMessage(error)}`)
+        throw new Error(`Rally couldn't remove the worktree at ${session.clone?.path}. Remove that folder, then start over again. ${errorMessage(error)}`)
       })
     })
     this.remove(session)

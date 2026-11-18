@@ -157,7 +157,22 @@ export interface Config {
   reviewDoneSound: ReviewDoneSound
   attentionSound: boolean
   approvedSound: boolean
+  /** Headings or labels in a PR description under which PR links in other repos name companion PRs. */
+  linkMarkers: string[]
 }
+
+export const DEFAULT_LINK_MARKERS = [
+  'linked PR',
+  'related PR',
+  'companion PR',
+  'sibling PR',
+  'paired PR',
+  'dependent PR',
+  'depends on',
+  'required by',
+  'requires',
+  'goes with',
+]
 
 export const DEFAULT_CONFIG: Config = {
   authors: [],
@@ -176,6 +191,7 @@ export const DEFAULT_CONFIG: Config = {
   reviewDoneSound: 'each',
   attentionSound: true,
   approvedSound: true,
+  linkMarkers: DEFAULT_LINK_MARKERS,
 }
 
 export function soundPlayback(cue: SoundCue, config: Pick<Config, 'skin' | 'soundPack' | 'soundVolume'>): SoundPlayback {

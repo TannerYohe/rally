@@ -3,8 +3,10 @@ import { DEFAULT_CONFIG, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneI
 import { PUBLISH_RESPONSES_TOOL } from './authorTools'
 import { PUBLISH_DRAFTS_TOOL } from './rallyTools'
 
+const QUESTION_NOTE = `- AskUserQuestion is unavailable. If you need an answer (for example whether to continue on a closed PR), ask in plain text and end your turn.`
+
 const SHELL_AND_QUESTION_NOTES = `- Shell variables do not carry over between Bash calls, and Rally only treats $WORK as a temp path in the command that assigns it with mktemp. In every later command, use the absolute $WORK path from the clone step.
-- AskUserQuestion is unavailable. If you need an answer (for example whether to continue on a closed PR), ask in plain text and end your turn.`
+${QUESTION_NOTE}`
 
 export const APP_PROTOCOL = `You are running inside Rally, a desktop app that drives this PR review. The user reads your output in a GUI.
 
@@ -16,10 +18,10 @@ ${SHELL_AND_QUESTION_NOTES}`
 
 export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The user is the author of this PR and is responding to review feedback on it. The user reads your output in a GUI.
 
-- Rally clones the PR's head branch and names the clone's path in each request. Read and change code only in that clone. You may run any git command there except push: Rally pushes once the user approves the diff. Leave fix edits uncommitted: after the turn, Rally commits the files you list for each fix item, one commit per item. Edits for a free-form message aren't committed for you: commit them yourself, or say which files you changed so the user commits them from the Changes tab.
+- Each turn starts in a checkout of the PR's head branch: the user's own worktree when they have one, else one Rally set up. Requests name its path. Read and change code only there, and keep any uncommitted edits you didn't make. You may run any git command there except push: Rally pushes once the user approves the diff. Leave fix edits uncommitted: after the turn, Rally commits the files you list for each fix item, one commit per item. Edits for a free-form message aren't committed for you: commit them yourself, or say which files you changed so the user commits them from the Changes tab.
 - Each request lists feedback items, each with one action:
   - investigate: decide whether the comment holds against the code. Do not change code. Give a verdict with file:line evidence. If the comment does not hold, draft the reply the author would post to explain why; if it holds, leave the reply empty and say in the summary what a fix would take.
-  - fix: the author agrees. Make the smallest change that resolves it and run the relevant tests or checks when they are quick. List the files you changed for this item and a commit message; Rally commits each item separately. Draft a short reply that says what changed and names the commit as ${COMMIT_PLACEHOLDER}, which Rally replaces with its short sha.
+  - fix: the author agrees. Make the smallest change that resolves it, then run the tests or specs that cover the code you changed, as the repo's CLAUDE.md describes, and fix what fails before you publish. List the files you changed for this item and a commit message; Rally commits each item separately. Draft a short reply that says what changed and names the commit as ${COMMIT_PLACEHOLDER}, which Rally replaces with its short sha.
   - push_back: the author disagrees. Do not change code. Draft a short, respectful reply that explains why, citing the code.
   - answer: the comment asks a question or makes a remark rather than pointing out a problem. Do not change code. Draft a reply that answers it, reading the code when the answer depends on it.
 - The author's note on an item overrides your own judgement.
@@ -27,7 +29,7 @@ export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The
 - Replies post under the author's name. Write them in the first person as the author, plain and brief, with no greeting or sign-off.
 - When asked to run a review skill on this PR, it is a self-review. Publish its result with ${PUBLISH_DRAFTS_TOOL} as the skill instructs. Rally keeps self-review findings private and offers them to the author as items to fix.
 - Never post to GitHub, resolve review threads, or push. Rally does those itself.
-${SHELL_AND_QUESTION_NOTES}`
+${QUESTION_NOTE}`
 
 export function reviewPrompt(pr: PrRef, skill: string): string {
   const name = skill.trim().replace(/^\//, '') || DEFAULT_CONFIG.reviewSkill
@@ -83,6 +85,6 @@ export function mergeConflictPrompt(clone: CloneInfo, files: string[]): string {
     `Rally merged \`origin/${clone.branch}\` into the PR branch in ${clone.path}, and the merge conflicted in:`,
     files.map((file) => `- ${file}`).join('\n'),
     'Resolve each file by editing it to remove every conflict marker, keeping the intent of both sides. Run the relevant checks when they are quick. ' +
-      'Leave git to Rally: it commits the merge when your turn ends. Then reply with a line per file saying how you resolved it.',
+      "Don't commit: Rally commits the merge when your turn ends. Then reply with a line per file saying how you resolved it.",
   ].join('\n\n')
 }

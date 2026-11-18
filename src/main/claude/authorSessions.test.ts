@@ -9,8 +9,12 @@ import type { AuthorToolHandlers } from './authorTools'
 import { UncommittedChangesError } from '../git/prClone'
 
 const CLONE = { path: join(tmpdir(), 'rally-author-test-clone'), branch: 'feature', baseRef: 'origin/main' }
+const WORKTREE = { path: join(tmpdir(), 'rally-author-test-worktree'), branch: 'feature', baseRef: 'origin/main', kind: 'local_worktree' as const }
+const OLD_TEMP_CLONE = { ...CLONE, path: join(tmpdir(), 'rally-author-test-old-clone') }
 
 mkdirSync(CLONE.path, { recursive: true })
+mkdirSync(WORKTREE.path, { recursive: true })
+mkdirSync(OLD_TEMP_CLONE.path, { recursive: true })
 
 const mocks = vi.hoisted(() => ({
   stored: [] as AuthorSession[],
@@ -24,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   resolveFeedbackThread: vi.fn(),
   cloneBranch: vi.fn(),
   syncClone: vi.fn(),
+  syncWorktree: vi.fn(),
+  checkoutWorktree: vi.fn(),
+  removeRallyWorktree: vi.fn(async () => {}),
   localCommits: vi.fn(),
   uncommittedPaths: vi.fn(),
   pushClone: vi.fn(),
@@ -40,7 +47,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../store', () => ({
-  configFile: { get: () => ({ reviewSkill: 'review-pr' }) },
+  configFile: { get: () => ({ reviewSkill: 'review-pr', localRepoFolders: ['~/src'] }) },
   authorSessionsDir: { readAll: () => mocks.stored, write: vi.fn(), remove: vi.fn() },
 }))
 vi.mock('../prList', () => ({ authoredPrList: { refreshOne: mocks.refreshOne } }))
@@ -68,12 +75,18 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   discardUncommitted: mocks.discardUncommitted,
   cloneBranch: mocks.cloneBranch,
   syncClone: mocks.syncClone,
+  syncWorktree: mocks.syncWorktree,
   localCommits: mocks.localCommits,
   uncommittedPaths: mocks.uncommittedPaths,
   pushClone: mocks.pushClone,
   integrateRemote: mocks.integrateRemote,
   cloneDiff: vi.fn(async () => ''),
   uncommittedDiff: mocks.uncommittedDiff,
+}))
+vi.mock('../git/localWorktree', async (importOriginal) => ({
+  checkoutKind: (await importOriginal<typeof import('../git/localWorktree')>()).checkoutKind,
+  checkoutWorktree: mocks.checkoutWorktree,
+  removeRallyWorktree: mocks.removeRallyWorktree,
 }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
@@ -120,6 +133,12 @@ mocks.stored = [
     },
   }),
   stored(18, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(60),
+  stored(61, { sdkSessionId: 'temp-conversation' }),
+  stored(62, { clone: OLD_TEMP_CLONE }),
+  stored(63, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(64, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, path: join(tmpdir(), 'rally-author-test-rally-worktree') } }),
+  stored(65),
   stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
     clone: { ...CLONE, syncedHead: 'old-head' },
@@ -181,6 +200,9 @@ beforeEach(() => {
     mocks.concludeMerge,
     mocks.abortMerge,
     mocks.discardUncommitted,
+    mocks.checkoutWorktree,
+    mocks.cloneBranch,
+    mocks.removeRallyWorktree,
     mocks.requestReview,
     mocks.acknowledgeFeedbackItem,
   ])
@@ -189,13 +211,16 @@ beforeEach(() => {
   mocks.integrateRemote.mockImplementation(async (clone) => ({ clone, rewritten: {} }))
   mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'u', branch: 'feature', baseUrl: 'u', baseBranch: 'main' })
   mocks.cloneBranch.mockResolvedValue(CLONE)
+  mocks.syncClone.mockImplementation(async (clone) => clone)
+  mocks.checkoutWorktree.mockResolvedValue(null)
+  mocks.syncWorktree.mockImplementation(async (clone) => ({ ...clone, syncedHead: 'synced' }))
   mocks.localCommits.mockResolvedValue([])
   mocks.uncommittedPaths.mockResolvedValue([])
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
 afterAll(() => {
-  rmSync(CLONE.path, { recursive: true, force: true })
+  for (const path of [CLONE.path, WORKTREE.path, OLD_TEMP_CLONE.path]) rmSync(path, { recursive: true, force: true })
   for (const s of mocks.stored) rmSync(join(tmpdir(), 'rally', s.id), { recursive: true, force: true })
 })
 
@@ -630,5 +655,64 @@ describe('pruneUnlisted', () => {
     expect(authorSessions.getByPr('acme/api#3')).not.toBeNull()
     release()
     await vi.waitFor(() => expect(session(45).status).toBe('awaiting_feedback'))
+  })
+})
+
+describe('checking out the PR branch', () => {
+  const turnOptions = () => mocks.query.mock.calls.at(-1)![0].options
+
+  it('runs a self-review in the local worktree with the repo settings and CLAUDE.md loaded', async () => {
+    mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
+    finishTurn()
+    await authorSessions.selfReview(pr(60))
+    await vi.waitFor(() => expect(session(60).status).toBe('awaiting_feedback'))
+
+    expect(mocks.checkoutWorktree).toHaveBeenCalledWith(['~/src'], { repo: 'acme/api', branch: 'feature', baseBranch: 'main' })
+    expect(mocks.cloneBranch).not.toHaveBeenCalled()
+    expect(session(60).clone).toEqual({ ...WORKTREE, syncedHead: 'synced', createdBranch: undefined })
+    expect(turnOptions()).toMatchObject({ cwd: WORKTREE.path, settingSources: ['user', 'project', 'local'] })
+  })
+
+  it('starts a new conversation when the turn moves to a different folder', async () => {
+    mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
+    finishTurn()
+    await authorSessions.feedback('author-61', 'carry on')
+    await vi.waitFor(() => expect(session(61).status).toBe('awaiting_feedback'))
+    expect(turnOptions().resume).toBeUndefined()
+    expect(session(61).timeline).toContainEqual(expect.objectContaining({ kind: 'warning', detail: WORKTREE.path }))
+  })
+
+  it('moves a temp clone with no work of its own to the worktree and deletes the clone', async () => {
+    mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
+    finishTurn()
+    await authorSessions.feedback('author-62', 'go')
+    await vi.waitFor(() => expect(session(62).status).toBe('awaiting_feedback'))
+    expect(session(62).clone?.path).toBe(WORKTREE.path)
+    expect(existsSync(OLD_TEMP_CLONE.path)).toBe(false)
+  })
+
+  it('keeps using a temp clone that holds unpushed commits', async () => {
+    mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
+    mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
+    finishTurn()
+    await authorSessions.feedback('author-63', 'go')
+    await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
+    expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
+    expect(turnOptions().cwd).toBe(CLONE.path)
+  })
+
+  it('clones into the temp folder for a PR from a fork', async () => {
+    mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'fork', branch: 'feature', baseUrl: 'upstream', baseBranch: 'main' })
+    finishTurn()
+    await authorSessions.feedback('author-65', 'go')
+    await vi.waitFor(() => expect(session(65).status).toBe('awaiting_feedback'))
+    expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
+    expect(mocks.cloneBranch).toHaveBeenCalledWith(join(tmpdir(), 'rally', 'author-65'), expect.objectContaining({ headUrl: 'fork' }))
+  })
+
+  it('removes the worktree Rally added, with its edits, on start over', () => {
+    const { clone } = session(64)
+    authorSessions.discard('author-64')
+    expect(mocks.removeRallyWorktree).toHaveBeenCalledWith(clone, true)
   })
 })

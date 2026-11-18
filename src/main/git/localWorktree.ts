@@ -2,11 +2,9 @@ import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { checkoutKind } from '@shared/authorSession'
+import { checkoutKind, RALLY_WORKTREES_FOLDER } from '@shared/authorSession'
 import type { CloneInfo } from '@shared/types'
 import { git, NETWORK_TIMEOUT_MS, trackingRefspec, type GitFailure } from './gitCommand'
-
-export const RALLY_WORKTREES_DIR = join(homedir(), 'rally-worktrees')
 
 export interface WorktreeTarget {
   /** owner/name on GitHub. */
@@ -16,6 +14,8 @@ export interface WorktreeTarget {
 }
 
 const expandHome = (folder: string) => folder.trim().replace(/^~(?=\/|$)/, homedir())
+
+const RALLY_WORKTREES_DIR = expandHome(RALLY_WORKTREES_FOLDER)
 
 /** Returns owner/name, lowercased, for a GitHub remote URL, or null for any other URL. */
 export function githubRepoOf(url: string): string | null {
@@ -68,7 +68,7 @@ export async function findLocalClone(folders: string[], repo: string): Promise<s
 }
 
 /** Returns the path of the worktree that has the branch checked out, or null when none does. */
-export async function worktreeWithBranch(root: string, branch: string): Promise<string | null> {
+async function worktreeWithBranch(root: string, branch: string): Promise<string | null> {
   const blocks = (await git(root, ['worktree', 'list', '--porcelain'])).split('\n\n')
   for (const block of blocks) {
     const lines = block.split('\n')
@@ -96,7 +96,7 @@ async function localBranchExists(root: string, branch: string): Promise<boolean>
 }
 
 /**
- * Checks out the PR branch in a worktree of the local clone: the worktree that already has it, or one Rally adds under ~/rally-worktrees.
+ * Checks out the PR branch in a worktree of the local clone: the worktree that already has it, or one Rally adds under RALLY_WORKTREES_FOLDER.
  * Returns null when no folder holds a clone of the repo.
  */
 export async function checkoutWorktree(folders: string[], target: WorktreeTarget): Promise<CloneInfo | null> {

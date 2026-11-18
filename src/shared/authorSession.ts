@@ -6,6 +6,9 @@ export const COMMIT_PLACEHOLDER = '{commit}'
 
 export const shortSha = (oid: string) => oid.slice(0, 7)
 
+/** Where Rally adds worktrees for PR branches. */
+export const RALLY_WORKTREES_FOLDER = '~/rally-worktrees'
+
 /** Returns the checkout kind of a clone, treating a clone without one as a temp clone. */
 export const checkoutKind = (clone: CloneInfo): CheckoutKind => clone.kind ?? 'temp_clone'
 

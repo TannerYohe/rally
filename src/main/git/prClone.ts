@@ -9,7 +9,7 @@ import { CLONE_TIMEOUT_MS, git, LOCAL_TIMEOUT_MS, NETWORK_TIMEOUT_MS, trackingRe
 
 const FIELD_SEPARATOR = '\x1f'
 
-export const CLONE_DIR_NAME = 'repo'
+const CLONE_DIR_NAME = 'repo'
 
 export class MergeConflictError extends Error {
   constructor(

@@ -18,6 +18,7 @@ import {
   type SoundCue,
   type UpdateState,
 } from '@shared/types'
+import { RALLY_WORKTREES_FOLDER } from '@shared/authorSession'
 import { errorMessage } from '@shared/errors'
 import { RALLY_REPO_URL, releasePageUrl } from '@shared/repo'
 import logo from '../../../../resources/icon.svg'
@@ -215,9 +216,9 @@ function PullRequestsSection({ config, onChange }: SectionProps) {
           label="Local repo folders"
           description={
             <>
-              Folders that hold your clones, such as <code className="text-ink-300">~/src</code>. Rally looks for the PR's repo in each folder
-              and one level down, then works in the worktree that has the PR branch checked out, or adds one under{' '}
-              <code className="text-ink-300">~/rally-worktrees</code>. Without a match, Rally clones the branch into a temp folder.
+              Folders that hold your clones, such as <code className="text-ink-300">{DEFAULT_CONFIG.localRepoFolders[0]}</code>. Rally looks for the
+              PR's repo in each folder and one level down, then works in the worktree that has the PR branch checked out, or adds one under{' '}
+              <code className="text-ink-300">{RALLY_WORKTREES_FOLDER}</code>. Without a match, Rally clones the branch into a temp folder.
             </>
           }
         >

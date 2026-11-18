@@ -68,7 +68,6 @@ vi.mock('../github/authorReplies', () => ({
 vi.mock('../git/prClone', async (importOriginal) => ({
   MergeConflictError: (await importOriginal<typeof import('../git/prClone')>()).MergeConflictError,
   UncommittedChangesError: (await importOriginal<typeof import('../git/prClone')>()).UncommittedChangesError,
-  CLONE_DIR_NAME: 'repo',
   commitFiles: mocks.commitFiles,
   latestCommitTouching: mocks.latestCommitTouching,
   headOf: mocks.headOf,

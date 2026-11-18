@@ -79,7 +79,9 @@ describe('checkoutWorktree', () => {
   it('adds a worktree with a new tracking branch, finds it again, and removes both', async () => {
     const target = { repo: 'acme/api', branch: 'feature/new', baseBranch: 'main' }
     const path = rallyWorktreePath(target.repo, target.branch)
-    expect(path).toBe(join(home, 'rally-worktrees', 'api', 'feature-new'))
+    expect(path).toBe(join(home, 'rally-worktrees', 'acme', 'api', 'feature', 'new'))
+    expect(rallyWorktreePath('other/api', 'feature/new')).not.toBe(path)
+    expect(rallyWorktreePath(target.repo, 'feature-new')).not.toBe(path)
 
     const added = await checkoutWorktree(['~/src'], target)
     expect(added).toEqual({ path, branch: 'feature/new', baseRef: 'origin/main', kind: 'rally_worktree', createdBranch: true })

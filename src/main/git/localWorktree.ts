@@ -78,9 +78,9 @@ export async function worktreeWithBranch(root: string, branch: string): Promise<
   return null
 }
 
-/** Returns where Rally adds a worktree for the branch: ~/rally-worktrees/<repo name>/<branch, with slashes as dashes>. */
+/** Returns where Rally adds a worktree for the branch: ~/rally-worktrees/<owner>/<name>/<branch>, with each part of the branch a folder. */
 export function rallyWorktreePath(repo: string, branch: string): string {
-  return join(RALLY_WORKTREES_DIR, repo.split('/').pop() ?? repo, branch.replaceAll('/', '-'))
+  return join(RALLY_WORKTREES_DIR, ...repo.split('/'), ...branch.split('/'))
 }
 
 const samePath = (a: string, b: string) => existsSync(a) && existsSync(b) && realpathSync(a) === realpathSync(b)

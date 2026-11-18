@@ -10,7 +10,6 @@ const home = join(root, 'home')
 vi.mock('node:os', async (importOriginal) => ({ ...(await importOriginal<typeof import('node:os')>()), homedir: () => home }))
 
 const { checkoutWorktree, findLocalClone, rallyWorktreePath, removeRallyWorktree } = await import('./localWorktree')
-const { githubRepoOf } = await import('./githubRemotes')
 const { localCommits, syncWorktree } = await import('./prClone')
 
 const remote = join(root, 'remote.git')
@@ -40,15 +39,6 @@ beforeAll(() => {
 })
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
-
-describe('githubRepoOf', () => {
-  it('reads owner/name from ssh and https GitHub URLs', () => {
-    expect(githubRepoOf('git@github.com:Acme/API.git')).toBe('acme/api')
-    expect(githubRepoOf('https://github.com/acme/api')).toBe('acme/api')
-    expect(githubRepoOf('ssh://git@github.com/acme/api.git\n')).toBe('acme/api')
-    expect(githubRepoOf('https://gitlab.com/acme/api.git')).toBeNull()
-  })
-})
 
 describe('findLocalClone', () => {
   it('finds the clone by its origin in a folder or one level down', async () => {

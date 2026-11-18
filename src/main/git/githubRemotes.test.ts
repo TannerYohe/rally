@@ -2,12 +2,21 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { githubRemotes } from './githubRemotes'
+import { githubRemotes, githubRepoOf } from './githubRemotes'
 import { git } from './testRepo.fixture'
 
 const repo = mkdtempSync(join(tmpdir(), 'rally-github-remotes-'))
 
 afterAll(() => rmSync(repo, { recursive: true, force: true }))
+
+describe('githubRepoOf', () => {
+  it('reads owner/name from ssh and https GitHub URLs', () => {
+    expect(githubRepoOf('git@github.com:Acme/API.git')).toBe('acme/api')
+    expect(githubRepoOf('https://github.com/acme/api')).toBe('acme/api')
+    expect(githubRepoOf('ssh://git@github.com/acme/api.git\n')).toBe('acme/api')
+    expect(githubRepoOf('https://gitlab.com/acme/api.git')).toBeNull()
+  })
+})
 
 describe('githubRemotes', () => {
   it('lists the GitHub URLs and push URLs of every remote, skipping other hosts', async () => {

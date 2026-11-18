@@ -32,7 +32,7 @@ vi.mock('./github/search', () => ({ buildSearchQueries: () => ['query'], AUTHORE
 vi.mock('./claude/summarize', () => ({ summarizePr: mocks.summarizePr }))
 
 const { authoredPrList, prList } = await import('./prList')
-const { newHide, UNLISTED_HIDE_RETENTION_DAYS } = await import('./hiddenPrs')
+const { newHide, UNLISTED_RETENTION_DAYS } = await import('./hiddenPrs')
 
 const fetched = (...prs: GithubPr[]) => ({ viewer: 'me', lookups: prs.map((pr) => ({ status: 'found' as const, pr })) })
 
@@ -163,7 +163,7 @@ describe('prList', () => {
   })
 
   it('ages out indefinite hides for PRs unlisted past the retention window', async () => {
-    const lastListedAt = new Date(Date.now() - (UNLISTED_HIDE_RETENTION_DAYS + 1) * 24 * 60 * 60_000).toISOString()
+    const lastListedAt = new Date(Date.now() - (UNLISTED_RETENTION_DAYS + 1) * 24 * 60 * 60_000).toISOString()
     mocks.store.hiddenPrsFile.set({ gone: newHide(githubPr(), 'indefinite', lastListedAt) })
     mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [] })
     await prList.refresh()
@@ -577,7 +577,7 @@ describe('prList', () => {
 
       it('keeps hand links whose PRs both left the list until the retention window passes', async () => {
         const recently = new Date().toISOString()
-        const longAgo = new Date(Date.now() - (UNLISTED_HIDE_RETENTION_DAYS + 1) * 24 * 60 * 60_000).toISOString()
+        const longAgo = new Date(Date.now() - (UNLISTED_RETENTION_DAYS + 1) * 24 * 60 * 60_000).toISOString()
         mocks.store.prLinksFile.set({
           linked: [['acme/api#1', 'acme/gone#9']],
           unlinked: [['acme/old#1', 'acme/gone#9'], ['acme/stale#1', 'acme/stale#2']],

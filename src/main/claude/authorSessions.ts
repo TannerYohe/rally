@@ -70,8 +70,18 @@ const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp 
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 const NOTHING_TO_PUSH_ERROR = 'There are no commits or description update to push.'
 const EMPTY_TITLE_ERROR = "The PR title can't be empty."
+const COMMITS_PUSHED_NOTE = 'The commits are pushed.'
 const DESCRIPTION_CHANGED_ERROR =
   'The PR title or description changed on GitHub since Claude proposed this update, so Rally left it alone. Ask Claude to update the description again, or discard this update.'
+
+/** Returns the session's items, responses, and self-review findings without the ones `drop` matches. */
+function withoutItems(session: AuthorSession, drop: (itemId: string) => boolean): Pick<AuthorSession, 'items' | 'responses' | 'selfReview'> {
+  return {
+    items: session.items.filter((item) => !drop(item.id)),
+    responses: Object.fromEntries(Object.entries(session.responses).filter(([itemId]) => !drop(itemId))),
+    selfReview: session.selfReview && { ...session.selfReview, findings: session.selfReview.findings.filter((finding) => !drop(finding.id)) },
+  }
+}
 
 /** Marks fixes waiting on a commit as not committed, for a turn that didn't finish. */
 function withoutPendingCommits(responses: Record<string, ItemResponse>): Record<string, ItemResponse> {
@@ -235,25 +245,22 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       if (!clone) throw new Error(CLONE_LOST_ERROR)
       this.assertCloneFolder(sessionId)
     }
-    let conflicts: string[] = []
-    let pushed = false
-    try {
-      await this.whilePublishing(sessionId, async () => {
-        this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
-        if (clone && commits.length > 0) {
-          conflicts = await this.pushCommits(sessionId, clone)
-          pushed = conflicts.length === 0
-        }
-        if (conflicts.length === 0 && description) {
-          await this.publishDescription(sessionId, description, descriptionEdit)
-          pushed = true
-        }
+    const conflicts = await this.whilePublishing(sessionId, async () => {
+      this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
+      const conflicts = clone && commits.length > 0 ? await this.pushCommits(sessionId, clone) : []
+      if (conflicts.length > 0) {
         this.patch(sessionId, () => ({ status: 'awaiting_feedback' }), true)
-      })
-    } finally {
-      if (pushed) this.refreshPr(pr)
-    }
-    if (conflicts.length > 0) void this.runTurn(sessionId, mergeConflictPrompt(clone!, conflicts), 'resolve_merge')
+        return conflicts
+      }
+      try {
+        if (description) await this.publishDescription(sessionId, description, descriptionEdit, commits.length > 0)
+        this.patch(sessionId, () => ({ status: 'awaiting_feedback' }), true)
+      } finally {
+        this.refreshPr(pr)
+      }
+      return []
+    })
+    if (clone && conflicts.length > 0) void this.runTurn(sessionId, mergeConflictPrompt(clone, conflicts), 'resolve_merge')
   }
 
   /** Merges or replays GitHub's new commits into the clone and pushes, returning the files a conflicting merge left for Claude. */
@@ -281,19 +288,28 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   /** Updates the PR's title and description on GitHub, refusing when they changed there since Claude proposed the update. */
-  private async publishDescription(sessionId: string, draft: DescriptionDraft, edit: PrDescription | null): Promise<void> {
+  private async publishDescription(sessionId: string, draft: DescriptionDraft, edit: PrDescription | null, afterCommits: boolean): Promise<void> {
     const { pr } = this.byId(sessionId)
     try {
       const current = await fetchDescription(pr)
-      if (current.title !== draft.base.title || current.body !== draft.base.body) throw new Error(DESCRIPTION_CHANGED_ERROR)
-      const next = edit ?? draft
-      await updateDescription(pr, { title: next.title.trim(), body: next.body })
+      if (current.title === draft.base.title && current.body === draft.base.body) {
+        const next = edit ?? draft
+        await updateDescription(pr, { title: next.title.trim(), body: next.body })
+        this.patch(sessionId, () => ({ description: null, descriptionUpdatedAt: now() }), true)
+        return
+      }
     } catch (error) {
       console.error('Updating the PR description failed', { pr: pr.url, error })
-      this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
-      throw error
+      this.failDescription(sessionId, `Rally couldn't update the PR description: ${errorMessage(error)}`, afterCommits)
     }
-    this.patch(sessionId, () => ({ description: null, descriptionUpdatedAt: now() }), true)
+    this.failDescription(sessionId, DESCRIPTION_CHANGED_ERROR, afterCommits)
+  }
+
+  /** Records and throws a failed description update, noting when the commits pushed just before it went through. */
+  private failDescription(sessionId: string, message: string, afterCommits: boolean): never {
+    const error = afterCommits ? `${COMMITS_PUSHED_NOTE} ${message}` : message
+    this.patch(sessionId, () => ({ status: 'error', error }), true)
+    throw new Error(error)
   }
 
   /** Saves the title and description Claude proposed, with GitHub's current ones as the base, or drops the draft when they already match. */
@@ -445,11 +461,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const cleared = new Set(itemIds.filter(isFindingId))
     this.patch(
       sessionId,
-      (s) => ({
-        items: s.items.filter((item) => !cleared.has(item.id)),
-        responses: Object.fromEntries(Object.entries(s.responses).filter(([itemId]) => !cleared.has(itemId))),
-        selfReview: s.selfReview && { ...s.selfReview, findings: s.selfReview.findings.filter((finding) => !cleared.has(finding.id)) },
-      }),
+      (s) => withoutItems(s, (itemId) => cleared.has(itemId)),
       true,
     )
   }
@@ -496,11 +508,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         const selfReview = { verdict: drafts.verdict, reportMarkdown: drafts.reportMarkdown, findings: findingsFromDrafts(drafts, now()) }
         this.patch(
           sessionId,
-          (s) => ({
-            selfReview,
-            items: s.items.filter((item) => !isFindingId(item.id)),
-            responses: Object.fromEntries(Object.entries(s.responses).filter(([itemId]) => !isFindingId(itemId))),
-          }),
+          (s) => ({ ...withoutItems(s, isFindingId), selfReview }),
           true,
         )
       },

@@ -92,7 +92,7 @@ export interface PrUnit {
   size: number
 }
 
-/** Returns the member phase that comes first in the phase order, so a unit is only as far along as its least reviewed member. */
+/** Returns the member phase that comes first in the phase order. */
 export function unitPhase(members: Pick<Pr, 'phase'>[], phaseOrder: readonly Phase[]): Phase {
   const rank = (phase: Phase) => {
     const index = phaseOrder.indexOf(phase)

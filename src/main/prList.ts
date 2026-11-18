@@ -93,7 +93,7 @@ function unreciprocatedTargets(prs: Pr[]): Map<string, LinkTarget> {
   return new Map(refs.map((ref) => [keyOf(ref), { node: { key: keyOf(ref), coords: ref, targets: [] }, ref }]))
 }
 
-/** Shows every member of a unit while any member shows, so a unit hides only while all its members do. */
+/** Shows every member of a unit while any member shows. */
 function withUnitHides(prs: Pr[]): Pr[] {
   const byKey = new Map(prs.map((pr) => [keyOf(pr), pr]))
   return prs.map((pr) => (pr.linkedPrs ? { ...pr, hidden: unitHide(membersOf(pr, byKey)) } : pr))
@@ -233,7 +233,7 @@ class PrList extends EventEmitter {
     return [...fetched.values()].filter((pr) => memberKeys.has(keyOf(pr)))
   }
 
-  /** Looks up linked PRs, treating every one as unknown when the whole request fails so the refresh keeps their previous copies. */
+  /** Looks up linked PRs, treating every one as unknown when the whole request fails. */
   private async lookupCompanions(wanted: PrCoords[]): Promise<PrLookup[]> {
     try {
       return (await fetchPrs(wanted, this.kind)).lookups
@@ -271,7 +271,7 @@ class PrList extends EventEmitter {
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
-  /** Links a listed PR with another PR by hand, then refreshes so the other PR joins its unit. */
+  /** Links a listed PR with another PR by hand, then refreshes the list. */
   async link(key: string, target: PrCoords): Promise<void> {
     const links = this.linkSource()
     const pr = this.state.prs.find((p) => keyOf(p) === key)
@@ -301,7 +301,7 @@ class PrList extends EventEmitter {
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
-  /** Returns the PR's link node, parsing its description again only when the description or markers changed, since settle runs on every session update. */
+  /** Returns the PR's link node, parsing its description again only when the description or markers changed. */
   private linkNodeOf(pr: Pr, markers: string[]): LinkNode {
     const key = keyOf(pr)
     const cached = this.linkNodes.get(key)
@@ -316,7 +316,7 @@ class PrList extends EventEmitter {
     return this.source.links
   }
 
-  /** Returns the key of an open PR by someone else, from the list or GitHub, so keys keep GitHub's casing. */
+  /** Returns the key of an open PR by someone else, with GitHub's casing, from the list or GitHub. */
   private async linkableKey(target: PrCoords): Promise<string> {
     const known = [...this.state.prs, ...[...this.linkTargets.values()].map((t) => t.ref)].find((pr) => isSamePr(pr, target))
     if (known) return keyOf(known)

@@ -52,7 +52,7 @@ function withoutCodeAndComments(body: string): string {
     .join('\n')
 }
 
-/** Lowercases a label and writes "pull request(s)" and "PRs" as "pr", so markers match either spelling. */
+/** Lowercases a label and writes "pull request(s)" and "PRs" as "pr". */
 export function normalizeMarker(text: string): string {
   return text
     .toLowerCase()

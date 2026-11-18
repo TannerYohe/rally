@@ -127,10 +127,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     return session ? { status: session.status, active: session.status !== 'submitted' } : null
   }
 
-  /**
-   * Starts a review of the PR and the PRs linked with it, replacing any session a member already has and refusing while
-   * one of them is running a turn, posting, resolving threads, or has posted to only some of its PRs.
-   */
+  /** Starts a review of the PR and its linked PRs, replacing their sessions unless one is busy or partly posted. */
   async start(pr: PrRef, linked: PrRef[] = []): Promise<ReviewSession> {
     const members = [pr, ...linked].filter((member, index, all) => all.findIndex((other) => keyOf(other) === keyOf(member)) === index)
     const key = keyOf(pr)
@@ -148,10 +145,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     return this.sessions.get(key)!
   }
 
-  /**
-   * Posts a review to each PR that hasn't posted yet, Request changes first, then Comment, then Approve, stopping at the
-   * first failure so an approval never lands without its blocking sibling. A retry posts only the PRs still missing.
-   */
+  /** Posts a review to each PR that hasn't posted yet, in Request changes, Comment, Approve order, stopping at the first failure. */
   async submit(sessionId: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]): Promise<void> {
     this.assertIdle(sessionId)
     const session = this.byId(sessionId)
@@ -235,7 +229,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     return session.drafts && draftsForPr(session.drafts, keyOf(member))
   }
 
-  /** Blocks Claude turns once some PRs of a unit posted, so the drafts behind those posts can't change before the rest post. */
+  /** Blocks Claude turns while some but not all PRs of a unit have posted. */
   protected assertCanStartTurn(sessionId: string): void {
     super.assertCanStartTurn(sessionId)
     const session = this.byId(sessionId)

@@ -11,7 +11,7 @@ const SNOOZE_TITLES: Record<PrListKind, string> = {
 
 interface Props {
   list: PrListKind
-  /** Every member of the unit, so snoozing or hiding applies to all of them. */
+  /** The ids of every PR that snoozing or hiding applies to. */
   ids: string[]
   hidden: PrHide | null
   phase: Phase

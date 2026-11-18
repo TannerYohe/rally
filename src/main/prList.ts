@@ -13,7 +13,7 @@ import {
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { summarizePr } from './claude/summarize'
-import { computeAuthorPhase } from './github/authorPhase'
+import { computeAuthorPhase, type AuthorSessionPhaseInput } from './github/authorPhase'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { AUTHORED_SEARCH_QUERIES, buildSearchQueries } from './github/search'
@@ -35,9 +35,8 @@ import {
 
 const SUMMARY_CONCURRENCY = 3
 
-export interface SessionState {
+export interface SessionState extends AuthorSessionPhaseInput {
   status: SessionStatus
-  active: boolean
 }
 
 /** Drops state kept for PRs that a full refresh no longer lists, given the keys of the PRs it did list. */
@@ -45,7 +44,7 @@ export type Pruner = (listed: Set<string>) => void
 
 type SessionLookup = (key: string) => SessionState | null
 
-type PhaseInput = Omit<Pr, 'phase' | 'reviewStatus' | 'hidden'>
+type PhaseInput = Omit<Pr, 'phase' | 'reviewStatus' | 'openFindings' | 'hidden'>
 
 interface PrListFiles {
   cache: JsonFile<PrCache>
@@ -58,7 +57,7 @@ interface PrListSource {
   kind: PrListKind
   files: PrListFiles
   searchQueries(): string[]
-  phase(pr: PhaseInput, sessionActive: boolean): Phase
+  phase(pr: PhaseInput, session: SessionState | null): Phase
 }
 
 function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
@@ -117,6 +116,7 @@ class PrList extends EventEmitter {
       (pr, i) =>
         pr.phase !== this.state.prs[i].phase ||
         pr.reviewStatus !== this.state.prs[i].reviewStatus ||
+        pr.openFindings !== this.state.prs[i].openFindings ||
         pr.hidden?.mode !== this.state.prs[i].hidden?.mode,
     )
     if (changed) this.update({ prs })
@@ -217,7 +217,7 @@ class PrList extends EventEmitter {
   private withPhases(prs: PhaseInput[]): Omit<Pr, 'hidden'>[] {
     return prs.map((pr) => {
       const session = this.sessionOf(prKey(pr.owner, pr.repo, pr.number))
-      return { ...pr, reviewStatus: session?.status ?? null, phase: this.source.phase(pr, session?.active ?? false) }
+      return { ...pr, reviewStatus: session?.status ?? null, openFindings: session?.openFindings ?? 0, phase: this.source.phase(pr, session) }
     })
   }
 
@@ -285,14 +285,13 @@ function pruneRallyReviews(listed: Set<string>): void {
   rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => listed.has(key))))
 }
 
-function reviewPhase(pr: PhaseInput, sessionActive: boolean): Phase {
+function reviewPhase(pr: PhaseInput, session: SessionState | null): Phase {
   const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviewsFile.get()[prKey(pr.owner, pr.repo, pr.number)] ?? [])
-  return computePhase({ ...pr, myReviews, reviewInProgress: sessionActive })
+  return computePhase({ ...pr, myReviews, reviewInProgress: session?.active ?? false })
 }
 
-function authorPhase(pr: PhaseInput, sessionActive: boolean): Phase {
-  if (pr.feedback) return computeAuthorPhase(pr.feedback, sessionActive)
-  return sessionActive ? 'in_progress' : 'awaiting_reviews'
+function authorPhase(pr: PhaseInput, session: SessionState | null): Phase {
+  return computeAuthorPhase(pr.feedback, session)
 }
 
 export const prList = new ReviewPrList({

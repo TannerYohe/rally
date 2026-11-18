@@ -1,6 +1,15 @@
 import { COMMIT_PLACEHOLDER, itemLocation } from '@shared/authorSession'
-import { DEFAULT_CONFIG, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneInfo, type FeedbackItem, type FeedbackItemKind, type PrRef } from '@shared/types'
-import { PUBLISH_RESPONSES_TOOL } from './authorTools'
+import {
+  DEFAULT_CONFIG,
+  RESPONSE_ACTION_LABELS,
+  type ActionRequest,
+  type CloneInfo,
+  type FeedbackItem,
+  type FeedbackItemKind,
+  type PrDescription,
+  type PrRef,
+} from '@shared/types'
+import { PUBLISH_DESCRIPTION_TOOL, PUBLISH_RESPONSES_TOOL } from './authorTools'
 import { PUBLISH_DRAFTS_TOOL } from './rallyTools'
 
 const SHELL_AND_QUESTION_NOTES = `- Shell variables do not carry over between Bash calls, and Rally only treats $WORK as a temp path in the command that assigns it with mktemp. In every later command, use the absolute $WORK path from the clone step.
@@ -22,11 +31,13 @@ export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The
   - fix: the author agrees. Make the smallest change that resolves it and run the relevant tests or checks when they are quick. List the files you changed for this item and a commit message; Rally commits each item separately. Draft a short reply that says what changed and names the commit as ${COMMIT_PLACEHOLDER}, which Rally replaces with its short sha.
   - push_back: the author disagrees. Do not change code. Draft a short, respectful reply that explains why, citing the code.
   - answer: the comment asks a question or makes a remark rather than pointing out a problem. Do not change code. Draft a reply that answers it, reading the code when the answer depends on it.
+- Self-review findings are private, so they never get a reply: leave reply_body empty and put everything in the summary. For push_back on a finding, say in the summary why it doesn't apply or isn't worth changing, citing the code.
 - The author's note on an item overrides your own judgement.
 - After handling the items, call ${PUBLISH_RESPONSES_TOOL} once with an entry for every item in the request. Each later turn that changes an item's result, call it again for that item.
 - Replies post under the author's name. Write them in the first person as the author, plain and brief, with no greeting or sign-off.
 - When asked to run a review skill on this PR, it is a self-review. Publish its result with ${PUBLISH_DRAFTS_TOOL} as the skill instructs. Rally keeps self-review findings private and offers them to the author as items to fix.
-- Never post to GitHub, resolve review threads, or push. Rally does those itself.
+- The PR's title and description should match its code. When a fix or a message changes something they state, or adds something reviewers need to know, call ${PUBLISH_DESCRIPTION_TOOL} with the complete proposed title and description, keeping their structure, template sections, and voice. Read the current ones with \`gh pr view <url> --json title,body\`. Rally shows the user the change and updates GitHub when they push.
+- Never post to GitHub, edit the PR, resolve review threads, or push. Rally does those itself.
 ${SHELL_AND_QUESTION_NOTES}`
 
 export function reviewPrompt(pr: PrRef, skill: string): string {
@@ -69,12 +80,29 @@ export function authorActionsPrompt(pr: PrRef, clone: CloneInfo, items: Feedback
   })
   return [
     `Respond to review feedback on my PR ${pr.url}.`,
-    `The head branch \`${clone.branch}\` is checked out at ${clone.path}. \`origin/${clone.branch}\` is what is on GitHub, and the base branch is \`${clone.baseRef}\`.`,
+    cloneLine(clone),
     ...sections,
     note.trim() ? `Also: ${note.trim()}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+function cloneLine(clone: CloneInfo): string {
+  return `The head branch \`${clone.branch}\` is checked out at ${clone.path}. \`origin/${clone.branch}\` is what is on GitHub, and the base branch is \`${clone.baseRef}\`.`
+}
+
+/** Returns the turn prompt asking Claude to bring the PR's title and description up to date with its code. */
+export function descriptionPrompt(pr: PrRef, clone: CloneInfo, current: PrDescription): string {
+  return [
+    `Update the title and description of my PR ${pr.url} so they match its code.`,
+    `${cloneLine(clone)} Read what the branch changes against the base, including commits Rally hasn't pushed yet.`,
+    `Current title: ${current.title}`,
+    current.body.trim() ? `Current description:\n\n${quote(current.body)}` : 'The PR has no description yet.',
+    'Keep the structure, template sections, and voice, and change only what is stale, wrong, or missing. ' +
+      `Then call ${PUBLISH_DESCRIPTION_TOOL} with the complete title and description, and reply with a short list of what you changed. ` +
+      'If nothing needs to change, say so and skip the call.',
+  ].join('\n\n')
 }
 
 /** Returns the turn prompt asking Claude to resolve conflicts Rally hit merging the remote branch into the clone. */

@@ -1,3 +1,4 @@
+import { GraphqlResponseError } from '@octokit/graphql'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const graphql = vi.hoisted(() => vi.fn())
@@ -6,7 +7,7 @@ vi.mock('./client', async (importOriginal) => ({
   github: async () => ({ graphql, login: 'me' }),
 }))
 
-const { fetchPr, isReplyOnly, SEARCH_PAGES, searchPrs } = await import('./queries')
+const { fetchPr, fetchPrs, isReplyOnly, SEARCH_PAGES, searchPrs } = await import('./queries')
 
 const reply = { replyTo: { id: 'c1' } }
 const inline = { replyTo: null }
@@ -264,5 +265,77 @@ describe('searchPrs', () => {
     expect(graphql).toHaveBeenCalledTimes(3)
     expect(graphql.mock.calls[2][1]).toMatchObject({ id: 'PR_13', before: 'c1' })
     expect(prs.map((pr) => pr.myReviews.map((r) => r.databaseId))).toEqual([[7], [6, 1001, 1002]])
+  })
+})
+
+function lookupError(data: unknown, errors: { type: string; path: string[] }[]) {
+  const full = errors.map((e) => ({ ...e, message: e.type, extensions: {}, locations: [{ line: 1, column: 1 }] }))
+  return new GraphqlResponseError({ method: 'POST', url: '/graphql' }, {}, { data, errors: full } as never)
+}
+
+const open = (number: number) => ({ pullRequest: { ...rawPr([], undefined, number), state: 'OPEN' } })
+const coord = (number: number) => ({ owner: 'acme', repo: 'api', number })
+
+describe('fetchPrs', () => {
+  beforeEach(() => graphql.mockReset())
+
+  it('looks up each PR under its own alias with variables', async () => {
+    graphql.mockResolvedValueOnce({ p0: open(1), p1: open(2) })
+
+    const { viewer, lookups } = await fetchPrs([coord(1), { owner: 'acme', repo: 'web', number: 2 }], 'reviewing')
+
+    const [query, variables] = graphql.mock.calls[0]
+    expect(query).toMatch(/p0: repository\(owner: \$o0, name: \$r0\) \{ pullRequest\(number: \$n0\) \{ state \.\.\.PrFields \} \}/)
+    expect(query).toMatch(/p1: repository/)
+    expect(variables).toMatchObject({ o0: 'acme', r0: 'api', n0: 1, o1: 'acme', r1: 'web', n1: 2, viewer: 'me', authored: false })
+    expect(viewer).toBe('me')
+    expect(lookups.map((l) => (l.status === 'found' ? l.pr.number : l.status))).toEqual([1, 2])
+  })
+
+  it('splits more than 20 PRs across requests', async () => {
+    const coords = Array.from({ length: 21 }, (_, i) => coord(i + 1))
+    graphql.mockResolvedValueOnce(Object.fromEntries(coords.slice(0, 20).map((c, i) => [`p${i}`, open(c.number)])))
+    graphql.mockResolvedValueOnce({ p0: open(21) })
+
+    const { lookups } = await fetchPrs(coords, 'reviewing')
+
+    expect(graphql).toHaveBeenCalledTimes(2)
+    expect(graphql.mock.calls[1][1]).toMatchObject({ n0: 21 })
+    expect(lookups).toHaveLength(21)
+    expect(lookups.every((l) => l.status === 'found')).toBe(true)
+  })
+
+  it('reports closed and merged PRs as gone', async () => {
+    graphql.mockResolvedValueOnce({ p0: { pullRequest: { ...open(1).pullRequest, state: 'MERGED' } }, p1: { pullRequest: { ...open(2).pullRequest, state: 'CLOSED' } } })
+    const { lookups } = await fetchPrs([coord(1), coord(2)], 'reviewing')
+    expect(lookups).toEqual([{ status: 'gone' }, { status: 'gone' }])
+  })
+
+  it('tells gone PRs from lookups that failed for another reason', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const data = { p0: open(1), p1: { pullRequest: null }, p2: null, p3: null }
+    graphql.mockRejectedValueOnce(
+      lookupError(data, [
+        { type: 'NOT_FOUND', path: ['p1', 'pullRequest'] },
+        { type: 'FORBIDDEN', path: ['p2'] },
+        { type: 'SERVICE_UNAVAILABLE', path: ['p3'] },
+      ]),
+    )
+
+    const { lookups } = await fetchPrs([1, 2, 3, 4].map(coord), 'reviewing')
+
+    expect(lookups.map((l) => l.status)).toEqual(['found', 'gone', 'gone', 'unknown'])
+  })
+
+  it('rethrows a failure that returned no data', async () => {
+    graphql.mockRejectedValueOnce(lookupError(null, [{ type: 'RATE_LIMITED', path: [] }]))
+    await expect(fetchPrs([coord(1)], 'reviewing')).rejects.toThrow('RATE_LIMITED')
+    graphql.mockRejectedValueOnce(new Error('socket hang up'))
+    await expect(fetchPrs([coord(1)], 'reviewing')).rejects.toThrow('socket hang up')
+  })
+
+  it('makes no request for no PRs', async () => {
+    expect(await fetchPrs([], 'reviewing')).toEqual({ viewer: 'me', lookups: [] })
+    expect(graphql).not.toHaveBeenCalled()
   })
 })

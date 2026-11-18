@@ -1,4 +1,5 @@
 import { GraphqlResponseError } from '@octokit/graphql'
+import type { PrCoords } from '@shared/linkedPrs'
 import type { MyReview, Pr, PrListKind, ReviewState } from '@shared/types'
 import { authorFeedback, type RawAuthorFields } from './authorPhase'
 import { decisionsField, prCommentsField, reviewSummariesField, threadsField } from './feedbackFields'
@@ -78,6 +79,23 @@ export const SEARCH_PAGES: Record<PrListKind, { size: number; max: number }> = {
   authored: { size: 10, max: 10 },
 }
 const MAX_NODE_IDS = 100
+const PRS_PER_REQUEST = 20
+const GONE_ERROR_TYPES = ['NOT_FOUND', 'FORBIDDEN']
+
+/** A PR looked up by its coordinates: found open, gone (closed, merged, deleted, or not visible), or unknown after an error. */
+export type PrLookup = { status: 'found'; pr: GithubPr } | { status: 'gone' } | { status: 'unknown' }
+
+function multiPrQuery(count: number): string {
+  const indexes = Array.from({ length: count }, (_, i) => i)
+  const variables = indexes.map((i) => `$o${i}: String!, $r${i}: String!, $n${i}: Int!`).join(', ')
+  const fields = indexes.map((i) => `p${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { state ...PrFields } }`)
+  return `
+  query(${variables}, $viewer: String!, $authored: Boolean!) {
+    ${fields.join('\n    ')}
+  }
+  ${PR_FIELDS}
+`
+}
 
 interface RawReview {
   id: string
@@ -287,6 +305,56 @@ export async function searchPrs(queries: string[], kind: PrListKind): Promise<{ 
   const raws = [...byId.values()]
   const myReviews = await myReviewsOf(gh, raws, kind)
   return { viewer: gh.login, prs: raws.map((raw, index) => toPr(raw, gh.login, myReviews[index])) }
+}
+
+type MultiPrResponse = Record<string, { pullRequest: (RawPr & { state: string }) | null } | null>
+
+type GraphqlErrors = NonNullable<GraphqlResponseError<unknown>['errors']>
+
+/** Runs one aliased lookup, returning partial data with its errors and rethrowing a failure that returned no data. */
+async function requestPrs(gh: GithubClient, batch: PrCoords[], kind: PrListKind): Promise<{ data: MultiPrResponse; errors: GraphqlErrors | [] }> {
+  const variables = Object.fromEntries(batch.flatMap((c, i) => [[`o${i}`, c.owner], [`r${i}`, c.repo], [`n${i}`, c.number]]))
+  try {
+    const data = await gh.graphql<MultiPrResponse>(multiPrQuery(batch.length), {
+      ...variables,
+      viewer: gh.login,
+      authored: isAuthored(kind),
+      request: timeoutRequest(),
+    })
+    return { data, errors: [] }
+  } catch (error) {
+    const partial = error instanceof GraphqlResponseError ? (error.data as MultiPrResponse | null | undefined) : undefined
+    if (!partial) throw error
+    const errors = (error as GraphqlResponseError<unknown>).errors ?? []
+    console.warn('GitHub PR lookup returned partial errors', { errors })
+    return { data: partial, errors }
+  }
+}
+
+function lookupOf(alias: string, data: MultiPrResponse, errors: GraphqlErrors | []): RawPr | 'gone' | 'unknown' {
+  const raw = data[alias]?.pullRequest
+  if (raw) return raw.state === 'OPEN' ? raw : 'gone'
+  const aliasErrors = errors.filter((e) => e.path?.[0] === alias)
+  return aliasErrors.length > 0 && aliasErrors.every((e) => GONE_ERROR_TYPES.includes(e.type)) ? 'gone' : 'unknown'
+}
+
+/** Looks up PRs by their coordinates, 20 to a request, keeping only open ones. */
+export async function fetchPrs(coords: PrCoords[], kind: PrListKind): Promise<{ viewer: string; lookups: PrLookup[] }> {
+  const gh = await github()
+  const lookups: PrLookup[] = []
+  for (let start = 0; start < coords.length; start += PRS_PER_REQUEST) {
+    const batch = coords.slice(start, start + PRS_PER_REQUEST)
+    const { data, errors } = await requestPrs(gh, batch, kind)
+    const results = batch.map((_, i) => lookupOf(`p${i}`, data, errors))
+    const raws = results.filter((r): r is RawPr => typeof r === 'object')
+    const myReviews = await myReviewsOf(gh, raws, kind)
+    const prs = new Map(raws.map((raw, i) => [raw, toPr(raw, gh.login, myReviews[i])]))
+    for (const result of results) {
+      if (typeof result === 'object') lookups.push({ status: 'found', pr: prs.get(result)! })
+      else lookups.push({ status: result })
+    }
+  }
+  return { viewer: gh.login, lookups }
 }
 
 export async function fetchPr(owner: string, repo: string, number: number, kind: PrListKind): Promise<GithubPr> {

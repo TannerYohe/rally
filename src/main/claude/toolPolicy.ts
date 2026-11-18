@@ -144,12 +144,12 @@ const BLOCKED_PUSH_URL = 'rally-blocked-push://'
 /**
  * Returns git config entries for the environment of a turn with open access, added after any the environment already sets, that rewrite
  * every common GitHub URL form, and each GitHub URL the checkout's remotes use, to one git can't push to, whatever command runs git.
- * pushInsteadOf covers remote URLs; insteadOf covers explicit push URLs, which pushInsteadOf skips.
+ * pushInsteadOf covers remote URLs; insteadOf covers explicit push URLs, which pushInsteadOf skips, unless the push URL prefixes a fetch URL.
  */
 export function pushBlockingGitEnv(env: NodeJS.ProcessEnv, remotes: GithubRemotes = NO_GITHUB_REMOTES): Record<string, string> {
   const rules = [
     ...[...GITHUB_URL_PREFIXES, ...remotes.urls].map((url) => ['pushInsteadOf', url]),
-    ...remotes.pushUrls.map((url) => ['insteadOf', url]),
+    ...remotes.pushUrls.filter((url) => !remotes.urls.some((fetchUrl) => fetchUrl.startsWith(url))).map((url) => ['insteadOf', url]),
   ]
   const start = Number(env.GIT_CONFIG_COUNT) || 0
   const entries: Record<string, string> = { GIT_CONFIG_COUNT: String(start + rules.length) }

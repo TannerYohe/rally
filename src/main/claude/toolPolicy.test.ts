@@ -373,6 +373,14 @@ describe('pushBlockingGitEnv', () => {
     expect(env.GIT_CONFIG_KEY_0).toBeUndefined()
   })
 
+  it('leaves fetching alone when a push URL is also a fetch URL', () => {
+    const remotes = { urls: ['https://github.com/acme/api.git'], pushUrls: ['https://github.com/acme/api.git', 'https://github.com/acme/mirror.git'] }
+    const env = pushBlockingGitEnv({}, remotes)
+    const insteadOf = Object.entries(env).filter(([key, value]) => key.startsWith('GIT_CONFIG_KEY_') && value.endsWith('.insteadOf'))
+    expect(insteadOf).toHaveLength(1)
+    expect(env[insteadOf[0][0].replace('KEY', 'VALUE')]).toBe('https://github.com/acme/mirror.git')
+  })
+
   it('makes git push to GitHub fail before reaching the network, for a URL, a named remote, a user in the URL, or an explicit push URL', () => {
     const repo = mkdtempSync(join(tmpdir(), 'rally-push-block-'))
     try {

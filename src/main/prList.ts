@@ -270,10 +270,10 @@ class PrList extends EventEmitter {
     )
     const freshIds = new Set(fresh.map((pr) => pr.id))
     const kept = this.state.prs.filter((pr) => !gone.some((ref) => isSamePr(ref, pr)))
-    const prs = this.settle([
+    const prs = this.settle(this.withHidden([
       ...kept.map((pr) => (freshIds.has(pr.id) ? fresh.find((f) => f.id === pr.id)! : pr)),
       ...fresh.filter((pr) => !kept.some((k) => k.id === pr.id)),
-    ])
+    ]))
     this.update({ prs })
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
@@ -303,7 +303,7 @@ class PrList extends EventEmitter {
     const stored = links.file.get()
     const outsidePairs = (pair: [string, string]) => !pairs.some(([x, y]) => hasPair([pair], x, y))
     links.file.set({ ...stored, linked: stored.linked.filter(outsidePairs), unlinked: [...stored.unlinked.filter(outsidePairs), ...pairs] })
-    const prs = this.settle(this.state.prs)
+    const prs = this.settle(this.withHidden(this.state.prs))
     this.update({ prs })
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }

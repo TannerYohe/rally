@@ -356,6 +356,17 @@ describe('prList', () => {
       expect(Object.keys(mocks.store.hiddenPrsFile.get())).toEqual(['pr1'])
     })
 
+    it("restores a PR's own hide when it is unlinked from a unit that showed it", async () => {
+      mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api(), web()] })
+      await prList.refresh()
+      mocks.store.hiddenPrsFile.set({ pr1: newHide(api(), 'indefinite', new Date().toISOString()) })
+      prList.reapplyPhases()
+      expect(prList.get().prs.map((pr) => pr.hidden)).toEqual([null, null])
+
+      prList.unlink('acme/web#2', ['acme/api#1'])
+      expect(prList.get().prs.map((pr) => pr.hidden?.mode)).toEqual(['indefinite', undefined])
+    })
+
     it('shows every member while one member has a review in progress', async () => {
       mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api(), web()] })
       await prList.refresh()

@@ -5,7 +5,7 @@ import type { AuthorSession, FeedbackItem } from '@shared/types'
 const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem(id, { kind, line: 1, url: null, comments: [], reactionSubjectId: null })
 const response = (itemId: string, reply: string) => itemResponse(itemId, reply)
 const session = (overrides: Partial<AuthorSession> = {}) => authorSession(1, overrides)
-import { actionRequests, feedbackRows, replyPosts, splitWaitingRows } from './authorView'
+import { actionRequests, feedbackRows, replyPosts, splitWaitingRows, withoutFindingPicks } from './authorView'
 
 describe('feedbackRows', () => {
   it('keeps closed items only while they have an unposted reply, and lists findings last', () => {
@@ -48,6 +48,13 @@ describe('actionRequests', () => {
       { itemId: 'open', action: 'fix', note: 'n' },
       { itemId: 'self-1', action: 'investigate', note: '' },
     ])
+  })
+})
+
+describe('withoutFindingPicks', () => {
+  it('drops picks on findings, listed or not, and keeps picks on GitHub comments', () => {
+    const pick = { action: 'fix' as const, note: '' }
+    expect(withoutFindingPicks({ T1: pick, 'self-1': pick, 'self-9': pick })).toEqual({ T1: pick })
   })
 })
 

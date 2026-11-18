@@ -10,6 +10,8 @@ export type DraftEdits = Record<string, DraftEdit>
 export interface DraftChanges {
   edits: DraftEdits
   summaryBodyEdit: string | undefined
+  /** Review body rewrites per PR key, in a review of several linked PRs. */
+  summaryBodyEdits?: Record<string, string>
   instructions: string
 }
 

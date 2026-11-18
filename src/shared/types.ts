@@ -264,6 +264,8 @@ export interface DraftComment {
   replyToCommentId: number | null
   /** Absent until Rally looks up the review comment this reply answers. */
   replyTarget?: ReplyTarget
+  /** The PR the comment is on, in a review of several linked PRs. */
+  prKey?: string
 }
 
 export const CONCERN_STATUSES = ['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot'] as const
@@ -288,10 +290,19 @@ export interface PriorConcern {
   verdict: string
   status?: ConcernStatus
   threadId?: string | null
+  /** The PR the earlier comment is on, in a review of several linked PRs. */
+  prKey?: string
 }
 
 export function priorConcernThreadIds(drafts: Pick<Drafts, 'priorConcerns'> | null): string[] {
   return drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
+}
+
+/** The verdict and review body for one PR in a review of several linked PRs. */
+export interface PrReviewDraft {
+  prKey: string
+  verdict: string
+  summaryBody: string
 }
 
 export interface Drafts {
@@ -301,6 +312,8 @@ export interface Drafts {
   summaryBody: string
   comments: DraftComment[]
   priorConcerns: PriorConcern[]
+  /** One per PR in a review of several linked PRs, which replaces verdict and summaryBody for each. */
+  prReviews?: PrReviewDraft[]
 }
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
@@ -385,9 +398,20 @@ export interface SessionCore {
   updatedAt: string
 }
 
-export interface ReviewSession extends SessionCore {
-  drafts: Drafts | null
+/** How submitting one PR of a review went: its posted review, the pending review an attempt left, or the error that stopped it. */
+export interface MemberSubmit {
   submitted: SubmittedReview | null
+  attemptReviewId?: number
+  error?: string
+}
+
+export interface ReviewSession extends SessionCore {
+  /** Every PR the session reviews, starting with pr; absent for a session that reviews pr alone. */
+  members?: PrRef[]
+  drafts: Drafts | null
+  /** Set once every PR the session reviews has posted or been skipped. */
+  submitted: SubmittedReview | null
+  memberSubmits?: Record<string, MemberSubmit>
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]

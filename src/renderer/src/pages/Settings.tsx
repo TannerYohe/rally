@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import {
   DEFAULT_CONFIG,
+  DEFAULT_LINK_MARKERS,
   type AppInfo,
   type InstallAttempt,
   EFFORT_LABELS,
@@ -187,6 +188,33 @@ function PullRequestsSection({ config, onChange }: SectionProps) {
         </StackedRow>
         <StackedRow label="Repos" description="owner/name, or owner/* for every repo in an org. Leave empty to include any repo.">
           <TagInput values={config.repos} placeholder="Add owner/name or owner/*" onChange={(repos) => onChange({ ...config, repos })} />
+        </StackedRow>
+      </Card>
+      <Card
+        title="Linked PRs"
+        description="Rally reviews PRs in different repos together when each one's description links the other under one of these headings or labels."
+      >
+        <StackedRow
+          label="Markers"
+          description={
+            <>
+              A heading such as <code className="text-ink-300">## Related PRs</code> or a label such as <code className="text-ink-300">Depends on:</code>{' '}
+              whose text includes a marker. PR links on that line or in the block below it count. &ldquo;PRs&rdquo; and &ldquo;pull requests&rdquo; match
+              &ldquo;PR&rdquo;. Separate markers with commas.
+            </>
+          }
+        >
+          <TagInput
+            values={config.linkMarkers}
+            kind="phrase"
+            placeholder="Add a heading or label"
+            onChange={(linkMarkers) => onChange({ ...config, linkMarkers })}
+          />
+          {JSON.stringify(config.linkMarkers) !== JSON.stringify(DEFAULT_LINK_MARKERS) && (
+            <button className="text-xs text-ink-400 hover:text-ink-200" onClick={() => onChange({ ...config, linkMarkers: DEFAULT_LINK_MARKERS })}>
+              Restore defaults
+            </button>
+          )}
         </StackedRow>
       </Card>
       <Card>

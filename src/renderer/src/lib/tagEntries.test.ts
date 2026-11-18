@@ -9,6 +9,10 @@ describe('splitEntries', () => {
   it('drops empty entries', () => {
     expect(splitEntries(' ,\n, ')).toEqual([])
   })
+
+  it('keeps spaces inside phrases and splits them on commas and newlines', () => {
+    expect(splitEntries('depends on, goes with\n required by ', 'phrase')).toEqual(['depends on', 'goes with', 'required by'])
+  })
 })
 
 describe('entriesFromPaste', () => {

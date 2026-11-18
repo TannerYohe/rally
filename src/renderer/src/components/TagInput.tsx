@@ -1,14 +1,16 @@
 import { useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { addEntries, entriesFromPaste, splitEntries } from '../lib/tagEntries'
+import { addEntries, entriesFromPaste, splitEntries, type EntryKind } from '../lib/tagEntries'
 
 interface Props {
   values: string[]
   placeholder: string
+  /** Phrases may hold spaces and are split only on commas and new lines. */
+  kind?: EntryKind
   renderIcon?(value: string): ReactNode
   onChange(values: string[]): void
 }
 
-export function TagInput({ values, placeholder, renderIcon, onChange }: Props) {
+export function TagInput({ values, placeholder, kind = 'word', renderIcon, onChange }: Props) {
   const [draft, setDraft] = useState('')
 
   const add = (entries: string[]) => {
@@ -19,15 +21,16 @@ export function TagInput({ values, placeholder, renderIcon, onChange }: Props) {
   const remove = (value: string) => onChange(values.filter((v) => v !== value))
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if ((e.key === 'Enter' || e.key === ',' || e.key === ' ') && draft.trim()) {
+    const separates = e.key === 'Enter' || e.key === ',' || (e.key === ' ' && kind === 'word')
+    if (separates && draft.trim()) {
       e.preventDefault()
-      add(splitEntries(draft))
+      add(splitEntries(draft, kind))
     } else if (e.key === 'Backspace' && !draft && values.length) {
       remove(values[values.length - 1])
     }
   }
   const onPaste = (e: ClipboardEvent<HTMLInputElement>) => {
-    const entries = entriesFromPaste(draft, e.clipboardData.getData('text'))
+    const entries = entriesFromPaste(draft, e.clipboardData.getData('text'), kind)
     if (entries) {
       e.preventDefault()
       add(entries)
@@ -57,7 +60,7 @@ export function TagInput({ values, placeholder, renderIcon, onChange }: Props) {
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
-        onBlur={() => draft.trim() && add(splitEntries(draft))}
+        onBlur={() => draft.trim() && add(splitEntries(draft, kind))}
       />
     </div>
   )

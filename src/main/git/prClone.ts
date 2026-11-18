@@ -177,6 +177,16 @@ export async function uncommittedDiff(clone: CloneInfo): Promise<DiffResult> {
   }
 }
 
+/** Returns the branch the checkout has checked out, or null when HEAD is detached. */
+export async function checkedOutBranch(clone: CloneInfo): Promise<string | null> {
+  try {
+    return (await git(clone.path, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim()
+  } catch (error) {
+    if ((error as GitFailure).code === 1) return null
+    throw error
+  }
+}
+
 async function isAncestor(clone: CloneInfo, ancestor: string, descendant = 'HEAD'): Promise<boolean> {
   try {
     await git(clone.path, ['merge-base', '--is-ancestor', ancestor, descendant])

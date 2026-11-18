@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   concludeMerge: vi.fn(),
   abortMerge: vi.fn(),
   discardUncommitted: vi.fn(),
+  checkedOutBranch: vi.fn(async (clone: { branch: string }): Promise<string | null> => clone.branch),
   refreshOne: vi.fn(async () => {}),
   handlers: null as AuthorToolHandlers | null,
 }))
@@ -73,6 +74,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   concludeMerge: mocks.concludeMerge,
   abortMerge: mocks.abortMerge,
   discardUncommitted: mocks.discardUncommitted,
+  checkedOutBranch: mocks.checkedOutBranch,
   cloneBranch: mocks.cloneBranch,
   syncClone: mocks.syncClone,
   syncWorktree: mocks.syncWorktree,
@@ -362,6 +364,17 @@ describe('push', () => {
     await authorSessions.discardUncommitted('author-25')
     expect(mocks.discardUncommitted).toHaveBeenCalledWith(CLONE)
     expect(session(25).uncommitted).toEqual([])
+  })
+
+  it('refuses to push, discard, commit, or diff while the checkout has another branch checked out', async () => {
+    mocks.checkedOutBranch.mockResolvedValueOnce('main').mockResolvedValueOnce('main').mockResolvedValueOnce(null).mockResolvedValueOnce('main')
+    await expect(authorSessions.push('author-42')).rejects.toThrow('has `main` checked out, not the PR branch `feature`')
+    await expect(authorSessions.discardUncommitted('author-47')).rejects.toThrow('has `main` checked out')
+    await expect(authorSessions.commitUncommitted('author-47', 'Tidy')).rejects.toThrow('has a detached HEAD checked out')
+    await expect(authorSessions.uncommittedDiff('author-47')).rejects.toThrow('has `main` checked out')
+    expect(mocks.pushClone).not.toHaveBeenCalled()
+    expect(mocks.discardUncommitted).not.toHaveBeenCalled()
+    expect(mocks.commitAll).not.toHaveBeenCalled()
   })
 
   it('commits uncommitted edits with the given message', async () => {

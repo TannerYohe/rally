@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { canReplyTo, checkoutKind, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { canReplyTo, checkoutKind, checkoutNoun, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
@@ -20,6 +20,7 @@ import {
 import { errorMessage } from '@shared/errors'
 import {
   abortMerge,
+  checkedOutBranch,
   cloneBranch,
   cloneDiff,
   commitAll,
@@ -62,11 +63,22 @@ const WORKTREE_CLEARED_ERROR = 'The worktree for this PR was removed, and its un
 const PROJECT_SETTINGS: SettingSource[] = ['user', 'project', 'local']
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
-/** Marks fixes waiting on a commit as not committed, for a turn that didn't finish. */
-function withoutPendingCommits(responses: Record<string, ItemResponse>): Record<string, ItemResponse> {
-  return Object.fromEntries(
-    Object.entries(responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError: TURN_DID_NOT_FINISH_ERROR } : r]),
-  )
+/** Marks fixes waiting on a commit as not committed, with the reason. */
+function withoutPendingCommits(responses: Record<string, ItemResponse>, commitError = TURN_DID_NOT_FINISH_ERROR): Record<string, ItemResponse> {
+  return Object.fromEntries(Object.entries(responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError } : r]))
+}
+
+/** Returns why Rally won't act on the checkout when it has a branch other than the PR's checked out, or null when it has the PR branch. */
+async function offBranchError(clone: CloneInfo): Promise<string | null> {
+  const branch = await checkedOutBranch(clone)
+  if (branch === clone.branch) return null
+  const current = branch ? `\`${branch}\`` : 'a detached HEAD'
+  return `The ${checkoutNoun(clone)} at ${clone.path} has ${current} checked out, not the PR branch \`${clone.branch}\`. Switch it back, or send a message so Rally checks the PR branch out again.`
+}
+
+async function assertOnPrBranch(clone: CloneInfo): Promise<void> {
+  const error = await offBranchError(clone)
+  if (error) throw new Error(error)
 }
 
 function restoreAuthorSession(stored: AuthorSession): AuthorSession {
@@ -201,6 +213,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const { clone } = this.byId(sessionId)
     if (!clone) return EMPTY_DIFF
     this.assertCloneFolder(sessionId)
+    await assertOnPrBranch(clone)
     return cloneDiff(clone)
   }
 
@@ -208,6 +221,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const { clone } = this.byId(sessionId)
     if (!clone) return EMPTY_DIFF
     this.assertCloneFolder(sessionId)
+    await assertOnPrBranch(clone)
     return uncommittedDiff(clone)
   }
 
@@ -219,6 +233,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.assertCloneFolder(sessionId)
     let conflicts: string[] = []
     await this.whilePublishing(sessionId, async () => {
+      await assertOnPrBranch(clone)
       this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
       try {
         const integrated = await integrateRemote(clone)
@@ -280,6 +295,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   async discardUncommitted(sessionId: string): Promise<void> {
     const clone = this.assertCanTouchUncommitted(sessionId, 'There is nothing to discard.')
     await this.whilePublishing(sessionId, async () => {
+      await assertOnPrBranch(clone)
       await discardUncommitted(clone)
       await this.refreshClone(sessionId)
     })
@@ -291,6 +307,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const { pr } = this.byId(sessionId)
     if (!message.trim()) throw new Error('Write a commit message first.')
     await this.whilePublishing(sessionId, async () => {
+      await assertOnPrBranch(clone)
       try {
         const oid = await commitAll(clone, message.trim()).catch((error: unknown) => {
           console.error('Committing uncommitted changes failed', { pr: pr.url, sessionId, error })
@@ -455,6 +472,11 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (!succeeded) this.dropPendingCommits(sessionId)
     const clone = session.clone
     if (!clone || this.cloneFolderGone(sessionId)) return
+    const offBranch = await offBranchError(clone)
+    if (offBranch) {
+      this.patch(sessionId, (s) => ({ responses: withoutPendingCommits(s.responses, offBranch) }), true)
+      return
+    }
     try {
       if (succeeded && mode === 'resolve_merge') {
         const merged = await concludeMerge(clone, session.mergeConflicts)
@@ -552,6 +574,10 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const clone = this.find(sessionId)?.clone
     if (!clone || this.cloneFolderGone(sessionId)) return
     try {
+      if (await offBranchError(clone)) {
+        console.warn('Skipping the read of a checkout on another branch', { sessionId, path: clone.path, branch: clone.branch })
+        return
+      }
       const [commits, uncommitted] = await Promise.all([localCommits(clone), uncommittedPaths(clone)])
       this.patch(sessionId, () => ({ commits, uncommitted }), true)
     } catch (error) {

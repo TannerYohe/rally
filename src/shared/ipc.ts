@@ -56,7 +56,7 @@ export interface RallyApi {
   pushAuthorCommits(sessionId: string): Promise<void>
   resolveMergeConflicts(sessionId: string): Promise<void>
   abortMerge(sessionId: string): Promise<void>
-  discardUncommitted(sessionId: string): Promise<void>
+  discardUncommitted(sessionId: string, confirmedFiles: string[]): Promise<void>
   commitUncommitted(sessionId: string, message: string): Promise<void>
   postAuthorReplies(sessionId: string, replies: ReplyPost[], reRequestReviews: boolean): Promise<void>
   discardAuthorReply(sessionId: string, itemId: string): Promise<void>

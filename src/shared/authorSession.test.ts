@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canPush, checkoutNoun, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies, startOverQuestion } from './authorSession'
+import { canPush, checkoutNoun, cloneChangeCount, committableFiles, discardQuestion, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies, startOverQuestion } from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
@@ -90,6 +90,23 @@ describe('cloneChangeCount', () => {
     const commits = [{ oid: 'a', subject: 'fix' }]
     expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'b.ts'], mergeConflicts: [] })).toBe(3)
     expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'merged.ts'], mergeConflicts: ['a.ts'] })).toBe(1)
+  })
+})
+
+describe('discardQuestion', () => {
+  const clone = { path: '/w/api', branch: 'feature', baseRef: 'origin/main' }
+
+  it('counts the files for the temp clone', () => {
+    expect(discardQuestion(clone, ['a.ts', 'b.ts'])).toBe('Discard 2 uncommitted files in the clone?')
+  })
+
+  it('names the worktree folder and lists the files, up to ten', () => {
+    const files = Array.from({ length: 12 }, (_, i) => `f${i}.ts`)
+    const question = discardQuestion({ ...clone, kind: 'local_worktree' }, files)
+    expect(question).toContain('Discard 12 uncommitted files in the worktree at /w/api?')
+    expect(question).toContain('  f9.ts')
+    expect(question).not.toContain('f10.ts')
+    expect(question).toContain('and 2 more')
   })
 })
 

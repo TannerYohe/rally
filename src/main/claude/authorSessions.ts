@@ -60,6 +60,7 @@ const CLONE_LOST_ERROR = `Rally's clone of this PR is gone, probably cleared fro
 const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp folder, and its uncommitted edits with it."
 const WORKTREE_GONE_ERROR = 'The worktree for this PR is gone. Send a message or run actions to check the branch out again; commits on the branch are kept.'
 const WORKTREE_CLEARED_ERROR = 'The worktree for this PR was removed, and its uncommitted edits with it.'
+const DISCARD_CHANGED_ERROR = 'The uncommitted files changed since Rally last read them. Check the list in the Changes tab and discard again.'
 const PROJECT_SETTINGS: SettingSource[] = ['user', 'project', 'local']
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
@@ -75,6 +76,8 @@ async function offBranchError(clone: CloneInfo): Promise<string | null> {
   const current = branch ? `\`${branch}\`` : 'a detached HEAD'
   return `The ${checkoutNoun(clone)} at ${clone.path} has ${current} checked out, not the PR branch \`${clone.branch}\`. Switch it back, or send a message so Rally checks the PR branch out again.`
 }
+
+const sameFiles = (a: string[], b: string[]) => a.length === b.length && new Set([...a, ...b]).size === a.length
 
 async function assertOnPrBranch(clone: CloneInfo): Promise<void> {
   const error = await offBranchError(clone)
@@ -291,11 +294,15 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     return clone
   }
 
-  /** Throws away edits in the clone that no fix committed, such as those left by a cancelled turn. */
-  async discardUncommitted(sessionId: string): Promise<void> {
+  /** Throws away edits in the clone that no fix committed, refusing when its uncommitted files are no longer the ones the user confirmed. */
+  async discardUncommitted(sessionId: string, confirmedFiles: string[]): Promise<void> {
     const clone = this.assertCanTouchUncommitted(sessionId, 'There is nothing to discard.')
     await this.whilePublishing(sessionId, async () => {
       await assertOnPrBranch(clone)
+      if (!sameFiles(await uncommittedPaths(clone), confirmedFiles)) {
+        await this.refreshClone(sessionId)
+        throw new Error(DISCARD_CHANGED_ERROR)
+      }
       await discardUncommitted(clone)
       await this.refreshClone(sessionId)
     })

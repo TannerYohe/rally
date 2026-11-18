@@ -1,3 +1,4 @@
+import { plural } from './format'
 import type { AuthorSession, CheckoutKind, CloneInfo, FeedbackItem, ItemResponse, PostedReply, SessionCore } from './types'
 
 /** Where a fix reply names its commit; Rally replaces it with the short sha once it commits. */
@@ -13,6 +14,16 @@ export const isWorktree = (clone: CloneInfo | null): boolean => !!clone && check
 
 /** Names the checkout in UI text: a worktree, or Rally's clone. */
 export const checkoutNoun = (clone: CloneInfo | null): string => (isWorktree(clone) ? 'worktree' : 'clone')
+
+const DISCARD_LISTED_FILES = 10
+
+/** Returns the Discard confirmation; for a worktree it names the folder and the files, since Discard resets and cleans that whole worktree. */
+export function discardQuestion(clone: CloneInfo | null, files: string[]): string {
+  if (!isWorktree(clone)) return `Discard ${plural(files.length, 'uncommitted file')} in the clone?`
+  const listed = files.slice(0, DISCARD_LISTED_FILES).map((file) => `  ${file}`)
+  const more = files.length > DISCARD_LISTED_FILES ? [`  and ${files.length - DISCARD_LISTED_FILES} more`] : []
+  return [`Discard ${plural(files.length, 'uncommitted file')} in the worktree at ${clone!.path}? Git can't bring them back.`, '', ...listed, ...more].join('\n')
+}
 
 /** Returns the Start over confirmation, naming what discarding the session deletes and what it keeps. */
 export function startOverQuestion(clone: CloneInfo | null): string {

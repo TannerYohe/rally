@@ -346,8 +346,8 @@ describe('push', () => {
   it('refuses to start a turn while discarding or aborting is under way', async () => {
     let finish: () => void = () => {}
     mocks.discardUncommitted.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
-    mocks.uncommittedPaths.mockResolvedValue([])
-    const discarding = authorSessions.discardUncommitted('author-27')
+    mocks.uncommittedPaths.mockResolvedValue(['a.ts'])
+    const discarding = authorSessions.discardUncommitted('author-27', ['a.ts'])
     await expect(authorSessions.feedback('author-27', 'go')).rejects.toThrow('already posting')
     finish()
     await discarding
@@ -360,16 +360,23 @@ describe('push', () => {
   })
 
   it('discards uncommitted edits', async () => {
-    mocks.uncommittedPaths.mockResolvedValue([])
-    await authorSessions.discardUncommitted('author-25')
+    mocks.uncommittedPaths.mockResolvedValueOnce(['a.ts']).mockResolvedValue([])
+    await authorSessions.discardUncommitted('author-25', ['a.ts'])
     expect(mocks.discardUncommitted).toHaveBeenCalledWith(CLONE)
     expect(session(25).uncommitted).toEqual([])
+  })
+
+  it('refuses to discard when the uncommitted files are not the ones confirmed, and shows the new list', async () => {
+    mocks.uncommittedPaths.mockResolvedValue(['a.ts', 'mine.ts'])
+    await expect(authorSessions.discardUncommitted('author-53', ['a.ts'])).rejects.toThrow('uncommitted files changed')
+    expect(mocks.discardUncommitted).not.toHaveBeenCalled()
+    expect(session(53).uncommitted).toEqual(['a.ts', 'mine.ts'])
   })
 
   it('refuses to push, discard, commit, or diff while the checkout has another branch checked out', async () => {
     mocks.checkedOutBranch.mockResolvedValueOnce('main').mockResolvedValueOnce('main').mockResolvedValueOnce(null).mockResolvedValueOnce('main')
     await expect(authorSessions.push('author-42')).rejects.toThrow('has `main` checked out, not the PR branch `feature`')
-    await expect(authorSessions.discardUncommitted('author-47')).rejects.toThrow('has `main` checked out')
+    await expect(authorSessions.discardUncommitted('author-47', ['a.ts'])).rejects.toThrow('has `main` checked out')
     await expect(authorSessions.commitUncommitted('author-47', 'Tidy')).rejects.toThrow('has a detached HEAD checked out')
     await expect(authorSessions.uncommittedDiff('author-47')).rejects.toThrow('has `main` checked out')
     expect(mocks.pushClone).not.toHaveBeenCalled()
@@ -409,7 +416,7 @@ describe('push', () => {
     await expect(authorSessions.commitUncommitted('author-50', 'Tidy up')).rejects.toThrow('cleared from the temp folder')
     expect(session(50)).toMatchObject({ uncommitted: [], status: 'error', error: expect.stringContaining('cleared from the temp folder') })
     expect(session(50).timeline.at(-1)).toMatchObject({ kind: 'warning', label: expect.stringContaining('cleared from the temp folder'), detail: 'a.ts' })
-    await expect(authorSessions.discardUncommitted('author-50')).rejects.toThrow('cleared from the temp folder')
+    await expect(authorSessions.discardUncommitted('author-50', ['a.ts'])).rejects.toThrow('cleared from the temp folder')
     await expect(authorSessions.uncommittedDiff('author-50')).rejects.toThrow('cleared from the temp folder')
     expect(mocks.commitAll).not.toHaveBeenCalled()
     expect(mocks.discardUncommitted).not.toHaveBeenCalled()

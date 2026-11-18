@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { HIDE_MODE_LABELS, type Pr, type PrListKind } from '@shared/types'
+import { HIDE_MODE_LABELS, type Phase, type PrHide, type PrListKind } from '@shared/types'
 import { age, fullTime } from '../lib/format'
 
 const BUTTON_CLASS = 'rounded-md px-2 py-0.5 text-xs text-ink-400 ring-1 ring-ink-800 hover:bg-ink-800 hover:text-ink-100'
@@ -9,9 +9,18 @@ const SNOOZE_TITLES: Record<PrListKind, string> = {
   authored: 'Hide until you push new commits',
 }
 
-export function HideControls({ list, pr, className = '' }: { list: PrListKind; pr: Pr; className?: string }) {
+interface Props {
+  list: PrListKind
+  /** Every member of the unit, so snoozing or hiding applies to all of them. */
+  ids: string[]
+  hidden: PrHide | null
+  phase: Phase
+  className?: string
+}
+
+export function HideControls({ list, ids, hidden, phase, className = '' }: Props) {
   const [error, setError] = useState<string | null>(null)
-  if (pr.phase === 'in_progress') return null
+  if (phase === 'in_progress') return null
 
   const run = async (action: () => Promise<void>) => {
     setError(null)
@@ -27,14 +36,14 @@ export function HideControls({ list, pr, className = '' }: { list: PrListKind; p
     </span>
   )
 
-  if (pr.hidden) {
+  if (hidden) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
         {errorNote}
-        <span className="text-xs text-ink-500" title={fullTime(pr.hidden.at)}>
-          {HIDE_MODE_LABELS[pr.hidden.mode]} · {age(pr.hidden.at)} ago
+        <span className="text-xs text-ink-500" title={fullTime(hidden.at)}>
+          {HIDE_MODE_LABELS[hidden.mode]} · {age(hidden.at)} ago
         </span>
-        <button className={BUTTON_CLASS} onClick={() => run(() => window.rally.unhidePr(list, [pr.id]))}>
+        <button className={BUTTON_CLASS} onClick={() => run(() => window.rally.unhidePr(list, ids))}>
           Unhide
         </button>
       </div>
@@ -46,11 +55,11 @@ export function HideControls({ list, pr, className = '' }: { list: PrListKind; p
       <button
         className={BUTTON_CLASS}
         title={SNOOZE_TITLES[list]}
-        onClick={() => run(() => window.rally.hidePr(list, [pr.id], 'snooze'))}
+        onClick={() => run(() => window.rally.hidePr(list, ids, 'snooze'))}
       >
         Snooze
       </button>
-      <button className={BUTTON_CLASS} title="Hide until you unhide it" onClick={() => run(() => window.rally.hidePr(list, [pr.id], 'indefinite'))}>
+      <button className={BUTTON_CLASS} title="Hide until you unhide it" onClick={() => run(() => window.rally.hidePr(list, ids, 'indefinite'))}>
         Hide
       </button>
     </div>

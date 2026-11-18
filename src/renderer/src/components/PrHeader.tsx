@@ -52,7 +52,7 @@ export function PrHeader({ list, pr, title, repo, number, url }: Props) {
               <a className="text-primary-400 hover:text-primary-300" href={url} target="_blank" rel="noreferrer">
                 Open on GitHub ↗
               </a>
-              {pr && <HideControls list={list} pr={pr} className="ml-auto" />}
+              {pr && <HideControls list={list} ids={[pr.id]} hidden={pr.hidden} phase={pr.phase} className="ml-auto" />}
             </div>
           </div>
         </div>

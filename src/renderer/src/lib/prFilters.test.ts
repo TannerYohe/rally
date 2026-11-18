@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { groupIntoUnits, type PrUnit } from '@shared/prUnit'
 import { AUTHOR_PHASE_ORDER, REVIEW_PHASE_ORDER, type Pr } from '@shared/types'
-import { applySecondaryFilters, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, filterOptions, sortPrs } from './prFilters'
+import { applySecondaryFilters, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, filterOptions, sortUnits } from './prFilters'
 
 function pr(overrides: Partial<Pr>): Pr {
   return {
     id: overrides.id ?? 'id',
-    number: 1,
+    number: overrides.number ?? (overrides.id ?? 'id').charCodeAt(0),
     owner: 'acme',
     repo: 'api',
     url: '',
@@ -43,21 +44,23 @@ const prs = [
   pr({ id: 'c', author: 'Carol', repo: 'api', isDraft: false, phase: 'unreviewed', createdAt: '2026-10-02T00:00:00Z', additions: 1 }),
 ]
 
-const ids = (list: Pr[]) => list.map((p) => p.id)
+const units = (list: Pr[]) => groupIntoUnits(list, REVIEW_PHASE_ORDER)
+const ids = (list: PrUnit[]) => list.map((u) => u.members.map((p) => p.id).join('+'))
+const sortPrs = (list: Pr[], sort: Parameters<typeof sortUnits>[1], order: Parameters<typeof sortUnits>[2]) => sortUnits(groupIntoUnits(list, order), sort, order)
 
 describe('applySecondaryFilters', () => {
   it('keeps everything by default', () => {
-    expect(ids(applySecondaryFilters(prs, DEFAULT_FILTERS))).toEqual(['a', 'b', 'c'])
+    expect(ids(applySecondaryFilters(units(prs), DEFAULT_FILTERS))).toEqual(['a', 'b', 'c'])
   })
 
   it('ORs within a filter and ANDs across filters', () => {
     const filters = { ...DEFAULT_FILTERS, authors: ['alice', 'bob'], repos: ['acme/api'] }
-    expect(ids(applySecondaryFilters(prs, filters))).toEqual(['a'])
+    expect(ids(applySecondaryFilters(units(prs), filters))).toEqual(['a'])
   })
 
   it('filters by draft status', () => {
-    expect(ids(applySecondaryFilters(prs, { ...DEFAULT_FILTERS, draft: 'draft' }))).toEqual(['b'])
-    expect(ids(applySecondaryFilters(prs, { ...DEFAULT_FILTERS, draft: 'ready' }))).toEqual(['a', 'c'])
+    expect(ids(applySecondaryFilters(units(prs), { ...DEFAULT_FILTERS, draft: 'draft' }))).toEqual(['b'])
+    expect(ids(applySecondaryFilters(units(prs), { ...DEFAULT_FILTERS, draft: 'ready' }))).toEqual(['a', 'c'])
   })
 })
 
@@ -86,7 +89,7 @@ describe('sortPrs', () => {
 
 describe('filterOptions', () => {
   it('counts values and keeps stale selections', () => {
-    expect(filterOptions(prs, (p) => p.repo, ['gone'])).toEqual([
+    expect(filterOptions(units(prs), (p) => p.repo, ['gone'])).toEqual([
       { value: 'api', count: 2 },
       { value: 'web', count: 1 },
       { value: 'gone', count: 0 },
@@ -105,7 +108,7 @@ describe('dashboardView', () => {
   it('moves hidden PRs out of the list and the phase counts', () => {
     const view = dashboardView(withHidden, DEFAULT_FILTERS, DEFAULT_SORT, REVIEW_PHASE_ORDER)
     expect(ids(view.visible)).toEqual(['b', 'c', 'a'])
-    expect(ids(view.hiddenPrs)).toEqual(['d', 'e'])
+    expect(ids(view.hiddenUnits)).toEqual(['d', 'e'])
     expect(view.phaseCounts).toEqual({ in_progress: 1, awaiting_rereview: 0, unreviewed: 1, pending_changes: 0, approved: 1 })
     expect(view.allMatchingHidden).toBe(false)
   })
@@ -113,11 +116,39 @@ describe('dashboardView', () => {
   it('applies author filters but not phase toggles to hidden PRs', () => {
     const view = dashboardView(withHidden, { ...DEFAULT_FILTERS, authors: ['bob'], hiddenPhases: ['approved'] }, DEFAULT_SORT, REVIEW_PHASE_ORDER)
     expect(ids(view.visible)).toEqual(['b'])
-    expect(ids(view.hiddenPrs)).toEqual(['e'])
+    expect(ids(view.hiddenUnits)).toEqual(['e'])
   })
 
   it('reports when every matching PR is hidden', () => {
     expect(dashboardView(withHidden.slice(3), DEFAULT_FILTERS, DEFAULT_SORT, REVIEW_PHASE_ORDER).allMatchingHidden).toBe(true)
     expect(dashboardView([], DEFAULT_FILTERS, DEFAULT_SORT, REVIEW_PHASE_ORDER).allMatchingHidden).toBe(false)
+  })
+})
+
+describe('units on the dashboard', () => {
+  const api = pr({ id: 'api', number: 1, repo: 'api', author: 'alice', phase: 'approved', linkedPrs: ['acme/web#2'], createdAt: '2026-10-05T00:00:00Z', additions: 1 })
+  const web = pr({ id: 'web', number: 2, repo: 'web', author: 'bob', phase: 'awaiting_rereview', linkedPrs: ['acme/api#1'], createdAt: '2026-10-01T00:00:00Z', isDraft: true, additions: 100 })
+  const solo = pr({ id: 'solo', number: 3, repo: 'api', author: 'carol', phase: 'unreviewed', createdAt: '2026-10-03T00:00:00Z', additions: 50 })
+
+  it('shows a unit once, in its most urgent phase, counted once', () => {
+    const view = dashboardView([api, solo, web], DEFAULT_FILTERS, DEFAULT_SORT, REVIEW_PHASE_ORDER)
+    expect(ids(view.visible)).toEqual(['api+web', 'solo'])
+    expect(view.phaseCounts).toMatchObject({ awaiting_rereview: 1, unreviewed: 1, approved: 0 })
+    expect(view.units).toHaveLength(2)
+  })
+
+  it('matches a filter when any member does', () => {
+    expect(ids(applySecondaryFilters(units([api, solo, web]), { ...DEFAULT_FILTERS, authors: ['bob'] }))).toEqual(['api+web'])
+    expect(ids(applySecondaryFilters(units([api, solo, web]), { ...DEFAULT_FILTERS, authors: ['alice'], repos: ['acme/web'] }))).toEqual(['api+web'])
+    expect(ids(applySecondaryFilters(units([api, solo, web]), { ...DEFAULT_FILTERS, draft: 'draft' }))).toEqual(['api+web'])
+  })
+
+  it('sorts by the earliest opened member and the total size', () => {
+    expect(ids(sortUnits(units([api, solo, web]), { field: 'created', direction: 'asc' }, REVIEW_PHASE_ORDER))).toEqual(['api+web', 'solo'])
+    expect(ids(sortUnits(units([api, solo, web]), { field: 'size', direction: 'asc' }, REVIEW_PHASE_ORDER))).toEqual(['solo', 'api+web'])
+  })
+
+  it('counts a unit once per filter value', () => {
+    expect(filterOptions(units([api, solo, web]), (p) => p.owner, [])).toEqual([{ value: 'acme', count: 2 }])
   })
 })

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { Pr } from '@shared/types'
+import type { PrUnit } from '@shared/prUnit'
 import { filterOptions, repoName, type DraftFilter, type PrFilters } from '../lib/prFilters'
 import { repoChipClass } from '../lib/theme'
 import { Avatar } from './Avatar'
@@ -15,16 +15,16 @@ function toggleValue(values: string[], value: string): string[] {
 }
 
 interface Props {
-  prs: Pr[]
+  units: PrUnit[]
   filters: PrFilters
   showAuthors: boolean
   onChange(filters: PrFilters): void
 }
 
-export function FilterPanel({ prs, filters, showAuthors, onChange }: Props) {
-  const avatars = new Map(prs.map((pr) => [pr.author, pr.authorAvatarUrl]))
-  const authors = filterOptions(prs, (pr) => pr.author, filters.authors)
-  const repos = filterOptions(prs, repoName, filters.repos)
+export function FilterPanel({ units, filters, showAuthors, onChange }: Props) {
+  const avatars = new Map(units.flatMap((unit) => unit.members.map((pr) => [pr.author, pr.authorAvatarUrl] as const)))
+  const authors = filterOptions(units, (pr) => pr.author, filters.authors)
+  const repos = filterOptions(units, repoName, filters.repos)
 
   return (
     <div className="space-y-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">

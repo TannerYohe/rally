@@ -334,9 +334,10 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     return 'Rally saved the proposed title and description. The user reviews them and updates GitHub when they push.'
   }
 
+  /** Drops the description update, and the error it left when no commits are still waiting to push. */
   discardDescription(sessionId: string): void {
     this.assertIdle(sessionId)
-    this.patch(sessionId, () => ({ description: null }), true)
+    this.patch(sessionId, (s) => (s.status === 'error' && s.commits.length === 0 ? { description: null, status: 'awaiting_feedback', error: null } : { description: null }), true)
   }
 
   /** Returns whether the clone's folder is gone, forgetting the uncommitted edits that went with it and noting them in the log and the timeline. */

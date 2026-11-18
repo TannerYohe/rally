@@ -176,6 +176,7 @@ mocks.stored = [
     description: descriptionDraft(),
   }),
   stored(68, { description: descriptionDraft(), status: 'error', error: 'Rally couldn\'t update the PR description: timeout' }),
+  stored(69, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], description: descriptionDraft(), status: 'error', error: 'rejected' }),
   stored(63),
   stored(64),
   stored(65),
@@ -718,8 +719,13 @@ describe('description updates', () => {
 
     await expect(authorSessions.push('author-62', { title: ' ', body: 'x' })).rejects.toThrow("title can't be empty")
     authorSessions.discardDescription('author-62')
-    expect(session(62).description).toBeNull()
+    expect(session(62)).toMatchObject({ description: null, status: 'awaiting_feedback', error: null })
     await expect(authorSessions.push('author-62')).rejects.toThrow('no commits or description update')
+  })
+
+  it('keeps a failed push\'s error when discarding the description leaves commits to push', () => {
+    authorSessions.discardDescription('author-69')
+    expect(session(69)).toMatchObject({ description: null, status: 'error', error: 'rejected' })
   })
 })
 

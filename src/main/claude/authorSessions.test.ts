@@ -153,6 +153,8 @@ mocks.stored = [
   stored(75, { clone: WORKTREE, commits: [{ oid: 'abc', subject: 'fix' }] }),
   stored(76, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
   stored(77, { clone: WORKTREE }),
+  stored(78, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-edits-clone') } }),
+  stored(79, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['a.ts'] }) } }),
   stored(71, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, syncedHead: 'prev' } }),
   stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
@@ -527,10 +529,11 @@ describe('turn exits', () => {
   it('credits a fix Claude committed itself to its newest commit of the turn touching the files', async () => {
     mocks.commitFiles.mockResolvedValue(null)
     mocks.latestCommitTouching.mockResolvedValueOnce('bbbbbbb123')
-    finishTurn()
+    mocks.headOf.mockResolvedValue('before-turn')
+    finishTurn(() => mocks.headOf.mockResolvedValue('after-turn'))
     await authorSessions.feedback('author-54', 'fix it')
     await vi.waitFor(() => expect(session(54).status).toBe('awaiting_feedback'))
-    expect(mocks.latestCommitTouching).toHaveBeenCalledWith(expect.anything(), ['b.ts'], 'turn-start')
+    expect(mocks.latestCommitTouching).toHaveBeenCalledWith(expect.anything(), ['b.ts'], 'before-turn')
     expect(session(54).responses.T1).toMatchObject({ pendingCommit: false, commits: ['bbbbbbb123'], reply: 'Fixed in bbbbbbb', commitError: null })
   })
 })
@@ -847,6 +850,29 @@ describe('checking out the PR branch', () => {
     await vi.waitFor(() => expect(session(77).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).toHaveBeenCalledWith(['~/src'], expect.anything(), WORKTREE.path)
     expect(session(77).clone).toMatchObject({ kind: 'rally_worktree' })
+  })
+
+  it('keeps using a temp clone that holds only uncommitted edits', async () => {
+    const path = join(tmpdir(), 'rally-author-test-edits-clone')
+    mkdirSync(path, { recursive: true })
+    mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
+    mocks.uncommittedPaths.mockResolvedValue(['a.ts'])
+    finishTurn()
+    await authorSessions.feedback('author-78', 'go')
+    await vi.waitFor(() => expect(session(78).status).toBe('awaiting_feedback'))
+    expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
+    expect(turnOptions().cwd).toBe(path)
+    expect(existsSync(path)).toBe(true)
+    rmSync(path, { recursive: true, force: true })
+  })
+
+  it('leaves a turn\'s fixes uncommitted, and refuses the diff, when the turn ends on another branch', async () => {
+    finishTurn(() => mocks.checkedOutBranch.mockResolvedValue('spike'))
+    await authorSessions.feedback('author-79', 'fix it')
+    await vi.waitFor(() => expect(session(79).status).toBe('awaiting_feedback'))
+    expect(mocks.commitFiles).not.toHaveBeenCalled()
+    expect(session(79).responses.T1).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('has `spike` checked out') })
+    await expect(authorSessions.diff('author-79')).rejects.toThrow('has `spike` checked out')
   })
 
   it('clones into the temp folder for a PR from a fork', async () => {

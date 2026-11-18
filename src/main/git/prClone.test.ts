@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CloneInfo } from '@shared/types'
 import {
   abortMerge,
+  checkedOutBranch,
   cloneBranch,
   cloneDiff,
   commitAll,
@@ -130,6 +131,23 @@ describe('prClone', () => {
     expect(git(clone.path, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort()).toEqual(['A\tfix.txt', 'D\ta.txt'])
     expect(await uncommittedPaths(clone)).toEqual(['other.txt'])
     expect(await commitFiles(clone, ['fix.txt'], 'Nothing new')).toBeNull()
+  })
+
+  it('commits only the listed files, leaving a file the user staged out of the commit and still staged', async () => {
+    const clone = await cloneBranch(join(root, 'session-staged2'), source)
+    writeFileSync(join(clone.path, 'mine.txt'), 'mine\n')
+    git(clone.path, 'add', 'mine.txt')
+    writeFileSync(join(clone.path, 'fix.txt'), 'fix\n')
+    expect(await commitFiles(clone, ['fix.txt'], 'Fix it')).not.toBeNull()
+    expect(git(clone.path, 'show', '--name-only', '--format=', 'HEAD').trim()).toBe('fix.txt')
+    expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('mine.txt')
+  })
+
+  it('names the checked-out branch, or null for a detached HEAD', async () => {
+    const clone = await cloneBranch(join(root, 'session-branch'), source)
+    expect(await checkedOutBranch(clone)).toBe('feature')
+    git(clone.path, 'checkout', '--detach')
+    expect(await checkedOutBranch(clone)).toBeNull()
   })
 
   it('returns null for listed files with no changes while another file is staged, and leaves that file staged', async () => {
@@ -340,15 +358,17 @@ describe('prClone', () => {
     const oldHead = git(worktree.path, 'rev-parse', 'HEAD').trim()
     git(other.path, 'commit', '--amend', '-m', 'rewritten')
     git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
-
-    const { clone: synced } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
-    expect(synced.syncedHead).toBe(oldHead)
-    expect(await localCommits(synced)).toEqual([])
-    const { clone: integrated } = await integrateRemote(synced)
-    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(git(other.path, 'rev-parse', 'HEAD').trim())
-    expect(await localCommits(integrated)).toEqual([])
-    git(other.path, 'reset', '--hard', oldHead)
-    git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
+    try {
+      const { clone: synced } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+      expect(synced.syncedHead).toBe(oldHead)
+      expect(await localCommits(synced)).toEqual([])
+      const { clone: integrated } = await integrateRemote(synced)
+      expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(git(other.path, 'rev-parse', 'HEAD').trim())
+      expect(await localCommits(integrated)).toEqual([])
+    } finally {
+      git(other.path, 'reset', '--hard', oldHead)
+      git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
+    }
   })
 
   it('finds the newest commit made since a point, and not on GitHub, that touches a file', async () => {

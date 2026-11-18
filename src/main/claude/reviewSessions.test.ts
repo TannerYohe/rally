@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_COMMENT_REVIEW_ERROR, SUBMIT_WITH_INSTRUCTIONS_ERROR, type DraftChanges } from '@shared/feedback'
@@ -73,7 +73,7 @@ vi.mock('../github/reviewComments', async (importOriginal) => ({
 vi.mock('../github/submitReview', () => ({ submitReview: mocks.submitReview }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
-vi.mock('./modelOptions', () => ({ reviewModelOptions: () => ({}) }))
+vi.mock('./modelOptions', () => ({ reviewModelOptions: (_config: unknown, env: Record<string, string>) => ({ env }) }))
 vi.mock('./timeline', () => ({ reduceTimeline: (timeline: unknown) => timeline, closeOpenEntries: (timeline: unknown) => timeline }))
 vi.mock('./rallyTools', () => ({
   RALLY_SERVER: 'rally',
@@ -335,6 +335,19 @@ describe('publishing drafts', () => {
     await reviewSessions.feedback('test-session-17', 'go')
     await vi.waitFor(() => expect(session(17).drafts?.comments[0].replyTarget).toEqual(TARGET))
     expect(mocks.describeReplies).toHaveBeenCalledWith(expect.objectContaining({ number: 17 }), published)
+  })
+
+  it('runs review turns sandboxed in the session folder, with only the user settings and no push URL rewrite', async () => {
+    publishOnTurn({ ...drafts([]), comments: [] })
+    await reviewSessions.feedback('test-session-21', 'go')
+    await vi.waitFor(() => expect(mocks.query).toHaveBeenCalled())
+    const { options } = mocks.query.mock.calls.at(-1)![0]
+    expect(options).toMatchObject({ cwd: join(tmpdir(), 'rally', 'test-session-21'), settingSources: ['user'] })
+    expect(Object.values(options.env as Record<string, string>)).not.toContain('url.rally-blocked-push://.pushInsteadOf')
+    const [preToolUse] = options.hooks.PreToolUse[0].hooks
+    const command = `git -C ${join(homedir(), 'src', 'api')} commit -am x`
+    const decision = await preToolUse({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, tool_use_id: 'x' }, undefined, {})
+    expect(decision).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
   })
 
   it('keeps the published drafts when the lookup fails', async () => {

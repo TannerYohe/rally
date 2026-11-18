@@ -174,7 +174,10 @@ class PrList extends EventEmitter {
     try {
       const { viewer, prs: searched } = await searchPrs(this.source.searchQueries(), this.kind)
       const fromSearch = searched.map((pr) => this.fetchedDuringRefresh.get(pr.id) ?? pr)
-      const companions = this.source.links ? await this.fetchCompanions(fromSearch, viewer, this.source.links) : []
+      const { companions, outside } = this.source.links
+        ? await this.fetchCompanions(fromSearch, viewer, this.source.links)
+        : { companions: [], outside: this.linkTargets }
+      this.linkTargets = outside
       const prs = [...fromSearch, ...companions.map((pr) => ({ ...(this.fetchedDuringRefresh.get(pr.id) ?? pr), companion: true }))]
       const refreshedAt = new Date().toISOString()
       const listed = new Set(prs.map(keyOf))
@@ -193,12 +196,16 @@ class PrList extends EventEmitter {
 
   /**
    * Fetches the open PRs in other repos that listed PRs link, following mutual and hand links for a few rounds,
-   * and returns those that join a unit with a listed PR. An unknown lookup reuses the PR's previous copy.
+   * and returns those that join a unit with a listed PR and the rest as outside link targets. An unknown lookup reuses the PR's previous copy.
    */
-  private async fetchCompanions(listed: GithubPr[], viewer: string, links: PrLinkSource): Promise<GithubPr[]> {
+  private async fetchCompanions(
+    listed: GithubPr[],
+    viewer: string,
+    links: PrLinkSource,
+  ): Promise<{ companions: GithubPr[]; outside: Map<string, LinkTarget> }> {
     const markers = links.markers()
     const handLinks = links.file.get()
-    const known: LinkNode[] = listed.map((pr) => linkNode(pr, markers))
+    const known: LinkNode[] = listed.map((pr) => this.linkNodeOf(pr, markers))
     const fetched = new Map<string, GithubPr>()
     let frontier = known
     for (let round = 0; round < MAX_LINK_ROUNDS && frontier.length > 0; round++) {
@@ -218,7 +225,7 @@ class PrList extends EventEmitter {
             return []
         }
       })
-      const nodes = found.map((pr) => linkNode(pr, markers))
+      const nodes = found.map((pr) => this.linkNodeOf(pr, markers))
       for (const pr of found) fetched.set(keyOf(pr), pr)
       frontier = nodes.filter((node) => known.some((other) => areLinked(node, other, handLinks)))
       known.push(...nodes)
@@ -226,8 +233,10 @@ class PrList extends EventEmitter {
     const listedKeys = new Set(listed.map(keyOf))
     const memberKeys = new Set(linkUnits(known, handLinks).filter((unit) => unit.some((key) => listedKeys.has(key))).flat())
     const outside = [...fetched.values()].filter((pr) => !memberKeys.has(keyOf(pr)))
-    this.linkTargets = new Map(outside.map((pr) => [keyOf(pr), { node: linkNode(pr, markers), ref: toPrRef(pr) }]))
-    return [...fetched.values()].filter((pr) => memberKeys.has(keyOf(pr)))
+    return {
+      companions: [...fetched.values()].filter((pr) => memberKeys.has(keyOf(pr))),
+      outside: new Map(outside.map((pr) => [keyOf(pr), { node: this.linkNodeOf(pr, markers), ref: toPrRef(pr) }])),
+    }
   }
 
   /** Looks up linked PRs, treating every one as unknown when the whole request fails. */
@@ -299,7 +308,7 @@ class PrList extends EventEmitter {
   }
 
   /** Returns the PR's link node, parsing its description again only when the description or markers changed. */
-  private linkNodeOf(pr: Pr, markers: string[]): LinkNode {
+  private linkNodeOf(pr: PrCoords & Pick<Pr, 'body'>, markers: string[]): LinkNode {
     const key = keyOf(pr)
     const cached = this.linkNodes.get(key)
     if (cached && cached.body === pr.body && cached.markers === markers) return cached.node

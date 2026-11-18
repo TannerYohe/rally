@@ -1,20 +1,15 @@
-import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
 import { MAX_DIFF_CHARS } from '@shared/diff'
 import { plural } from '@shared/format'
 import type { CloneInfo, DiffResult, LocalCommit, PushRecord } from '@shared/types'
+import { CLONE_TIMEOUT_MS, git, gitSucceeds, LOCAL_TIMEOUT_MS, NETWORK_TIMEOUT_MS, trackingRefspec, type GitFailure } from './gitCommand'
 
-const run = promisify(execFile)
-
-const GH_CREDENTIAL_HELPER = '!gh auth git-credential'
-const GH_CREDENTIALS = ['-c', 'credential.helper=', '-c', `credential.helper=${GH_CREDENTIAL_HELPER}`]
-const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 const FIELD_SEPARATOR = '\x1f'
 
-export const CLONE_DIR_NAME = 'repo'
+const CLONE_DIR_NAME = 'repo'
 
 export class MergeConflictError extends Error {
   constructor(
@@ -42,37 +37,6 @@ export class ForcePushConflictError extends Error {
 
 const CONFLICT_MARKER = /^(?:<{7}|={7}|>{7})(?: |$)/m
 
-const LOCAL_TIMEOUT_MS = 60_000
-const NETWORK_TIMEOUT_MS = 3 * 60_000
-const CLONE_TIMEOUT_MS = 10 * 60_000
-
-interface GitFailure {
-  code?: number | string
-  killed?: boolean
-  stderr?: string
-}
-
-/** Returns the git subcommand in args, skipping `-c key=value` pairs before it. */
-const subcommand = (args: string[]) => args.find((arg, index) => arg !== '-c' && args[index - 1] !== '-c') ?? ''
-
-async function git(cwd: string, args: string[], timeoutMs = LOCAL_TIMEOUT_MS, env: Record<string, string> = {}): Promise<string> {
-  try {
-    const { stdout } = await run('git', [...GH_CREDENTIALS, ...args], {
-      cwd,
-      maxBuffer: MAX_OUTPUT_BYTES,
-      timeout: timeoutMs,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env },
-    })
-    return stdout
-  } catch (error) {
-    const failure = error as GitFailure
-    const reason = failure.killed ? `timed out after ${Math.round(timeoutMs / 1000)}s` : failure.stderr?.trim() || (error as Error).message
-    throw Object.assign(new Error(`git ${subcommand(args)} failed: ${reason}`), { code: failure.code })
-  }
-}
-
-const trackingRefspec = (remote: string, branch: string) => `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`
-
 export interface CloneSource {
   headUrl: string
   branch: string
@@ -80,16 +44,19 @@ export interface CloneSource {
   baseBranch: string
 }
 
+/** Returns whether the PR's head branch lives in a different repo from its base. */
+export const isForkSource = (source: CloneSource) => source.headUrl !== source.baseUrl
+
 /** Clones the PR's head branch into `<dir>/repo` and fetches its base branch. Rally passes gh's credentials on each network command. */
 export async function cloneBranch(dir: string, source: CloneSource): Promise<CloneInfo> {
   const path = join(dir, CLONE_DIR_NAME)
   await mkdir(dir, { recursive: true })
   await rm(path, { recursive: true, force: true })
   await git(dir, ['clone', '--filter=blob:none', '--single-branch', '--branch', source.branch, source.headUrl, path], CLONE_TIMEOUT_MS)
-  const baseRemote = source.baseUrl === source.headUrl ? 'origin' : 'upstream'
+  const baseRemote = isForkSource(source) ? 'upstream' : 'origin'
   if (baseRemote === 'upstream') await git(path, ['remote', 'add', 'upstream', source.baseUrl])
   await git(path, ['fetch', baseRemote, trackingRefspec(baseRemote, source.baseBranch)], NETWORK_TIMEOUT_MS)
-  return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}`, syncedHead: await revParse(path, 'HEAD') }
+  return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}`, syncedHead: await revParse(path, 'HEAD'), kind: 'temp_clone' }
 }
 
 async function revParse(cwd: string, ref: string): Promise<string> {
@@ -98,25 +65,68 @@ async function revParse(cwd: string, ref: string): Promise<string> {
 
 const remoteRef = (clone: CloneInfo) => `origin/${clone.branch}`
 
-/** Returns the ref Rally's own commits start after, falling back to the remote branch for clones from before syncedHead existed. */
+/** Returns the ref the checkout's unpushed commits start after, falling back to the remote branch for clones from before syncedHead existed. */
 const syncedRef = (clone: CloneInfo) => clone.syncedHead ?? remoteRef(clone)
 
 async function fetchBranch(clone: CloneInfo): Promise<void> {
   await git(clone.path, ['fetch', 'origin', trackingRefspec('origin', clone.branch)], NETWORK_TIMEOUT_MS)
 }
 
-/** Fetches the head and base branches, and moves the clone to GitHub's head, even after a force push, when it holds no commits or edits of its own. */
-export async function syncClone(clone: CloneInfo): Promise<CloneInfo> {
+async function fetchHeadAndBase(clone: CloneInfo): Promise<void> {
   await fetchBranch(clone)
   const [baseRemote, ...baseBranch] = clone.baseRef.split('/')
   await git(clone.path, ['fetch', baseRemote, trackingRefspec(baseRemote, baseBranch.join('/'))], NETWORK_TIMEOUT_MS)
+}
+
+/** Fetches the head and base branches, and moves the clone to GitHub's head, even after a force push, when it holds no commits or edits of its own. */
+export async function syncClone(clone: CloneInfo): Promise<CloneInfo> {
+  await fetchHeadAndBase(clone)
   if ((await localCommits(clone)).length > 0 || (await uncommittedPaths(clone)).length > 0) return clone
   await git(clone.path, ['reset', '--hard', remoteRef(clone)])
   return { ...clone, syncedHead: await revParse(clone.path, 'HEAD') }
 }
 
+/** Whether a worktree holds GitHub's head after syncing, or why it doesn't. */
+export type WorktreeSyncState = 'synced' | 'diverged' | 'fast_forward_failed'
+
+export interface WorktreeSync {
+  clone: CloneInfo
+  state: WorktreeSyncState
+}
+
+/**
+ * Fetches the head and base branches and fast-forwards the worktree to GitHub's head when it is behind, leaving it alone when it has diverged
+ * or the fast-forward would touch uncommitted edits. Records GitHub's head as synced once the worktree contains it. A worktree Rally hasn't
+ * synced before, and that has diverged, counts as synced at the GitHub head it last fetched, so a force push since then is detected.
+ */
+export async function syncWorktree(clone: CloneInfo): Promise<WorktreeSync> {
+  const remote = remoteRef(clone)
+  const lastFetched = clone.syncedHead ? null : await revParse(clone.path, remote).catch(() => null)
+  await fetchHeadAndBase(clone)
+  let state: WorktreeSyncState = 'diverged'
+  if (await isAncestor(clone, 'HEAD', remote)) {
+    await git(clone.path, ['merge', '--ff-only', remote]).catch((error: unknown) => {
+      console.warn('Fast-forwarding the worktree to GitHub failed', { path: clone.path, branch: clone.branch, error })
+      state = 'fast_forward_failed'
+    })
+  }
+  if (await isAncestor(clone, remote)) return { clone: { ...clone, syncedHead: await revParse(clone.path, remote) }, state: 'synced' }
+  if (state === 'diverged') console.info('Leaving a worktree that has diverged from GitHub as is', { path: clone.path, branch: clone.branch })
+  if (clone.syncedHead) return { clone, state }
+  if (lastFetched && (await isAncestor(clone, lastFetched))) return { clone: { ...clone, syncedHead: lastFetched }, state }
+  return { clone: { ...clone, syncedHead: (await git(clone.path, ['merge-base', 'HEAD', remote])).trim() }, state }
+}
+
+/** The rev-list arguments for the checkout's commits that GitHub doesn't have. */
+const unpushedRange = (clone: CloneInfo) => ['HEAD', `^${remoteRef(clone)}`, `^${syncedRef(clone)}`]
+
+/** Returns the checkout's HEAD commit. */
+export function headOf(clone: CloneInfo): Promise<string> {
+  return revParse(clone.path, 'HEAD')
+}
+
 async function commitList(clone: CloneInfo, extra: string[]): Promise<LocalCommit[]> {
-  const out = await git(clone.path, ['log', `--format=%H${FIELD_SEPARATOR}%s`, ...extra, 'HEAD', `^${remoteRef(clone)}`, `^${syncedRef(clone)}`])
+  const out = await git(clone.path, ['log', `--format=%H${FIELD_SEPARATOR}%s`, ...extra, ...unpushedRange(clone)])
   return out
     .split('\n')
     .filter(Boolean)
@@ -126,7 +136,7 @@ async function commitList(clone: CloneInfo, extra: string[]): Promise<LocalCommi
     })
 }
 
-/** Returns the commits Rally made in the clone that GitHub doesn't have, newest first. */
+/** Returns the checkout's commits that GitHub doesn't have, whoever made them, newest first. */
 export function localCommits(clone: CloneInfo): Promise<LocalCommit[]> {
   return commitList(clone, [])
 }
@@ -181,9 +191,9 @@ export async function cloneDiff(clone: CloneInfo): Promise<DiffResult> {
   return displayDiff(await git(clone.path, [...DISPLAY_DIFF_COMMAND, `${syncedRef(clone)}...HEAD`]))
 }
 
-/** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index for display. */
+/** Returns the unified diff of the edits commitAll would commit, new files included, staged in a scratch index in the temp folder for display. */
 export async function uncommittedDiff(clone: CloneInfo): Promise<DiffResult> {
-  const env = { GIT_INDEX_FILE: join(clone.path, '.git', `rally-uncommitted-${randomUUID()}.index`) }
+  const env = { GIT_INDEX_FILE: join(tmpdir(), `rally-uncommitted-${randomUUID()}.index`) }
   try {
     await git(clone.path, ['read-tree', 'HEAD'], LOCAL_TIMEOUT_MS, env)
     await git(clone.path, ['add', '-A', '--', '.'], LOCAL_TIMEOUT_MS, env)
@@ -193,23 +203,32 @@ export async function uncommittedDiff(clone: CloneInfo): Promise<DiffResult> {
   }
 }
 
-async function isAncestor(clone: CloneInfo, ancestor: string, descendant = 'HEAD'): Promise<boolean> {
+/** Returns the branch the checkout has checked out, or null when HEAD is detached. */
+export async function checkedOutBranch(clone: CloneInfo): Promise<string | null> {
   try {
-    await git(clone.path, ['merge-base', '--is-ancestor', ancestor, descendant])
-    return true
+    return (await git(clone.path, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim()
   } catch (error) {
-    if ((error as GitFailure).code === 1) return false
+    if ((error as GitFailure).code === 1) return null
     throw error
   }
 }
 
+const isAncestor = (clone: CloneInfo, ancestor: string, descendant = 'HEAD') => gitSucceeds(clone.path, ['merge-base', '--is-ancestor', ancestor, descendant])
+
 /** Commits the listed files, including deletions, and returns the new commit's sha, or null when they have no changes. */
 export async function commitFiles(clone: CloneInfo, files: string[], message: string): Promise<string | null> {
   await git(clone.path, ['add', '-A', '--', ...files])
-  const staged = await git(clone.path, ['diff', '--cached', '--name-only'])
+  const staged = await git(clone.path, ['diff', '--cached', '--name-only', '--', ...files])
   if (!staged.trim()) return null
   await git(clone.path, ['commit', '-m', message, '--', ...files])
   return (await git(clone.path, ['rev-parse', 'HEAD'])).trim()
+}
+
+/** Returns the newest commit made after `since`, and not on GitHub, that touches any of the files, or null when there is none. */
+export async function latestCommitTouching(clone: CloneInfo, files: string[], since: string): Promise<string | null> {
+  if (files.length === 0) return null
+  const out = await git(clone.path, ['log', '-1', '--format=%H', ...unpushedRange(clone), `^${since}`, '--', ...files])
+  return out.trim() || null
 }
 
 /** Commits every edit in the clone, including new and deleted files, and returns the new commit's sha, or null when there are none. */
@@ -243,7 +262,7 @@ export async function concludeMerge(clone: CloneInfo, files: string[]): Promise<
   return { ...clone, syncedHead: await revParse(clone.path, remoteRef(clone)) }
 }
 
-/** Replays Rally's commits onto a force-pushed branch and returns each rewritten commit's old sha mapped to its new one. */
+/** Replays the checkout's unpushed commits onto a force-pushed branch and returns each rewritten commit's old sha mapped to its new one. */
 async function replayOntoRemote(clone: CloneInfo): Promise<Record<string, string>> {
   const before = await commitList(clone, ['--no-merges'])
   try {
@@ -272,7 +291,7 @@ export async function abortMerge(clone: CloneInfo): Promise<void> {
 }
 
 /**
- * Fetches the head branch and brings commits that landed on GitHub into the clone: merged in, or after a force push, with Rally's commits replayed on top.
+ * Fetches the head branch and brings commits that landed on GitHub into the clone: merged in, or after a force push, with the unpushed commits replayed on top.
  * The returned clone records GitHub's head as synced, so save it before pushing in case the push fails.
  */
 export async function integrateRemote(clone: CloneInfo): Promise<IntegrateResult> {

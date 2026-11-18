@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CloneInfo } from '@shared/types'
 import {
   abortMerge,
+  checkedOutBranch,
   cloneBranch,
   cloneDiff,
   commitAll,
@@ -14,38 +14,22 @@ import {
   discardUncommitted,
   ForcePushConflictError,
   integrateRemote,
+  latestCommitTouching,
   localCommits,
   MergeConflictError,
   pushClone,
   syncClone,
+  syncWorktree,
   uncommittedDiff,
   uncommittedPaths,
   UncommittedChangesError,
 } from './prClone'
+import { commitFile, git, seedRemote, useTestGitIdentity } from './testRepo.fixture'
 
 const root = mkdtempSync(join(tmpdir(), 'rally-clone-test-'))
 const remote = join(root, 'remote.git')
 const seed = join(root, 'seed')
 const AT = '2026-11-16T00:00:00Z'
-
-const TEST_GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: 'Test',
-  GIT_AUTHOR_EMAIL: 'test@example.com',
-  GIT_COMMITTER_NAME: 'Test',
-  GIT_COMMITTER_EMAIL: 'test@example.com',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-}
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], { cwd, env: TEST_GIT_ENV, stdio: 'pipe' }).toString()
-}
-
-function commitFile(cwd: string, name: string, content: string): void {
-  writeFileSync(join(cwd, name), content)
-  git(cwd, 'add', name)
-  git(cwd, 'commit', '-m', `change ${name}`)
-}
 
 /** Brings GitHub's commits in, then pushes, as Push does. */
 async function syncAndPush(clone: CloneInfo, at: string) {
@@ -58,12 +42,8 @@ const diffFiles = (diff: string) => [...diff.matchAll(/^diff --git a\/(\S+) b\//
 const source = { headUrl: `file://${remote}`, branch: 'feature', baseUrl: `file://${remote}`, baseBranch: 'main' }
 
 beforeAll(() => {
-  for (const key of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const) process.env[key] = TEST_GIT_ENV[key]
-  git(root, 'init', '--bare', '--initial-branch=main', remote)
-  git(root, 'init', '--initial-branch=main', seed)
-  commitFile(seed, 'a.txt', 'one\n')
-  git(seed, 'remote', 'add', 'origin', remote)
-  git(seed, 'push', 'origin', 'main')
+  useTestGitIdentity()
+  seedRemote(root, remote, seed)
   git(seed, 'checkout', '-b', 'feature')
   commitFile(seed, 'b.txt', 'two\n')
   git(seed, 'push', 'origin', 'feature')
@@ -153,6 +133,31 @@ describe('prClone', () => {
     expect(await commitFiles(clone, ['fix.txt'], 'Nothing new')).toBeNull()
   })
 
+  it('commits only the listed files, leaving a file the user staged out of the commit and still staged', async () => {
+    const clone = await cloneBranch(join(root, 'session-staged2'), source)
+    writeFileSync(join(clone.path, 'mine.txt'), 'mine\n')
+    git(clone.path, 'add', 'mine.txt')
+    writeFileSync(join(clone.path, 'fix.txt'), 'fix\n')
+    expect(await commitFiles(clone, ['fix.txt'], 'Fix it')).not.toBeNull()
+    expect(git(clone.path, 'show', '--name-only', '--format=', 'HEAD').trim()).toBe('fix.txt')
+    expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('mine.txt')
+  })
+
+  it('names the checked-out branch, or null for a detached HEAD', async () => {
+    const clone = await cloneBranch(join(root, 'session-branch'), source)
+    expect(await checkedOutBranch(clone)).toBe('feature')
+    git(clone.path, 'checkout', '--detach')
+    expect(await checkedOutBranch(clone)).toBeNull()
+  })
+
+  it('returns null for listed files with no changes while another file is staged, and leaves that file staged', async () => {
+    const clone = await cloneBranch(join(root, 'session-staged'), source)
+    writeFileSync(join(clone.path, 'other.txt'), 'other\n')
+    git(clone.path, 'add', 'other.txt')
+    expect(await commitFiles(clone, ['a.txt'], 'Nothing here')).toBeNull()
+    expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('other.txt')
+  })
+
   it('commits every edit, including new and deleted files, and returns null when there are none', async () => {
     const clone = await cloneBranch(join(root, 'session16'), source)
     writeFileSync(join(clone.path, 'new.txt'), 'new\n')
@@ -178,7 +183,17 @@ describe('prClone', () => {
     expect(diff).toContain('+two')
     expect(diff).toContain('deleted file mode')
     expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('')
-    expect(readdirSync(join(clone.path, '.git')).filter((name) => name.startsWith('rally-uncommitted-'))).toEqual([])
+    expect(readdirSync(tmpdir()).filter((name) => name.startsWith('rally-uncommitted-'))).toEqual([])
+  })
+
+  it('diffs uncommitted edits in a linked worktree, where .git is a file', async () => {
+    const clone = await cloneBranch(join(root, 'session-linked'), source)
+    const linked = join(root, 'session-linked-wt')
+    git(clone.path, 'worktree', 'add', '-b', 'linked', linked)
+    writeFileSync(join(linked, 'edit.txt'), 'edit\n')
+
+    const { diff } = await uncommittedDiff({ ...clone, path: linked, branch: 'linked', kind: 'local_worktree' })
+    expect(diff).toContain('diff --git a/edit.txt b/edit.txt')
   })
 
   it('lists renamed files once and keeps names with spaces or accents unquoted', async () => {
@@ -290,6 +305,85 @@ describe('prClone', () => {
     await syncClone(clone)
     expect(git(clone.path, 'rev-parse', 'HEAD').trim()).toBe(local.oid)
     expect((await localCommits(clone)).map((c) => c.oid)).toEqual([local.oid])
+  })
+
+  it('fast-forwards a worktree that is behind GitHub and records the new head as synced', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt1'), source)
+    const other = await cloneBranch(join(root, 'session-wt2'), source)
+    writeFileSync(join(worktree.path, 'wip.txt'), 'wip\n')
+    commitFile(other.path, 'ahead.txt', 'ahead\n')
+    const { push } = await syncAndPush(other, AT)
+
+    const { clone: synced, state } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(push.oid)
+    expect(synced.syncedHead).toBe(push.oid)
+    expect(state).toBe('synced')
+    expect(await uncommittedPaths(worktree)).toEqual(['wip.txt'])
+  })
+
+  it('leaves a worktree behind GitHub as is when the fast-forward would overwrite an uncommitted edit', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt7'), source)
+    const other = await cloneBranch(join(root, 'session-wt8'), source)
+    const head = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    writeFileSync(join(worktree.path, 'b.txt'), 'my edit\n')
+    commitFile(other.path, 'b.txt', 'their edit\n')
+    await syncAndPush(other, AT)
+
+    const { clone: synced, state } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(state).toBe('fast_forward_failed')
+    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(head)
+    expect(await uncommittedPaths(worktree)).toEqual(['b.txt'])
+    expect(synced.syncedHead).toBe(head)
+  })
+
+  it('leaves a diverged worktree alone and records where it left GitHub', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt3'), source)
+    const other = await cloneBranch(join(root, 'session-wt4'), source)
+    const forkPoint = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    commitFile(worktree.path, 'local.txt', 'local\n')
+    const localHead = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    commitFile(other.path, 'remote.txt', 'remote\n')
+    await syncAndPush(other, AT)
+
+    const { clone: synced, state } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(state).toBe('diverged')
+    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(localHead)
+    expect(synced.syncedHead).toBe(forkPoint)
+    expect((await localCommits(synced)).map((c) => c.oid)).toEqual([localHead])
+  })
+
+  it('detects a force push on the first sync of a worktree still on the old history', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt5'), source)
+    const other = await cloneBranch(join(root, 'session-wt6'), source)
+    const oldHead = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    git(other.path, 'commit', '--amend', '-m', 'rewritten')
+    git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
+    try {
+      const { clone: synced } = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+      expect(synced.syncedHead).toBe(oldHead)
+      expect(await localCommits(synced)).toEqual([])
+      const { clone: integrated } = await integrateRemote(synced)
+      expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(git(other.path, 'rev-parse', 'HEAD').trim())
+      expect(await localCommits(integrated)).toEqual([])
+    } finally {
+      git(other.path, 'reset', '--hard', oldHead)
+      git(other.path, 'push', '--force', 'origin', 'HEAD:feature')
+    }
+  })
+
+  it('finds the newest commit made since a point, and not on GitHub, that touches a file', async () => {
+    const clone = await cloneBranch(join(root, 'session-touch'), source)
+    const start = git(clone.path, 'rev-parse', 'HEAD').trim()
+    expect(await latestCommitTouching(clone, ['x.txt'], start)).toBeNull()
+    expect(await latestCommitTouching(clone, ['b.txt'], 'origin/main')).toBeNull()
+    commitFile(clone.path, 'x.txt', 'one\n')
+    const turnStart = git(clone.path, 'rev-parse', 'HEAD').trim()
+    commitFile(clone.path, 'y.txt', 'two\n')
+    const [yCommit, xCommit] = await localCommits(clone)
+    expect(await latestCommitTouching(clone, ['x.txt'], start)).toBe(xCommit.oid)
+    expect(await latestCommitTouching(clone, ['x.txt'], turnStart)).toBeNull()
+    expect(await latestCommitTouching(clone, ['x.txt', 'y.txt'], turnStart)).toBe(yCommit.oid)
+    expect(await latestCommitTouching(clone, [], start)).toBeNull()
   })
 
   describe('after a force push', () => {

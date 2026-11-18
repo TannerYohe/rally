@@ -125,7 +125,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
 
   sessionState(key: string): SessionState | null {
     const session = this.getByPr(key)
-    return session ? { status: session.status, active: session.status !== 'submitted' } : null
+    return session ? { status: session.status, active: session.status !== 'submitted', openFindings: 0 } : null
   }
 
   /** Starts a review of the PR and its linked PRs, replacing their sessions unless one is busy or partly posted. */
@@ -135,7 +135,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const covering = distinctSessions(members.map((member) => this.getByPr(keyOf(member))))
     const same = covering.find((session) => session.prKey === key && sessionMembers(session).length === members.length)
     if (same && this.isTurnRunning(same.id)) return same
-    const busy = covering.find((session) => this.isTurnRunning(session.id) || this.publishing.has(session.id) || session.resolvingThreads)
+    const busy = covering.find((session) => this.isTurnRunning(session.id) || this.busy.has(session.id) || session.resolvingThreads)
     if (busy) throw new Error(`The review of ${busy.prKey} is still running. Wait for it to finish or cancel it, then start again.`)
     const partlyPosted = covering.find(isPartlyPosted)
     if (partlyPosted) throw new Error(`Some PRs in the review of ${partlyPosted.prKey} already posted. Submit the rest or skip them, then start again.`)
@@ -155,7 +155,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const blocked = submitBlockedReason(changes.instructions)
     if (blocked) throw new Error(blocked)
     const posts = submitPlan(session, session.drafts, verdicts, changes)
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       this.patch(sessionId, () => ({ status: 'submitting', error: null, threadsToResolveOnSubmit: resolveThreadIds }), true)
       for (const post of posts) await this.postMember(sessionId, post)
       this.finishSubmit(sessionId)
@@ -240,7 +240,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   discard(sessionId: string): void {
     const session = this.byId(sessionId)
     if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
-    if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
+    if (this.busy.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
     if (isPartlyPosted(session)) throw new Error('Some PRs in this review already posted. Submit the rest or skip them before discarding it.')
     this.remove(session)
   }

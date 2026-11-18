@@ -11,6 +11,7 @@ import type {
   InstallAttempt,
   PrCoords,
   PrListKind,
+  PrDescription,
   PrListState,
   PrRef,
   ReplyPost,
@@ -52,18 +53,20 @@ export interface RallyApi {
   acknowledgeFeedback(pr: PrRef, itemId: string): Promise<void>
   runAuthorActions(pr: PrRef, requests: ActionRequest[], note: string): Promise<AuthorSession>
   startSelfReview(pr: PrRef): Promise<AuthorSession>
+  draftDescription(pr: PrRef): Promise<AuthorSession>
+  discardDescription(sessionId: string): Promise<void>
   sendAuthorFeedback(sessionId: string, message: string): Promise<void>
   cancelAuthorTurn(sessionId: string): Promise<void>
   getAuthorDiff(sessionId: string): Promise<DiffResult>
   getUncommittedDiff(sessionId: string): Promise<DiffResult>
-  pushAuthorCommits(sessionId: string): Promise<void>
+  pushAuthorChanges(sessionId: string, descriptionEdit: PrDescription | null): Promise<void>
   resolveMergeConflicts(sessionId: string): Promise<void>
   abortMerge(sessionId: string): Promise<void>
-  discardUncommitted(sessionId: string): Promise<void>
+  discardUncommitted(sessionId: string, confirmedFiles: string[]): Promise<void>
   commitUncommitted(sessionId: string, message: string): Promise<void>
   postAuthorReplies(sessionId: string, replies: ReplyPost[], reRequestReviews: boolean): Promise<void>
   discardAuthorReply(sessionId: string, itemId: string): Promise<void>
-  dismissFinding(sessionId: string, itemId: string): Promise<void>
+  clearFindings(sessionId: string, itemIds: string[]): Promise<void>
   discardAuthorSession(sessionId: string): Promise<void>
   onAuthorSessionChanged(listener: (session: AuthorSession) => void): () => void
   getAppInfo(): Promise<AppInfo>
@@ -101,18 +104,20 @@ export const IPC = {
   acknowledgeFeedback: 'author:acknowledge',
   runAuthorActions: 'author:run',
   startSelfReview: 'author:self-review',
+  draftDescription: 'author:draft-description',
+  discardDescription: 'author:discard-description',
   sendAuthorFeedback: 'author:feedback',
   cancelAuthorTurn: 'author:cancel',
   getAuthorDiff: 'author:diff',
   getUncommittedDiff: 'author:uncommitted-diff',
-  pushAuthorCommits: 'author:push',
+  pushAuthorChanges: 'author:push',
   resolveMergeConflicts: 'author:resolve-conflicts',
   abortMerge: 'author:abort-merge',
   discardUncommitted: 'author:discard-uncommitted',
   commitUncommitted: 'author:commit-uncommitted',
   postAuthorReplies: 'author:post-replies',
   discardAuthorReply: 'author:discard-reply',
-  dismissFinding: 'author:dismiss-finding',
+  clearFindings: 'author:clear-findings',
   discardAuthorSession: 'author:discard',
   authorSessionChanged: 'author:changed',
   getAppInfo: 'app:info',

@@ -37,6 +37,7 @@ function pr(repo: string, overrides: Partial<Pr> = {}): Pr {
     feedback: null,
     phase: 'unreviewed',
     reviewStatus: null,
+    openFindings: 0,
     summary: null,
     summaryError: null,
     hidden: null,

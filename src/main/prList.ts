@@ -21,7 +21,7 @@ import { errorMessage } from '@shared/errors'
 import { parsePrRef } from '@shared/linkedPrs'
 import { areLinked, handLinkedKeys, hasPair, linkNode, linkUnits, membersOf, oneSidedLinks, unitHide, type LinkNode } from '@shared/prUnit'
 import { summarizePr } from './claude/summarize'
-import { computeAuthorPhase } from './github/authorPhase'
+import { computeAuthorPhase, type AuthorSessionPhaseInput } from './github/authorPhase'
 import { computePhase } from './github/phase'
 import { sameLogin } from './github/logins'
 import { fetchPrs, searchPrs, type GithubPr, type PrLookup } from './github/queries'
@@ -47,9 +47,8 @@ const SUMMARY_CONCURRENCY = 3
 const MAX_LINK_ROUNDS = 3
 const LISTED_STAMP_REFRESH_MS = 24 * 60 * 60_000
 
-export interface SessionState {
+export interface SessionState extends AuthorSessionPhaseInput {
   status: SessionStatus
-  active: boolean
 }
 
 /** Drops state kept for PRs that a full refresh no longer lists, given the keys of the PRs it did list. */
@@ -57,7 +56,7 @@ export type Pruner = (listed: Set<string>) => void
 
 type SessionLookup = (key: string) => SessionState | null
 
-type PhaseInput = Omit<Pr, 'phase' | 'reviewStatus' | 'hidden'>
+type PhaseInput = Omit<Pr, 'phase' | 'reviewStatus' | 'openFindings' | 'hidden'>
 
 interface PrListFiles {
   cache: JsonFile<PrCache>
@@ -77,7 +76,7 @@ interface PrListSource {
   /** Present for a list that groups linked PRs into units. */
   links?: PrLinkSource
   searchQueries(): string[]
-  phase(pr: PhaseInput, sessionActive: boolean): Phase
+  phase(pr: PhaseInput, session: SessionState | null): Phase
 }
 
 /** A PR outside the list that a listed PR links one-sidedly. */
@@ -160,6 +159,7 @@ class PrList extends EventEmitter {
           pr.id !== this.state.prs[i].id ||
           pr.phase !== this.state.prs[i].phase ||
           pr.reviewStatus !== this.state.prs[i].reviewStatus ||
+          pr.openFindings !== this.state.prs[i].openFindings ||
           pr.hidden?.mode !== this.state.prs[i].hidden?.mode ||
           JSON.stringify(pr.linkedPrs) !== JSON.stringify(this.state.prs[i].linkedPrs) ||
           JSON.stringify(pr.unreciprocatedLinks) !== JSON.stringify(this.state.prs[i].unreciprocatedLinks),
@@ -432,7 +432,7 @@ class PrList extends EventEmitter {
   private withPhases(prs: PhaseInput[]): Omit<Pr, 'hidden'>[] {
     return prs.map((pr) => {
       const session = this.sessionOf(keyOf(pr))
-      return { ...pr, reviewStatus: session?.status ?? null, phase: this.source.phase(pr, session?.active ?? false) }
+      return { ...pr, reviewStatus: session?.status ?? null, openFindings: session?.openFindings ?? 0, phase: this.source.phase(pr, session) }
     })
   }
 
@@ -517,14 +517,13 @@ function pruneRallyReviews(listed: Set<string>): void {
   rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => listed.has(key))))
 }
 
-function reviewPhase(pr: PhaseInput, sessionActive: boolean): Phase {
+function reviewPhase(pr: PhaseInput, session: SessionState | null): Phase {
   const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviewsFile.get()[keyOf(pr)] ?? [])
-  return computePhase({ ...pr, myReviews, reviewInProgress: sessionActive })
+  return computePhase({ ...pr, myReviews, reviewInProgress: session?.active ?? false })
 }
 
-function authorPhase(pr: PhaseInput, sessionActive: boolean): Phase {
-  if (pr.feedback) return computeAuthorPhase(pr.feedback, sessionActive)
-  return sessionActive ? 'in_progress' : 'awaiting_reviews'
+function authorPhase(pr: PhaseInput, session: SessionState | null): Phase {
+  return computeAuthorPhase(pr.feedback, session)
 }
 
 export const prList = new ReviewPrList({

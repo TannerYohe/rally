@@ -69,29 +69,41 @@ describe('authorFeedback truncation', () => {
   })
 })
 
+const IDLE = { active: false, openFindings: 0 }
+
 describe('computeAuthorPhase', () => {
   it('needs a response when some feedback went unchecked, even when approved', () => {
-    expect(computeAuthorPhase(feedback({ truncated: true, reviewDecision: 'APPROVED' }), false)).toBe('needs_response')
+    expect(computeAuthorPhase(feedback({ truncated: true, reviewDecision: 'APPROVED' }), IDLE)).toBe('needs_response')
   })
 
   it('is in progress while a Rally session has work', () => {
-    expect(computeAuthorPhase(feedback({ unacknowledged: 2 }), true)).toBe('in_progress')
+    expect(computeAuthorPhase(feedback({ unacknowledged: 2 }), { active: true, openFindings: 0 })).toBe('in_progress')
   })
 
   it('needs a response for any unacknowledged comment, even when approved', () => {
-    expect(computeAuthorPhase(feedback({ unacknowledged: 1, reviewDecision: 'APPROVED', approvedBy: ['bob'] }), false)).toBe('needs_response')
+    expect(computeAuthorPhase(feedback({ unacknowledged: 1, reviewDecision: 'APPROVED', approvedBy: ['bob'] }), IDLE)).toBe('needs_response')
+  })
+
+  it('needs a response while a self-review finding is open, even when approved', () => {
+    expect(computeAuthorPhase(feedback({ reviewDecision: 'APPROVED' }), { active: false, openFindings: 1 })).toBe('needs_response')
+    expect(computeAuthorPhase(null, { active: false, openFindings: 1 })).toBe('needs_response')
+  })
+
+  it('awaits reviews when GitHub feedback is missing and nothing is open', () => {
+    expect(computeAuthorPhase(null, IDLE)).toBe('awaiting_reviews')
+    expect(computeAuthorPhase(null, null)).toBe('awaiting_reviews')
   })
 
   it('is approved when GitHub says so', () => {
-    expect(computeAuthorPhase(feedback({ reviewDecision: 'APPROVED' }), false)).toBe('approved')
+    expect(computeAuthorPhase(feedback({ reviewDecision: 'APPROVED' }), IDLE)).toBe('approved')
   })
 
   it('is approved by any approval when the repo requires no reviews', () => {
-    expect(computeAuthorPhase(feedback({ approvedBy: ['bob'] }), false)).toBe('approved')
+    expect(computeAuthorPhase(feedback({ approvedBy: ['bob'] }), IDLE)).toBe('approved')
   })
 
   it('awaits reviews once every comment is acknowledged, even with changes requested', () => {
-    expect(computeAuthorPhase(feedback({ reviewDecision: 'CHANGES_REQUESTED', changesRequestedBy: ['bob'], openThreads: 2 }), false)).toBe(
+    expect(computeAuthorPhase(feedback({ reviewDecision: 'CHANGES_REQUESTED', changesRequestedBy: ['bob'], openThreads: 2 }), IDLE)).toBe(
       'awaiting_reviews',
     )
   })

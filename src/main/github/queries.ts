@@ -5,7 +5,7 @@ import { decisionsField, prCommentsField, reviewSummariesField, threadsField } f
 import { github, timeoutRequest, type GithubClient } from './client'
 import { countsAsReview } from './phase'
 
-export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'summary' | 'summaryError' | 'hidden'>
+export type GithubPr = Omit<Pr, 'headKnownSince' | 'phase' | 'reviewStatus' | 'openFindings' | 'summary' | 'summaryError' | 'hidden'>
 
 const AUTHORED = '@include(if: $authored)'
 

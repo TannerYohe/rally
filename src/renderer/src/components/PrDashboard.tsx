@@ -12,7 +12,7 @@ import { PhaseBadge } from './PhaseBadge'
 import { RepoChip } from './RepoChip'
 import { SortControl } from './SortControl'
 import { PrSummary } from './PrSummary'
-import { age } from '../lib/format'
+import { age, plural } from '../lib/format'
 import { usePersistentState, usePrs } from '../lib/hooks'
 import { activeFilterCount, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, type PrFilters, type PrSort } from '../lib/prFilters'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
@@ -40,8 +40,15 @@ function SessionStatusNote({ status, labels }: { status: SessionStatus; labels: 
   )
 }
 
-function FeedbackNote({ feedback }: { feedback: PrFeedback }) {
+function FeedbackNote({ feedback, openFindings }: { feedback: PrFeedback; openFindings: number }) {
   const parts: ReactNode[] = []
+  if (openFindings > 0) {
+    parts.push(
+      <span key="findings" className="text-amber-300">
+        {plural(openFindings, 'open self-review finding')}
+      </span>,
+    )
+  }
   if (feedback.unacknowledged > 0) {
     parts.push(
       <span key="unanswered" className="text-amber-300">
@@ -110,7 +117,7 @@ function SingleCardBody({ pr, unit, statusLabels }: { pr: Pr; unit: PrUnit; stat
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
         <RepoChip repo={pr.repo} number={pr.number} />
         {pr.feedback ? (
-          <FeedbackNote feedback={pr.feedback} />
+          <FeedbackNote feedback={pr.feedback} openFindings={pr.openFindings} />
         ) : (
           <span>
             by <span className="text-ink-200">{pr.author}</span>

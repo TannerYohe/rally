@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { query, type CanUseTool, type HookCallback, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
+import { query, type CanUseTool, type HookCallback, type McpSdkServerConfigWithInstance, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { keyOf, type PrRef, type SessionCore, type SessionStatus, type TimelineEntry, type TurnMode } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import type { JsonDir } from '../jsonFile'
@@ -13,9 +13,12 @@ import { claudeExecutable } from './executable'
 import { reviewModelOptions } from './modelOptions'
 import { RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
-import { decideToolUse } from './toolPolicy'
+import { decideToolUse, pushBlockingGitEnv, type ToolAccess } from './toolPolicy'
+import type { GithubRemotes } from '../git/githubRemotes'
 
 const FLUSH_INTERVAL_MS = 200
+
+const NEW_CONVERSATION_WARNING = 'Started a new Claude conversation, because this turn runs in a different folder from the last one.'
 
 export const now = () => new Date().toISOString()
 
@@ -30,15 +33,22 @@ export function removeSessionDir(sessionId: string): void {
 export interface TurnSetup {
   systemPromptAppend: string
   mcpServer: McpSdkServerConfigWithInstance
-  readOnlyGitRepos?: string[]
+  /** Absent means sandboxed. */
+  toolAccess?: ToolAccess
+  /** The folder the turn runs in; absent means the session's temp folder. */
+  cwd?: string
+  /** Absent means only the user's own settings and CLAUDE.md. */
+  settingSources?: SettingSource[]
+  /** The GitHub URLs of the checkout's remotes, which an open turn's push URL rewrite also covers. */
+  githubRemotes?: GithubRemotes
 }
 
 /** Persists one Claude session per PR and runs its turns through the Agent SDK under Rally's tool policy. */
 export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter {
   protected sessions: Map<string, S>
   protected controllers = new Map<string, AbortController>()
-  /** Sessions Rally is writing to GitHub for, outside a Claude turn. */
-  protected publishing = new Set<string>()
+  /** Sessions running a git or GitHub action outside a turn. */
+  protected busy = new Set<string>()
   private pendingFlush: NodeJS.Timeout | null = null
   private dirty = new Set<string>()
 
@@ -64,12 +74,12 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     void this.runTurn(sessionId, message, 'refine')
   }
 
-  protected abstract turnSetup(sessionId: string): TurnSetup
+  protected abstract turnSetup(sessionId: string): TurnSetup | Promise<TurnSetup>
 
   protected assertIdle(sessionId: string): void {
     this.byId(sessionId)
     if (this.isTurnRunning(sessionId)) throw new Error('Claude is already working on this PR')
-    if (this.publishing.has(sessionId)) throw new Error('Rally is already posting to GitHub for this PR. Try again when it finishes.')
+    if (this.busy.has(sessionId)) throw new Error('Rally is still working on this PR. Try again when it finishes.')
   }
 
   /** Throws unless a new Claude turn may start; sessions add their own conditions. */
@@ -77,13 +87,13 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     this.assertIdle(sessionId)
   }
 
-  /** Runs a GitHub write for the session, marking it busy so no turn or other write starts meanwhile. */
-  protected async whilePublishing<T>(sessionId: string, action: () => Promise<T>): Promise<T> {
-    this.publishing.add(sessionId)
+  /** Runs a git or GitHub action for the session outside a turn, marking it busy so no turn or other action starts meanwhile. */
+  protected async whileBusy<T>(sessionId: string, action: () => Promise<T>): Promise<T> {
+    this.busy.add(sessionId)
     try {
       return await action()
     } finally {
-      this.publishing.delete(sessionId)
+      this.busy.delete(sessionId)
     }
   }
 
@@ -167,6 +177,13 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     )
   }
 
+  /** Returns the conversation to resume, or undefined when there is none or it ran in another folder. */
+  private resumableConversation(sessionId: string, cwd: string): string | undefined {
+    const session = this.find(sessionId)
+    if (!session?.sdkSessionId) return undefined
+    return (session.sdkCwd ?? sessionDir(sessionId)) === cwd ? session.sdkSessionId : undefined
+  }
+
   protected async runTurn(sessionId: string, prompt: string, mode: TurnMode): Promise<void> {
     const controller = new AbortController()
     this.controllers.set(sessionId, controller)
@@ -182,12 +199,16 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
       true,
     )
 
-    const cwd = sessionDir(sessionId)
-    mkdirSync(cwd, { recursive: true })
-
-    const setup = this.turnSetup(sessionId)
+    const scratch = sessionDir(sessionId)
+    mkdirSync(scratch, { recursive: true })
+    const setup = await this.turnSetup(sessionId)
+    const cwd = setup.cwd ?? scratch
+    const resume = this.resumableConversation(sessionId, cwd)
+    if (!resume && this.find(sessionId)?.sdkSessionId) {
+      this.append(sessionId, { kind: 'warning', id: randomUUID(), label: NEW_CONVERSATION_WARNING, detail: cwd, at: now() })
+    }
     const decide = (toolName: string, input: unknown) =>
-      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd, readOnlyGitRepos: setup.readOnlyGitRepos })
+      decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd, access: setup.toolAccess })
 
     const preToolUse: HookCallback = async (input) => {
       if (input.hook_event_name !== 'PreToolUse') return {}
@@ -215,22 +236,22 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
       const stream = query({
         prompt,
         options: {
-          resume: this.find(sessionId)?.sdkSessionId ?? undefined,
+          resume,
           cwd,
           pathToClaudeCodeExecutable: claudeExecutable(),
           abortController: controller,
-          settingSources: ['user'],
+          settingSources: setup.settingSources ?? ['user'],
           skills: 'all',
           systemPrompt: { type: 'preset', preset: 'claude_code', append: setup.systemPromptAppend },
           mcpServers: { [RALLY_SERVER]: setup.mcpServer },
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
           canUseTool,
-          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: cwd }),
+          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: scratch, ...(setup.toolAccess === 'open' ? pushBlockingGitEnv(process.env, setup.githubRemotes) : {}) }),
         },
       })
       for await (const message of stream) {
         if (message.type === 'system' && message.subtype === 'init') {
-          this.patchCore(sessionId, () => ({ sdkSessionId: message.session_id }), true)
+          this.patchCore(sessionId, () => ({ sdkSessionId: message.session_id, sdkCwd: cwd }), true)
         }
         if (message.type === 'result') resultOk = message.subtype === 'success' && !message.is_error
         this.updateTimeline(sessionId, (timeline) => reduceTimeline(timeline, message, now()))

@@ -1,15 +1,10 @@
-import { canReplyTo, isReplyPending, itemLocation, shortSha } from '@shared/authorSession'
+import { canReplyTo, isFindingHandled, isReplyPending, itemLocation, shortSha } from '@shared/authorSession'
 import { RESPONSE_ACTION_LABELS, RESPONSE_ACTIONS, RESPONSE_VERDICT_LABELS, type FeedbackComment, type ResponseAction, type ResponseVerdict } from '@shared/types'
-import type { FeedbackRow } from '../lib/authorView'
+import type { ActionPick, FeedbackRow } from '../lib/authorView'
 import { age, fullTime } from '../lib/format'
 import { Avatar } from './Avatar'
 import { BodyTextarea } from './BodyTextarea'
 import { Markdown } from './Markdown'
-
-export interface ActionPick {
-  action: ResponseAction
-  note: string
-}
 
 const VERDICT_STYLES: Record<ResponseVerdict, string> = {
   valid: 'bg-amber-500/15 text-amber-200',
@@ -18,7 +13,7 @@ const VERDICT_STYLES: Record<ResponseVerdict, string> = {
   unclear: 'bg-ink-500/20 text-ink-300',
 }
 
-const FINDING_ACTIONS: ResponseAction[] = ['investigate', 'fix']
+const FINDING_ACTIONS: ResponseAction[] = ['investigate', 'fix', 'push_back']
 
 const VISIBLE_COMMENTS = 3
 
@@ -80,11 +75,11 @@ interface Props {
   onReplyEdit(body: string | undefined): void
   onResolve(resolve: boolean): void
   onDropReply(): void
-  onDismiss(): void
+  onClearFinding(): void
   onAcknowledge(): void
 }
 
-export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, onReplyEdit, onResolve, onDropReply, onDismiss, onAcknowledge }: Props) {
+export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, onReplyEdit, onResolve, onDropReply, onClearFinding, onAcknowledge }: Props) {
   const { item, response, posted, closedOnGithub } = row
   const isFinding = item.kind === 'finding'
   const actions = isFinding ? FINDING_ACTIONS : RESPONSE_ACTIONS
@@ -128,8 +123,18 @@ export function FeedbackCard({ row, pick, replyEdit, resolve, disabled, onPick, 
               </button>
             ))}
           </div>
-          {isFinding && (
-            <button className="text-xs text-ink-500 hover:text-rose-300 disabled:opacity-40" disabled={disabled} onClick={onDismiss}>
+          {isFinding && isFindingHandled(response) && (
+            <button
+              className="rounded-md px-2 py-1 text-xs text-emerald-300 ring-1 ring-emerald-500/30 hover:bg-emerald-500/15 disabled:opacity-40"
+              disabled={disabled}
+              title="Clear this finding now that Claude fixed, investigated, or pushed back on it."
+              onClick={onClearFinding}
+            >
+              ✓ Resolve
+            </button>
+          )}
+          {isFinding && !isFindingHandled(response) && (
+            <button className="text-xs text-ink-500 hover:text-rose-300 disabled:opacity-40" disabled={disabled} onClick={onClearFinding}>
               Dismiss
             </button>
           )}

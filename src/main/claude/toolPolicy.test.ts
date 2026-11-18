@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { decideToolUse } from './toolPolicy'
+import { decideToolUse, pushBlockingGitEnv } from './toolPolicy'
+import { commitFile, git as testGit, TEST_GIT_ENV } from '../git/testRepo.fixture'
 
 const SESSION_CWD = join(tmpdir(), 'rally', 'test-session')
 const REVIEWING = { cwd: SESSION_CWD }
@@ -248,6 +250,8 @@ gh repo clone acme/web "$WORK/acme-web" -- --filter=blob:none --quiet
     expect(bash('git -C ~/src/rally log --oneline -5')).toBe(true)
     expect(bash('git config --global core.pager less')).toBe(false)
     expect(bash('git config --global --get user.name')).toBe(true)
+    expect(bash('git config --global user.name && git config get --global user.name')).toBe(true)
+    expect(bash('git config --global alias.p push')).toBe(false)
     expect(bash('git -c core.pager=cat log')).toBe(true)
     expect(bash('git -c advice.detachedHead=false -C ~/src/rally checkout main')).toBe(false)
     expect(bash('git -c x=y push origin HEAD')).toBe(false)
@@ -311,17 +315,124 @@ gh repo clone acme/web "$WORK/acme-web" -- --filter=blob:none --quiet
     expect(decideToolUse('Agent', { description: 'Security lens' }, REVIEWING).allow).toBe(true)
   })
 
-  it('only lets git read in a repo Rally commits in, and leaves other temp repos alone', () => {
-    const clone = join(SESSION_CWD, 'repo')
-    const AUTHOR = { cwd: SESSION_CWD, readOnlyGitRepos: [clone] }
-    expect(bash(`git -C "${clone}" diff origin/main...HEAD`, AUTHOR)).toBe(true)
-    expect(bash(`cd repo && git log --oneline -5 && git status`, AUTHOR)).toBe(true)
-    expect(bash(`cd repo && git commit -am "fix"`, AUTHOR)).toBe(false)
-    expect(bash(`git -C "${clone}" fetch origin`, AUTHOR)).toBe(false)
-    expect(bash(`git -C "${clone}/src" checkout -- a.ts`, AUTHOR)).toBe(false)
-    expect(bash(`cd repo && gh pr checkout 12`, AUTHOR)).toBe(false)
-    expect(decideToolUse('Bash', { command: 'cd repo && git merge origin/main' }, AUTHOR)).toMatchObject({ reason: expect.stringContaining('publish_responses') })
-    expect(bash(`git -C "${WORK}/repo" commit -am "skill scratch"`, AUTHOR)).toBe(true)
-    expect(bash(`cd repo && git commit -am "fix"`)).toBe(true)
+  describe('with open access', () => {
+    const WORKTREE = join(homedir(), 'src', 'api')
+    const OPEN = { cwd: WORKTREE, access: 'open' as const }
+
+    it('allows git, tests, writes, and tools anywhere', () => {
+      expect(bash('git commit -am "fix" && git checkout -b spike && git reset --hard HEAD~1 && git fetch origin', OPEN)).toBe(true)
+      expect(bash('bundle exec rspec spec/models > tmp/rspec.log 2>&1', OPEN)).toBe(true)
+      expect(bash(`rm -rf ${WORKTREE}/tmp && echo x > ${homedir()}/notes.txt && kubectl get pods && find . -name '*.orig' -delete`, OPEN)).toBe(true)
+      expect(bash('gh pr checkout 12 && gh pr view 12', OPEN)).toBe(true)
+      expect(decideToolUse('Write', { file_path: join(WORKTREE, 'app.rb') }, OPEN).allow).toBe(true)
+      expect(decideToolUse('Monitor', {}, OPEN).allow).toBe(true)
+      expect(decideToolUse('mcp__plugin_originations_atlassian__createJiraIssue', {}, OPEN).allow).toBe(true)
+    })
+
+    it('blocks pushes and GitHub writes, even nested in other commands', () => {
+      expect(decideToolUse('Bash', { command: 'git push origin HEAD' }, OPEN)).toMatchObject({ reason: expect.stringContaining('approves the diff') })
+      expect(bash('git -C ../api push', OPEN)).toBe(false)
+      expect(bash(`bash -c 'git push --force'`, OPEN)).toBe(false)
+      expect(bash('env FOO=1 git push', OPEN)).toBe(false)
+      expect(bash(`find . -maxdepth 0 -exec git push \\;`, OPEN)).toBe(false)
+      expect(bash('gh pr comment 12 --body hi', OPEN)).toBe(false)
+      expect(bash('gh api repos/acme/api/pulls/12/reviews -f event=APPROVE', OPEN)).toBe(false)
+      expect(decideToolUse('mcp__plugin_originations_github__add_issue_comment', {}, OPEN).allow).toBe(false)
+      expect(decideToolUse('mcp__plugin_originations_github__pull_request_read', {}, OPEN).allow).toBe(true)
+      expect(decideToolUse('AskUserQuestion', {}, OPEN).allow).toBe(false)
+    })
+
+    it('blocks push under another name and GitHub writes through curl or wget', () => {
+      expect(bash('git -c alias.p=push p origin HEAD', OPEN)).toBe(false)
+      expect(bash('git config alias.p push && git p', OPEN)).toBe(false)
+      expect(bash('git config --get alias.p', OPEN)).toBe(true)
+      expect(bash('git send-pack origin HEAD:refs/heads/feature', OPEN)).toBe(false)
+      expect(bash('curl -X POST -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/acme/api/issues/1/comments -d x', OPEN)).toBe(false)
+      expect(bash(`wget --post-data='{"body":"x"}' https://api.github.com/repos/acme/api/issues/1/comments`, OPEN)).toBe(false)
+      expect(bash('curl -s https://api.github.com/repos/acme/api/pulls/1', OPEN)).toBe(true)
+      expect(bash('curl -X POST http://localhost:3000/graphql -d x', OPEN)).toBe(true)
+    })
+
+    it('blocks config and environment changes that would get around the push URL rewrite', () => {
+      expect(bash('git remote set-url --push origin https://github.com/acme/api.git', OPEN)).toBe(false)
+      expect(bash('git config remote.origin.pushurl https://github.com/acme/api.git', OPEN)).toBe(false)
+      expect(bash('git config url.https://github.com/.pushInsteadOf x', OPEN)).toBe(false)
+      expect(bash('git -c url.x.insteadOf=y fetch', OPEN)).toBe(false)
+      expect(bash('GIT_CONFIG_COUNT=0 make release', OPEN)).toBe(false)
+      expect(bash('unset GIT_CONFIG_COUNT && npm run release', OPEN)).toBe(false)
+      expect(bash('env -u GIT_CONFIG_COUNT npm run release', OPEN)).toBe(false)
+      expect(bash('env -i PATH=/usr/bin npm run release', OPEN)).toBe(false)
+      expect(bash('/usr/libexec/git-core/git-send-pack git@github.com:acme/api.git HEAD:main', OPEN)).toBe(false)
+      expect(bash('git remote set-url origin https://x-access-token:$T@github.com/acme/api.git', OPEN)).toBe(false)
+      expect(bash('git config set remote.origin.url https://me@github.com/acme/api.git', OPEN)).toBe(false)
+      expect(bash('git config remote.origin.url https://me@github.com/acme/api.git', OPEN)).toBe(false)
+      expect(bash('git remote add fork https://me@github.com/me/api.git', OPEN)).toBe(false)
+      expect(bash('declare -x GIT_CONFIG_COUNT=0', OPEN)).toBe(false)
+      expect(bash('env - make release', OPEN)).toBe(false)
+      expect(bash('env --unset=GIT_CONFIG_COUNT make release', OPEN)).toBe(false)
+      expect(bash('env -uGIT_CONFIG_COUNT make release', OPEN)).toBe(false)
+      expect(bash('exec -c make release', OPEN)).toBe(false)
+      expect(bash('exec -cl make release', OPEN)).toBe(false)
+      expect(bash('env -vi make release', OPEN)).toBe(false)
+      expect(bash(`env -S "-i make release"`, OPEN)).toBe(false)
+      expect(bash('env --ignore make release', OPEN)).toBe(false)
+      expect(bash('env --default-signal -i make release', OPEN)).toBe(false)
+      expect(bash('env --c /tmp -i make release', OPEN)).toBe(false)
+      expect(bash(`git config alias.q '--no-pager push https://me@github.com/acme/api.git HEAD:main'`, OPEN)).toBe(false)
+      expect(bash('git remote set-url fork https://me@github.com/me/api.git', OPEN)).toBe(false)
+      expect(bash('git remote add -t main -f fork https://me@github.com/me/api.git', OPEN)).toBe(false)
+      expect(bash('git remote add fork git@github.com:me/api.git && git remote add gl https://gitlab.com/me/api.git', OPEN)).toBe(true)
+      expect(bash('git config --get remote.origin.pushurl && git remote -v', OPEN)).toBe(true)
+      expect(bash('git config remote.origin.url && git config get remote.origin.url && git config alias.co', OPEN)).toBe(true)
+      expect(bash('git config --file .git/config alias.co && git config --type bool alias.co && git config get --file x remote.origin.url', OPEN)).toBe(true)
+      expect(bash('git remote set-url gl https://gitlab.com/me/api.git && git remote set-url origin git@github.com:acme/api.git', OPEN)).toBe(true)
+      expect(bash(`exec bash -c "npm test" && env CI=1 cat - && env CI=true npx jest -i && env -u FOO npm test`, OPEN)).toBe(true)
+      expect(bash('FOO=1 npm test && export NODE_ENV=test && env NODE_ENV=test npm test', OPEN)).toBe(true)
+    })
+
+    it('keeps blocking push through xargs, eval, a full path, and command substitution', () => {
+      expect(bash('echo origin | xargs git push', OPEN)).toBe(false)
+      expect(bash(`eval "git push"`, OPEN)).toBe(false)
+      expect(bash('/usr/bin/git push', OPEN)).toBe(false)
+      expect(bash('echo $(git push)', OPEN)).toBe(false)
+      expect(bash('gh pr merge 12', OPEN)).toBe(false)
+      expect(bash('gh pr create --fill', OPEN)).toBe(false)
+      expect(bash(`gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'`, OPEN)).toBe(false)
+    })
   })
+})
+
+describe('pushBlockingGitEnv', () => {
+  it('appends after git config entries the environment already sets', () => {
+    const env = pushBlockingGitEnv({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.editor', GIT_CONFIG_VALUE_0: 'vi' })
+    expect(env).toMatchObject({ GIT_CONFIG_COUNT: '7', GIT_CONFIG_KEY_1: 'url.rally-blocked-push://.pushInsteadOf', GIT_CONFIG_VALUE_1: 'https://github.com/' })
+    expect(env.GIT_CONFIG_KEY_0).toBeUndefined()
+  })
+
+  it('leaves fetching alone when a push URL is also a fetch URL', () => {
+    const remotes = { urls: ['https://github.com/acme/api.git'], pushUrls: ['https://github.com/acme/api.git', 'https://github.com/acme/mirror.git'] }
+    const env = pushBlockingGitEnv({}, remotes)
+    const insteadOf = Object.entries(env).filter(([key, value]) => key.startsWith('GIT_CONFIG_KEY_') && value.endsWith('.insteadOf'))
+    expect(insteadOf).toHaveLength(1)
+    expect(env[insteadOf[0][0].replace('KEY', 'VALUE')]).toBe('https://github.com/acme/mirror.git')
+  })
+
+  it('makes git push to GitHub fail before reaching the network, for a URL, a named remote, a user in the URL, or an explicit push URL', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'rally-push-block-'))
+    try {
+      testGit(repo, 'init', '--initial-branch=main')
+      commitFile(repo, 'a.txt', 'a\n')
+      testGit(repo, 'remote', 'add', 'origin', 'https://me@github.com/acme/api.git')
+      testGit(repo, 'remote', 'add', 'mirror', 'https://github.com/acme/mirror.git')
+      testGit(repo, 'remote', 'set-url', '--push', 'mirror', 'https://me@github.com/acme/mirror-push.git')
+      const remotes = { urls: ['https://me@github.com/acme/api.git', 'https://github.com/acme/mirror.git'], pushUrls: ['https://me@github.com/acme/mirror-push.git'] }
+      const env = { ...TEST_GIT_ENV, ...pushBlockingGitEnv(TEST_GIT_ENV, remotes) }
+      for (const target of ['https://github.com/acme/api.git', 'git@github.com:acme/api.git', 'http://github.com/acme/api.git', 'origin', 'mirror']) {
+        const push = () => execFileSync('git', ['push', target, 'HEAD:main'], { cwd: repo, env, stdio: 'pipe' })
+        expect(push).toThrow(/rally-blocked-push/)
+      }
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  }, 30_000)
 })

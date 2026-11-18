@@ -189,7 +189,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
   const { drafts } = session
   const hasDrafts = Boolean(drafts)
   const members = sessionMembers(session)
-  const unit = members.length > 1
+  const unit = isUnitSession(session)
   const prOf = (member: PrRef) => memberPrs.find((pr) => keyOf(pr) === keyOf(member))
   const postedOf = (member: PrRef) => memberPosted(session, keyOf(member))
   const partlyPosted = isPartlyPosted(session)
@@ -231,7 +231,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
   const pullChanges = () => sendMessage(pullChangesMessage(drafts, changes, lastSuccessfulTurnAt, members.length))
   const submit = (verdicts: MemberVerdict[]) =>
     run(async () => {
-      const empty = drafts && emptyReviewError(drafts, verdicts, changes, unit)
+      const empty = drafts && emptyReviewError(session, drafts, verdicts, changes)
       if (empty) throw new Error(empty)
       await window.rally.submitReview(session.id, verdicts, changes, threadResolution.selectedIds)
     })
@@ -299,7 +299,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
       {session.submitted && (
         <div className="space-y-2 rounded-xl bg-emerald-950/70 px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-500/20">
           {members.map((member) => {
-            const posted = unit ? postedOf(member) : session.submitted
+            const posted = postedOf(member)
             return (
               <div key={keyOf(member)} className="flex flex-wrap items-center gap-2">
                 {unit && <MemberLabel member={member} pr={prOf(member)} />}

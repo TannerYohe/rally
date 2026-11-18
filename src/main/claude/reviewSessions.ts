@@ -73,7 +73,7 @@ function submitPlan(session: ReviewSession, drafts: Drafts, verdicts: MemberVerd
     if (event === 'SKIP' && !unit) throw new Error('Pick Comment, Approve, or Request changes.')
     return { member, prKey: key, event }
   })
-  const empty = emptyReviewError(drafts, remainingVerdicts, changes, unit)
+  const empty = emptyReviewError(session, drafts, remainingVerdicts, changes)
   if (empty) throw new Error(empty)
   const posts = remainingVerdicts.flatMap(({ member, prKey, event }): MemberPost[] =>
     event === 'SKIP' ? [] : [{ member, event, review: finalReview(draftsForPr(drafts, prKey), changesForPr(changes, prKey)) }],
@@ -254,20 +254,21 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
 
 
   protected turnSetup(sessionId: string): TurnSetup {
-    const members = sessionMembers(this.byId(sessionId))
+    const session = this.byId(sessionId)
+    const members = sessionMembers(session)
     const mcpServer = createRallyServer(
       {
         onDrafts: (published) => {
-          const session = this.find(sessionId)
-          if (!session) return
-          const drafts = withPrTags(published, session.prKey)
+          const current = this.find(sessionId)
+          if (!current) return
+          const drafts = withPrTags(published, current.prKey)
           this.patch(sessionId, () => ({ drafts }), true)
           void this.lookUpReplyTargets(sessionId, drafts)
         },
       },
       { members },
     )
-    const systemPromptAppend = members.length > 1 ? `${APP_PROTOCOL}\n\n${unitProtocol(members)}` : APP_PROTOCOL
+    const systemPromptAppend = isUnitSession(session) ? `${APP_PROTOCOL}\n\n${unitProtocol(members)}` : APP_PROTOCOL
     return { systemPromptAppend, mcpServer }
   }
 

@@ -97,11 +97,11 @@ export function unitDraftProblems(drafts: Drafts, memberKeys: string[]): string[
 }
 
 /** Returns the error for the first PR whose Comment review would post nothing, naming the PR in a review of several PRs. */
-export function emptyReviewError(drafts: Drafts, verdicts: MemberVerdict[], changes: DraftChanges, unit: boolean): string | null {
+export function emptyReviewError(session: Pick<ReviewSession, 'members'>, drafts: Drafts, verdicts: MemberVerdict[], changes: DraftChanges): string | null {
   for (const { prKey, event } of verdicts) {
     if (event === 'SKIP') continue
     if (isEmptyCommentReview(event, draftsForPr(drafts, prKey), changesForPr(changes, prKey))) {
-      return unit ? `${prKey}: ${EMPTY_COMMENT_REVIEW_ERROR}` : EMPTY_COMMENT_REVIEW_ERROR
+      return isUnitSession(session) ? `${prKey}: ${EMPTY_COMMENT_REVIEW_ERROR}` : EMPTY_COMMENT_REVIEW_ERROR
     }
   }
   return null

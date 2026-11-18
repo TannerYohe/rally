@@ -127,9 +127,21 @@ const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and re
 
 const GIT_PUSH_REASON = 'git push is not permitted in Rally. Rally pushes once the user approves the diff.'
 
-const GIT_CONFIG_REASON = 'Rally blocks git aliases, URL rewrite rules, and changes to remote URLs, since they can push around its guardrails.'
+const GIT_CONFIG_REASON = 'Rally blocks setting git aliases, URL rewrite rules, and remote URLs, and remotes pointed at GitHub URLs its push rewrite misses.'
 
 const GIT_CONFIG_ENV_REASON = "Rally blocks changing the GIT_CONFIG_* environment, which carries its push URL rewrite."
+
+const GIT_CONFIG_WRITE_FLAGS = new Set([
+  '--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section', '--edit', '-e',
+])
+
+const GIT_CONFIG_WRITE_SUBCOMMANDS = new Set(['set', 'unset', 'rename-section', 'remove-section', 'edit'])
+
+const GIT_CONFIG_READ_SUBCOMMANDS = new Set(['get', 'list'])
+
+const ENV_VALUE_FLAGS = new Set(['u', 'C', 'P'])
+
+const ENV_VALUE_OPTIONS = ['--chdir', '--block-signal', '--default-signal', '--ignore-signal']
 
 const GIT_CONFIG_ENV = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)(?:\+?=|$)/
 
@@ -508,21 +520,32 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
 
 /**
  * Under open access, blocks git push and send-pack, and git config that could push under another name or around Rally's push URL rewrite:
- * aliases, URL rewrite rules, remote URLs, and remote push URLs. Adding a remote is allowed when its URL is not GitHub or the rewrite covers it.
+ * setting aliases, URL rewrite rules, remote URLs, or push URLs, and pointing a remote at a GitHub URL the rewrite doesn't cover.
  */
 function decideOpenGit(args: string[], state: ShellState): ToolDecision {
   const { configs, subcommand, rest } = parseGit(args, state)
   if (subcommand === 'push' || subcommand === 'send-pack') return deny(GIT_PUSH_REASON)
-  const setsGuardedKey = subcommand === 'config' && rest.some(isGuardedGitKey) && !rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))
+  const setsGuardedKey = subcommand === 'config' && rest.some(isGuardedGitKey) && isGitConfigWrite(rest)
   const operands = rest.filter((a) => !a.startsWith('-'))
-  const changesRemoteUrl = subcommand === 'remote' && (operands[0] === 'set-url' || (operands[0] === 'add' && isUncoveredGithubUrl(operands.at(-1) ?? '')))
-  if (configs.some(isGuardedGitKey) || setsGuardedKey || changesRemoteUrl) return deny(GIT_CONFIG_REASON)
+  const remoteUrlChange = subcommand === 'remote' && ['add', 'set-url'].includes(operands[0])
+  const pointsRemoteAtUncoveredUrl = remoteUrlChange && (rest.includes('--push') || operands.slice(1).some(isUncoveredGithubUrl))
+  if (configs.some(isGuardedGitKey) || setsGuardedKey || pointsRemoteAtUncoveredUrl) return deny(GIT_CONFIG_REASON)
   return ALLOW
 }
 
 const isGuardedGitKey = (word: string) => /^(?:alias\.|url\.|remote\..+\.(?:push)?url(?:=|$))/i.test(word)
 
 const isUncoveredGithubUrl = (url: string) => githubRepoOf(url) !== null && !GITHUB_URL_PREFIXES.some((prefix) => url.startsWith(prefix))
+
+/** Returns whether `git config` arguments change a value rather than read one: a write flag or subcommand, or a key followed by a value. */
+function isGitConfigWrite(args: string[]): boolean {
+  if (args.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return false
+  if (args.some((a) => GIT_CONFIG_WRITE_FLAGS.has(a.split('=')[0]))) return true
+  const operands = args.filter((a) => !a.startsWith('-'))
+  if (GIT_CONFIG_WRITE_SUBCOMMANDS.has(operands[0])) return true
+  if (GIT_CONFIG_READ_SUBCOMMANDS.has(operands[0])) return false
+  return operands.length >= 2
+}
 
 /** Under open access, blocks commands that set, clear, or drop the git config environment carrying Rally's push URL rewrite. */
 function touchesGitConfigEnv(program: string, args: string[]): boolean {
@@ -535,18 +558,53 @@ function touchesGitConfigEnv(program: string, args: string[]): boolean {
     case 'readonly':
       return args.some((a) => GIT_CONFIG_ENV.test(a))
     case 'env':
-      return args.some(
-        (a, i) =>
-          GIT_CONFIG_ENV.test(a) ||
-          ['-', '-i', '--ignore-environment'].includes(a) ||
-          (['-u', '--unset'].includes(a) && GIT_CONFIG_ENV.test(args[i + 1] ?? '')) ||
-          GIT_CONFIG_ENV.test(a.replace(/^(?:-u|--unset=)/, '')),
-      )
+      return envClearsGitConfig(args)
     case 'exec':
-      return args.includes('-c')
+      return execClearsEnvironment(args)
     default:
       return false
   }
+}
+
+/** Reads env's own options and assignments, up to the program it runs, for any that clear the environment or a GIT_CONFIG_* variable. */
+function envClearsGitConfig(args: string[]): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (ASSIGNMENT.test(arg)) {
+      if (GIT_CONFIG_ENV.test(arg)) return true
+      continue
+    }
+    if (arg === '-') return true
+    if (!arg.startsWith('-')) return false
+    if (arg.startsWith('--')) {
+      const [name, inline] = arg.split(/=(.*)/s)
+      const isLong = (option: string, shortest: number) => name.length >= shortest && option.startsWith(name)
+      if (isLong('--ignore-environment', 3) || isLong('--split-string', 3)) return true
+      if (isLong('--unset', 3)) {
+        if (GIT_CONFIG_ENV.test(inline ?? args[++i] ?? '')) return true
+      } else if (inline === undefined && ENV_VALUE_OPTIONS.some((option) => isLong(option, 4))) {
+        i++
+      }
+      continue
+    }
+    for (let j = 1; j < arg.length; j++) {
+      if (arg[j] === 'i' || arg[j] === 'S') return true
+      if (!ENV_VALUE_FLAGS.has(arg[j])) continue
+      const value = arg.slice(j + 1) || args[++i] || ''
+      if (arg[j] === 'u' && GIT_CONFIG_ENV.test(value)) return true
+      break
+    }
+  }
+  return false
+}
+
+/** Reads exec's own options, up to the program it runs, for -c, which clears the environment. */
+function execClearsEnvironment(args: string[]): boolean {
+  for (let i = 0; i < args.length && args[i].startsWith('-'); i++) {
+    if (args[i].includes('c')) return true
+    if (args[i].endsWith('a')) i++
+  }
+  return false
 }
 
 /** Under open access, blocks curl and wget requests to GitHub other than reads. */

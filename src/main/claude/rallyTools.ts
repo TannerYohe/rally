@@ -136,6 +136,7 @@ export function publishDraftsTool(handlers: RallyToolHandlers, options: PublishD
       if (options.members.length > 1) {
         const problems = unitDraftProblems(drafts, options.members.map(keyOf))
         if (problems.length > 0) {
+          console.warn('Rally rejected unit drafts', { members: options.members.map(keyOf), problems })
           return {
             content: [{ type: 'text' as const, text: `Rally did not accept these drafts. Fix the following and publish the full set again:\n${problems.map((p) => `- ${p}`).join('\n')}` }],
             isError: true,

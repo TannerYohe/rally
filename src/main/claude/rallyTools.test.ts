@@ -57,6 +57,7 @@ describe('publishDraftsTool', () => {
   })
 
   it('rejects unit drafts with a missing PR, a repeated id, or a missing verdict without publishing them', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const onDrafts = vi.fn()
     const args = { ...unitArgs, comments: [comment('1'), comment('1', 'acme/api#1')], pr_reviews: unitArgs.pr_reviews!.slice(0, 1) }
     const result = await publishDraftsTool({ onDrafts }, { members: [api, web] }).handler(args, {})
@@ -66,6 +67,7 @@ describe('publishDraftsTool', () => {
     expect(text).toContain('#1 repeat')
     expect(text).toContain('Give a verdict and review body for Acme/Web#2')
     expect(onDrafts).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith('Rally rejected unit drafts', expect.objectContaining({ members: ['acme/api#1', 'Acme/Web#2'] }))
   })
 
   it('accepts any drafts for one PR, as author self-review does', async () => {

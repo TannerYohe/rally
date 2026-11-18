@@ -151,7 +151,8 @@ export async function checkoutWorktree(folders: string[], target: WorktreeTarget
 /**
  * Removes a worktree Rally added, and its local branch when Rally created that too. With dropWork, the worktree's uncommitted edits and the
  * branch's unpushed commits go with them; without it, Rally refuses when either exists. Commits up to the head Rally last synced or pushed
- * count as pushed, even after GitHub deletes the branch. When the folder is gone, Rally unregisters it through the clone it recorded.
+ * count as pushed, even after GitHub deletes the branch. When the folder is gone, Rally unregisters it through the clone it recorded. A branch
+ * already deleted, or checked out in another worktree, is left alone.
  */
 export async function removeRallyWorktree(clone: CloneInfo, { dropWork }: { dropWork: boolean }): Promise<void> {
   if (checkoutKind(clone) !== 'rally_worktree') return
@@ -161,12 +162,14 @@ export async function removeRallyWorktree(clone: CloneInfo, { dropWork }: { drop
     if (present) throw new Error(`Rally can't find the clone the worktree at ${clone.path} belongs to. Delete that folder yourself.`)
     return
   }
-  if (!dropWork && clone.createdBranch) {
+  const branchExists = clone.createdBranch === true && (await localBranchExists(root, clone.branch))
+  if (!dropWork && branchExists) {
     const pushed = ['--remotes=origin', ...(clone.syncedHead ? [clone.syncedHead] : [])]
     const unpushed = (await git(root, ['rev-list', '--count', `refs/heads/${clone.branch}`, '--not', ...pushed])).trim()
     if (unpushed !== '0') throw new Error(`The branch ${clone.branch} has commits GitHub doesn't.`)
   }
   const registered = present || (await registeredWorktrees(root)).some((w) => samePath(w.path, clone.path))
   if (registered) await git(root, ['worktree', 'remove', ...(dropWork || !present ? ['--force'] : []), clone.path])
-  if (clone.createdBranch && (await localBranchExists(root, clone.branch))) await git(root, ['branch', '-D', clone.branch])
+  const checkedOutElsewhere = branchExists && (await registeredWorktrees(root)).some((w) => w.branch === clone.branch)
+  if (branchExists && !checkedOutElsewhere) await git(root, ['branch', '-D', clone.branch])
 }

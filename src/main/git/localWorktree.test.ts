@@ -217,6 +217,27 @@ describe('checkoutWorktree', () => {
     expect(git(clonePath, 'worktree', 'list')).not.toContain(added!.path)
   })
 
+  it('removes a worktree whose folder and branch are both gone, and keeps a branch checked out elsewhere', async () => {
+    const seed = join(root, 'seed')
+    git(seed, 'checkout', '-b', 'cleaned', 'main')
+    git(seed, 'push', 'origin', 'cleaned')
+    const cleaned = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'cleaned', baseBranch: 'main' })
+    rmSync(cleaned!.path, { recursive: true, force: true })
+    git(clonePath, 'worktree', 'prune')
+    git(clonePath, 'branch', '-D', 'cleaned')
+    await removeRallyWorktree(cleaned!, { dropWork: false })
+
+    git(seed, 'checkout', '-b', 'moved', 'main')
+    git(seed, 'push', 'origin', 'moved')
+    const moved = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'moved', baseBranch: 'main' })
+    rmSync(moved!.path, { recursive: true, force: true })
+    git(clonePath, 'worktree', 'prune')
+    const elsewhere = join(root, 'conductor', 'moved')
+    git(clonePath, 'worktree', 'add', elsewhere, 'moved')
+    await removeRallyWorktree(moved!, { dropWork: true })
+    expect(git(clonePath, 'branch', '--list', 'moved').trim()).toContain('moved')
+  })
+
   it('never removes a worktree Rally did not add', async () => {
     const found = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'mine', baseBranch: 'main' })
     await removeRallyWorktree(found!, { dropWork: true })

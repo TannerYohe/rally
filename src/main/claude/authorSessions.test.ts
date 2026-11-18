@@ -165,6 +165,16 @@ mocks.stored = [
     description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' },
   }),
   stored(62, { description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' } }),
+  stored(66, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' },
+  }),
+  stored(67, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' },
+  }),
   stored(63),
   stored(64),
   stored(65),
@@ -627,11 +637,12 @@ describe('description updates', () => {
     await authorSessions.feedback(session(63).id, 'update the description')
     await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
 
-    expect(await mocks.handlers!.onDescription({ title: 'Fix', body: 'Old body\n' })).toContain('nothing to update')
-    expect(session(63).description).toBeNull()
     expect(await mocks.handlers!.onDescription({ title: ' Fix the bug ', body: 'New body\n' })).toContain('saved')
     expect(session(63).description).toMatchObject({ title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body\r\n' } })
     expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: true })
+    expect(await mocks.handlers!.onDescription({ title: 'Fix', body: 'Old body\n' })).toContain('nothing to update')
+    expect(session(63).description).toBeNull()
+    expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: false })
   })
 
   it('asks Claude to update the description from the clone, quoting the current one', async () => {
@@ -668,6 +679,27 @@ describe('description updates', () => {
     await authorSessions.push('author-61')
     expect(mocks.updateDescription).toHaveBeenCalledWith(pr(61), { title: 'Fix the bug', body: 'New body' })
     expect(session(61)).toMatchObject({ status: 'awaiting_feedback', commits: [], description: null })
+  })
+
+  it('keeps pushed commits and the draft when the description update fails after them', async () => {
+    const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: CLONE })
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    mocks.updateDescription.mockRejectedValue(new Error('Not Found'))
+    await expect(authorSessions.push('author-66')).rejects.toThrow("The commits are pushed. Rally couldn't update the PR description: Not Found")
+    expect(session(66)).toMatchObject({ status: 'error', commits: [], lastPush, description: { title: 'Fix the bug' } })
+    expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 66)
+  })
+
+  it('leaves the description update for later when the merge conflicts', async () => {
+    mocks.integrateRemote.mockRejectedValue(new MergeConflictError('feature', ['a.ts']))
+    mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
+    finishTurn()
+    await authorSessions.push('author-67')
+    expect(session(67)).toMatchObject({ mergeConflicts: ['a.ts'], description: { title: 'Fix the bug' } })
+    expect(mocks.fetchDescription).not.toHaveBeenCalled()
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(mocks.refreshOne).not.toHaveBeenCalled()
   })
 
   it('refuses to overwrite a description that changed on GitHub, keeping the draft', async () => {

@@ -84,6 +84,15 @@ describe('unitDraftProblems', () => {
       'Give a verdict and review body for acme/web#2 in pr_reviews.',
     ])
   })
+
+  it('names pr_reviews entries for a PR outside the review or given twice', () => {
+    const review = (prKey: string) => ({ prKey, verdict: 'Looks good', summaryBody: '' })
+    const drafts: Drafts = { ...unitDrafts, prReviews: [review(API), review(WEB), review(WEB), review('acme/other#9')] }
+    expect(unitDraftProblems(drafts, [API, WEB])).toEqual([
+      "pr_reviews names acme/other#9, which isn't in this review.",
+      'Give acme/web#2 one entry in pr_reviews.',
+    ])
+  })
 })
 
 describe('distinctSessions', () => {

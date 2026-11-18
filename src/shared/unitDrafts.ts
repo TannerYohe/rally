@@ -60,7 +60,7 @@ export function changesForPr(changes: DraftChanges, prKey: string): DraftChanges
   return { ...changes, summaryBodyEdit: changes.summaryBodyEdits[prKey] }
 }
 
-/** Returns what keeps a unit's drafts from mapping onto its PRs: comments or concerns without a member PR, repeated ids, or a PR with no verdict. */
+/** Returns what keeps a unit's drafts from mapping onto its PRs: comments or concerns without a member PR, repeated ids, or a PR without exactly one verdict. */
 export function unitDraftProblems(drafts: Drafts, memberKeys: string[]): string[] {
   const problems: string[] = []
   const members = memberKeys.join(', ')
@@ -78,6 +78,8 @@ export function unitDraftProblems(drafts: Drafts, memberKeys: string[]): string[
   if (missing.length > 0) problems.push(`Give a verdict and review body for ${missing.join(', ')} in pr_reviews.`)
   const unknown = reviewed.filter((key) => !memberKeys.includes(key))
   if (unknown.length > 0) problems.push(`pr_reviews names ${unknown.join(', ')}, which isn't in this review.`)
+  const doubled = [...new Set(reviewed.filter((key, index) => reviewed.indexOf(key) !== index))]
+  if (doubled.length > 0) problems.push(`Give ${doubled.join(', ')} one entry in pr_reviews.`)
   return problems
 }
 

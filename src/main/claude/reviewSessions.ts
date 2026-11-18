@@ -19,6 +19,8 @@ import {
   type ThreadResolution,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
+import { keyOf } from '@shared/prUnit'
+import { draftsForPr, sessionMembers, withMemberComments } from '@shared/unitDrafts'
 import { describeReplies, needsReplyTargets } from '../github/reviewComments'
 import { submitReview } from '../github/submitReview'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
@@ -110,30 +112,43 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
 
   async threads(sessionId: string): Promise<ReviewThread[]> {
     const session = this.byId(sessionId)
-    return fetchOwnThreads(session.pr, priorConcernThreadIds(session.drafts))
+    const perMember = await Promise.all(
+      sessionMembers(session).map((member) => fetchOwnThreads(member, priorConcernThreadIds(this.memberDrafts(session, member)))),
+    )
+    return perMember.flat()
   }
 
+  /** Resolves each thread on the PR whose earlier comment it is, refusing threads outside the session's earlier comments. */
   async resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution> {
-    const { pr, resolvingThreads, drafts } = this.byId(sessionId)
-    if (resolvingThreads) throw new Error('Rally is already resolving threads for this review')
-    const concernThreadIds = new Set(priorConcernThreadIds(drafts))
+    const session = this.byId(sessionId)
+    if (session.resolvingThreads) throw new Error('Rally is already resolving threads for this review')
+    const concernThreadIds = new Set(priorConcernThreadIds(session.drafts))
     const outside = threadIds.filter((id) => !concernThreadIds.has(id))
     this.patch(sessionId, () => ({ resolvingThreads: true }), true)
-    let result: ThreadResolution
-    try {
-      const resolution = await resolveOwnThreads(
-        pr,
-        threadIds.filter((id) => concernThreadIds.has(id)),
-      )
-      const refused = outside.map((threadId) => ({ threadId, error: "Not one of this review's earlier comments" }))
-      result = { at: now(), resolved: resolution.resolved, failed: [...resolution.failed, ...refused] }
-    } catch (error) {
-      const message = errorMessage(error)
-      console.error('Resolving review threads failed', { pr: pr.url, error })
-      result = failedResolution(threadIds, message)
+    const resolved: string[] = []
+    const failed: ThreadResolution['failed'] = []
+    for (const member of sessionMembers(session)) {
+      const owned = new Set(priorConcernThreadIds(this.memberDrafts(session, member)))
+      const ids = threadIds.filter((id) => owned.has(id))
+      if (ids.length === 0) continue
+      try {
+        const resolution = await resolveOwnThreads(member, ids)
+        resolved.push(...resolution.resolved)
+        failed.push(...resolution.failed)
+      } catch (error) {
+        console.error('Resolving review threads failed', { pr: member.url, error })
+        failed.push(...failedResolution(ids, errorMessage(error)).failed)
+      }
     }
+    const refused = outside.map((threadId) => ({ threadId, error: "Not one of this review's earlier comments" }))
+    const result: ThreadResolution = { at: now(), resolved, failed: [...failed, ...refused] }
     this.patch(sessionId, () => ({ threadResolution: result, resolvingThreads: false }), true)
     return result
+  }
+
+  /** Returns one PR's share of the session's drafts. */
+  private memberDrafts(session: ReviewSession, member: PrRef): Drafts | null {
+    return session.drafts && draftsForPr(session.drafts, keyOf(member))
   }
 
   discard(sessionId: string): void {
@@ -159,8 +174,11 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     if (!session || !needsReplyTargets(drafts) || this.replyLookups.has(drafts)) return
     this.replyLookups.add(drafts)
     try {
-      const described = await describeReplies(session.pr, drafts)
-      if (this.find(sessionId)?.drafts === drafts) this.patch(sessionId, () => ({ drafts: described }), true)
+      const shares = sessionMembers(session).map((member) => ({ member, share: draftsForPr(drafts, keyOf(member)) }))
+      const described = await Promise.all(
+        shares.map(({ member, share }) => (needsReplyTargets(share) ? describeReplies(member, share) : share)),
+      )
+      if (this.find(sessionId)?.drafts === drafts) this.patch(sessionId, () => ({ drafts: withMemberComments(drafts, described) }), true)
     } catch (error) {
       console.warn('Looking up the comments that draft replies answer failed', { sessionId, pr: session.pr.url, error })
     } finally {

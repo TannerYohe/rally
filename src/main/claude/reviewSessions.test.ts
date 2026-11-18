@@ -31,6 +31,34 @@ const drafts = (threadIds: string[]): Drafts => ({
   priorConcerns: threadIds.map((threadId, i) => ({ id: `C${i + 1}`, location: 'a.rb:1', gist: '', verdict: '', status: 'addressed', threadId })),
 })
 
+const WEB = { owner: 'acme', repo: 'web', number: 2, url: 'https://github.com/acme/web/pull/2' }
+
+function unitDrafts(number: number): Drafts {
+  return {
+    mode: 'followup',
+    verdict: 'Needs changes',
+    reportMarkdown: '',
+    summaryBody: '',
+    comments: [
+      { ...THREAD_REPLY, id: '1', prKey: `acme/api#${number}` },
+      { ...THREAD_REPLY, id: '2', replyToCommentId: 77, prKey: 'acme/web#2' },
+    ],
+    priorConcerns: [
+      { id: 'C1', location: 'a.rb:1', gist: '', verdict: '', status: 'addressed', threadId: 'T-api', prKey: `acme/api#${number}` },
+      { id: 'C2', location: 'b.ts:1', gist: '', verdict: '', status: 'addressed', threadId: 'T-web', prKey: 'acme/web#2' },
+    ],
+    prReviews: [
+      { prKey: `acme/api#${number}`, verdict: 'Looks good', summaryBody: 'API body' },
+      { prKey: 'acme/web#2', verdict: 'Needs changes', summaryBody: 'Web body' },
+    ],
+  }
+}
+
+function storedUnit(number: number, overrides: Partial<ReviewSession> = {}): ReviewSession {
+  const base = storedSession(number)
+  return { ...base, members: [base.pr, WEB], drafts: unitDrafts(number), ...overrides }
+}
+
 function storedSession(number: number, overrides: Partial<ReviewSession> = {}): ReviewSession {
   return {
     id: `test-session-${number}`,
@@ -51,6 +79,7 @@ function storedSession(number: number, overrides: Partial<ReviewSession> = {}): 
 const mocks = vi.hoisted(() => ({
   stored: [] as ReviewSession[],
   resolveOwnThreads: vi.fn(),
+  fetchOwnThreads: vi.fn(),
   query: vi.fn(),
   submitReview: vi.fn(),
   recordRallyReview: vi.fn(),
@@ -65,7 +94,7 @@ vi.mock('../store', () => ({
 vi.mock('../prList', () => ({
   prList: { refreshOne: vi.fn(async () => {}), recordRallyReview: mocks.recordRallyReview, get: () => ({ viewer: 'me' }) },
 }))
-vi.mock('../github/threads', () => ({ fetchOwnThreads: vi.fn(), resolveOwnThreads: mocks.resolveOwnThreads }))
+vi.mock('../github/threads', () => ({ fetchOwnThreads: mocks.fetchOwnThreads, resolveOwnThreads: mocks.resolveOwnThreads }))
 vi.mock('../github/reviewComments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../github/reviewComments')>()),
   describeReplies: mocks.describeReplies,
@@ -110,6 +139,9 @@ mocks.stored = [
   storedSession(22, { drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
   storedSession(23, { status: 'submitted', submitted: SUBMITTED, drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
   storedSession(24, { drafts: { ...drafts([]), comments: [THREAD_REPLY] } }),
+  storedUnit(30),
+  storedUnit(31),
+  storedUnit(32),
 ]
 
 const { reviewSessions } = await import('./reviewSessions')
@@ -121,6 +153,7 @@ beforeEach(() => {
   mocks.query.mockReset()
   mocks.submitReview.mockReset()
   mocks.describeReplies.mockReset()
+  mocks.fetchOwnThreads.mockReset()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -409,5 +442,51 @@ describe('publishing drafts', () => {
     mocks.onDrafts({ ...drafts([]), comments: [THREAD_REPLY] })
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mocks.describeReplies).not.toHaveBeenCalled()
+  })
+})
+
+describe('a review of several PRs', () => {
+  const thread = (id: string) => ({ id, url: `https://github.com/t/${id}`, isResolved: false, isOutdated: false })
+
+  it('reads each PR threads from the earlier comments on that PR', async () => {
+    mocks.fetchOwnThreads.mockImplementation(async (pr: { repo: string }, ids: string[]) => ids.map(thread))
+    const threads = await reviewSessions.threads('test-session-30')
+    expect(mocks.fetchOwnThreads.mock.calls).toEqual([
+      [expect.objectContaining({ repo: 'api', number: 30 }), ['T-api']],
+      [expect.objectContaining({ repo: 'web', number: 2 }), ['T-web']],
+    ])
+    expect(threads.map((t) => t.id)).toEqual(['T-api', 'T-web'])
+  })
+
+  it('resolves each thread on the PR that owns it and keeps going when one PR fails', async () => {
+    mocks.resolveOwnThreads.mockImplementation(async (pr: { repo: string }, ids: string[]) => {
+      if (pr.repo === 'web') throw new Error('forbidden')
+      return { resolved: ids, failed: [] }
+    })
+    const result = await reviewSessions.resolveThreads('test-session-31', ['T-web', 'T-api', 'TX'])
+    expect(mocks.resolveOwnThreads.mock.calls).toEqual([
+      [expect.objectContaining({ repo: 'api' }), ['T-api']],
+      [expect.objectContaining({ repo: 'web' }), ['T-web']],
+    ])
+    expect(result.resolved).toEqual(['T-api'])
+    expect(result.failed).toEqual([
+      { threadId: 'T-web', error: 'forbidden' },
+      { threadId: 'TX', error: "Not one of this review's earlier comments" },
+    ])
+  })
+
+  it('looks up reply targets on the PR each reply is on and merges them back', async () => {
+    const found = (url: string) => ({ found: true as const, comment: { author: 'octocat', path: 'a', line: 1, excerpt: '', url } })
+    mocks.describeReplies.mockImplementation(async (pr: { repo: string }, d: Drafts) => ({
+      ...d,
+      comments: d.comments.map((c) => ({ ...c, replyTarget: found(pr.repo) })),
+    }))
+    reviewSessions.open('acme/api#32')
+    await vi.waitFor(() => expect(session(32).drafts?.comments.map((c) => c.replyTarget)).toEqual([found('api'), found('web')]))
+    expect(mocks.describeReplies.mock.calls.map(([pr, d]) => [pr.repo, d.comments.map((c: DraftComment) => c.id)])).toEqual([
+      ['api', ['1']],
+      ['web', ['2']],
+    ])
+    expect(session(32).drafts?.prReviews).toHaveLength(2)
   })
 })

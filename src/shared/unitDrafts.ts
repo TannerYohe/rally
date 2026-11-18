@@ -29,6 +29,12 @@ export function draftsForPr(drafts: Drafts, prKey: string): Drafts {
   }
 }
 
+/** Puts comments from each PR's share of the drafts back into the unit's drafts by id, which is unique across the unit. */
+export function withMemberComments(drafts: Drafts, shares: Drafts[]): Drafts {
+  const byId = new Map(shares.flatMap((share) => share.comments.map((c) => [c.id, c] as const)))
+  return { ...drafts, comments: drafts.comments.map((c) => byId.get(c.id) ?? c) }
+}
+
 /** Returns the changes that apply to one PR, taking its review body edit from the per-PR edits of a unit. */
 export function changesForPr(changes: DraftChanges, prKey: string): DraftChanges {
   if (!changes.summaryBodyEdits) return changes

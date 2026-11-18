@@ -367,6 +367,17 @@ describe('prList', () => {
       expect(prList.get().prs.map((pr) => pr.hidden?.mode)).toEqual(['indefinite', undefined])
     })
 
+    it("restores a PR's own hide when a single-PR refresh splits its unit", async () => {
+      mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api(), web()] })
+      await prList.refresh()
+      mocks.store.hiddenPrsFile.set({ pr1: newHide(api(), 'indefinite', new Date().toISOString()) })
+      prList.reapplyPhases()
+
+      mocks.fetchPrs.mockResolvedValueOnce(fetched(web({ body: '' })))
+      await prList.refreshOne('acme', 'web', 2)
+      expect(prList.get().prs.map((pr) => pr.hidden?.mode)).toEqual(['indefinite', undefined])
+    })
+
     it('shows every member while one member has a review in progress', async () => {
       mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api(), web()] })
       await prList.refresh()

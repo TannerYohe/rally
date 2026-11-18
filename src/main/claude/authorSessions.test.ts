@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
@@ -91,7 +91,7 @@ vi.mock('../git/localWorktree', () => ({
 }))
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: mocks.query }))
 vi.mock('./executable', () => ({ claudeExecutable: () => 'claude' }))
-vi.mock('./modelOptions', () => ({ reviewModelOptions: () => ({}) }))
+vi.mock('./modelOptions', () => ({ reviewModelOptions: (_config: unknown, env: Record<string, string>) => ({ env }) }))
 vi.mock('./timeline', () => ({ reduceTimeline: (timeline: unknown) => timeline, closeOpenEntries: (timeline: unknown) => timeline }))
 vi.mock('./authorTools', () => ({
   PUBLISH_RESPONSES_TOOL: 'mcp__rally__publish_responses',
@@ -251,8 +251,10 @@ describe('runActions', () => {
     const [preToolUse] = mocks.query.mock.calls[0][0].options.hooks.PreToolUse[0].hooks
     const decide = (command: string) =>
       preToolUse({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, tool_use_id: command }, undefined, {})
-    expect(await decide(`git commit -am fix && bundle exec rspec > /tmp/out.log`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } })
+    const outsideTemp = join(homedir(), 'src', 'api')
+    expect(await decide(`git -C ${outsideTemp} commit -am fix && bundle exec rspec > ${outsideTemp}/out.log`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } })
     expect(await decide(`git push origin HEAD`)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    expect(mocks.query.mock.calls[0][0].options.env).toMatchObject({ GIT_CONFIG_VALUE_0: 'https://github.com/' })
     const prompt = mocks.query.mock.calls[0][0].prompt as string
     expect(prompt).toContain('## Item T1: Fix')
     expect(prompt).toContain('Note from me: use camelCase')

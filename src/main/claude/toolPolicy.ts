@@ -132,6 +132,24 @@ const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativ
 
 const WORK_STAND_IN = join(realPath(tmpdir()), 'rally-work')
 
+const GITHUB_PUSH_URLS = ['https://github.com/', 'git@github.com:', 'ssh://git@github.com/']
+
+const BLOCKED_PUSH_URL = 'rally-blocked-push://'
+
+/**
+ * Returns git config entries for the environment of a turn with open access, added after any the environment already sets, that rewrite
+ * every GitHub push URL to one git can't push to, whatever command runs git.
+ */
+export function pushBlockingGitEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const start = Number(env.GIT_CONFIG_COUNT) || 0
+  const entries: Record<string, string> = { GIT_CONFIG_COUNT: String(start + GITHUB_PUSH_URLS.length) }
+  GITHUB_PUSH_URLS.forEach((url, i) => {
+    entries[`GIT_CONFIG_KEY_${start + i}`] = `url.${BLOCKED_PUSH_URL}.pushInsteadOf`
+    entries[`GIT_CONFIG_VALUE_${start + i}`] = url
+  })
+  return entries
+}
+
 const deny = (reason: string): ToolDecision => ({ allow: false, reason })
 const ALLOW: ToolDecision = { allow: true }
 

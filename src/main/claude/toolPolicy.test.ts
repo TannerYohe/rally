@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { decideToolUse } from './toolPolicy'
+import { decideToolUse, pushBlockingGitEnv } from './toolPolicy'
+import { git as testGit, TEST_GIT_ENV } from '../git/testRepo.fixture'
 
 const SESSION_CWD = join(tmpdir(), 'rally', 'test-session')
 const REVIEWING = { cwd: SESSION_CWD }
@@ -347,5 +349,29 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
       expect(bash('gh pr create --fill', OPEN)).toBe(false)
       expect(bash(`gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'`, OPEN)).toBe(false)
     })
+  })
+})
+
+describe('pushBlockingGitEnv', () => {
+  it('appends after git config entries the environment already sets', () => {
+    const env = pushBlockingGitEnv({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.editor', GIT_CONFIG_VALUE_0: 'vi' })
+    expect(env).toMatchObject({ GIT_CONFIG_COUNT: '4', GIT_CONFIG_KEY_1: 'url.rally-blocked-push://.pushInsteadOf', GIT_CONFIG_VALUE_1: 'https://github.com/' })
+    expect(env.GIT_CONFIG_KEY_0).toBeUndefined()
+  })
+
+  it('makes git push to a GitHub remote fail before reaching the network, over https or ssh', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'rally-push-block-'))
+    try {
+      testGit(repo, 'init', '--initial-branch=main')
+      writeFileSync(join(repo, 'a.txt'), 'a\n')
+      testGit(repo, 'add', 'a.txt')
+      testGit(repo, 'commit', '-m', 'a')
+      for (const url of ['https://github.com/acme/api.git', 'git@github.com:acme/api.git']) {
+        const push = () => execFileSync('git', ['push', url, 'HEAD:main'], { cwd: repo, env: { ...TEST_GIT_ENV, ...pushBlockingGitEnv(TEST_GIT_ENV) }, stdio: 'pipe' })
+        expect(push).toThrow(/rally-blocked-push/)
+      }
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
   })
 })

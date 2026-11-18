@@ -13,7 +13,7 @@ import { claudeExecutable } from './executable'
 import { reviewModelOptions } from './modelOptions'
 import { RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
-import { decideToolUse, type ToolAccess } from './toolPolicy'
+import { decideToolUse, pushBlockingGitEnv, type ToolAccess } from './toolPolicy'
 
 const FLUSH_INTERVAL_MS = 200
 
@@ -242,7 +242,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
           mcpServers: { [RALLY_SERVER]: setup.mcpServer },
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
           canUseTool,
-          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: scratch }),
+          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: scratch, ...(setup.toolAccess === 'open' ? pushBlockingGitEnv(process.env) : {}) }),
         },
       })
       for await (const message of stream) {

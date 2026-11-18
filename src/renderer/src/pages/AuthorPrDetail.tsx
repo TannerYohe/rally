@@ -91,7 +91,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const push = () =>
     session &&
     run(async () => {
-      await window.rally.pushAuthorCommits(session.id, session.description ? descriptionEdit : null)
+      await window.rally.pushAuthorChanges(session.id, session.description ? descriptionEdit : null)
       setDescriptionEdit(null)
     })
   const postReplies = () => {

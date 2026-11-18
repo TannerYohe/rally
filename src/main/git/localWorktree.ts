@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { checkoutKind, RALLY_WORKTREES_FOLDER } from '@shared/authorSession'
 import type { CloneInfo } from '@shared/types'
 import { git, gitSucceeds, NETWORK_TIMEOUT_MS, trackingRefspec } from './gitCommand'
 import { githubRepoOf } from './githubRemotes'
-import { realPath } from '../realPath'
+import { samePath } from '../realPath'
 
 export interface WorktreeTarget {
   /** owner/name on GitHub. */
@@ -32,7 +32,7 @@ async function candidateRepos(folders: string[]): Promise<string[]> {
 /** Returns the main working tree of the repo that dir belongs to, even when dir is one of its linked worktrees. */
 async function mainWorktree(dir: string): Promise<string | null> {
   try {
-    return dirname((await git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim())
+    return resolve(dirname((await git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()))
   } catch {
     return null
   }
@@ -87,7 +87,7 @@ async function registeredWorktrees(root: string): Promise<RegisteredWorktree[]> 
     .map((block) => block.split('\n'))
     .filter((lines) => lines[0]?.startsWith('worktree '))
     .map((lines) => ({
-      path: lines[0].slice('worktree '.length),
+      path: resolve(lines[0].slice('worktree '.length)),
       branch: lines.find((line) => line.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length) ?? null,
     }))
 }
@@ -96,8 +96,6 @@ async function registeredWorktrees(root: string): Promise<RegisteredWorktree[]> 
 export function rallyWorktreePath(repo: string, branch: string): string {
   return join(RALLY_WORKTREES_DIR, ...repo.split('/'), ...branch.split('/'))
 }
-
-const samePath = (a: string, b: string) => realPath(a) === realPath(b)
 
 const localBranchExists = (root: string, branch: string) => gitSucceeds(root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
 

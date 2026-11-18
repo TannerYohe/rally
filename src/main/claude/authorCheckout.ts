@@ -3,6 +3,7 @@ import { checkoutKind, checkoutNoun, isWorktree } from '@shared/authorSession'
 import { errorMessage } from '@shared/errors'
 import type { CloneInfo, PrRef } from '@shared/types'
 import { fetchCloneSource } from '../github/authorReplies'
+import { samePath } from '../realPath'
 import { checkoutWorktree, LocalCloneError } from '../git/localWorktree'
 import { checkedOutBranch, cloneBranch, isForkSource, localCommits, syncClone, syncWorktree, uncommittedPaths, type WorktreeSyncState } from '../git/prClone'
 
@@ -103,7 +104,7 @@ export async function chooseCheckout({ pr, clone, held, folders, cloneDir }: Che
     return { clone: next, reason: fork ? 'fork' : 'no_local_clone', warning: null }
   }
   if (tempClone) await rm(tempClone.path, { recursive: true, force: true })
-  const previous = clone?.path === worktree.path ? clone : undefined
+  const previous = clone && samePath(clone.path, worktree.path) ? clone : undefined
   const carriedOver = { ...worktree, syncedHead: previous?.syncedHead, createdBranch: previous?.createdBranch || worktree.createdBranch }
   return syncLocalWorktree(carriedOver, 'worktree_found')
 }

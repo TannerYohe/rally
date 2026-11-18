@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
 import { authorSession as stored, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
@@ -817,8 +817,8 @@ describe('checking out the PR branch', () => {
     expect(session(70)).toMatchObject({ status: 'error', error: expect.stringContaining('Permission denied (publickey)') })
   })
 
-  it('keeps the branch Rally created and the synced head across turns in its worktree', async () => {
-    mocks.checkoutWorktree.mockResolvedValue({ ...WORKTREE, kind: 'rally_worktree' })
+  it('keeps the branch Rally created and the synced head across turns in its worktree, however git spells its path', async () => {
+    mocks.checkoutWorktree.mockResolvedValue({ ...WORKTREE, path: `${realpathSync.native(WORKTREE.path)}${sep}`, kind: 'rally_worktree' })
     finishTurn()
     await authorSessions.feedback('author-71', 'go')
     await vi.waitFor(() => expect(session(71).status).toBe('awaiting_feedback'))

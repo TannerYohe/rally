@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { commitFile, git, seedRemote, useTestGitIdentity } from './testRepo.fixture'
 
-const root = realpathSync(mkdtempSync(join(tmpdir(), 'rally-worktree-test-')))
+const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'rally-worktree-test-')))
 const home = join(root, 'home')
 
 vi.mock('node:os', async (importOriginal) => ({ ...(await importOriginal<typeof import('node:os')>()), homedir: () => home }))

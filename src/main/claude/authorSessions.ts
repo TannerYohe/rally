@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { canReplyTo, checkoutNoun, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, isWorktree, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { canReplyTo, checkoutKind, checkoutNoun, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, isWorktree, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
@@ -72,13 +72,14 @@ const SYNC_WARNINGS: Record<WorktreeSyncState, string | null> = {
 }
 
 /** Why a turn runs in the checkout it does. */
-type CheckoutReason = 'temp_clone_has_work' | 'fork' | 'no_local_clone' | 'worktree'
+type CheckoutReason = 'temp_clone_has_work' | 'worktree_has_work' | 'fork' | 'no_local_clone' | 'worktree_found'
 
 const CHECKOUT_REASONS: Record<CheckoutReason, string> = {
   temp_clone_has_work: 'Temp clone, which holds unpushed work',
+  worktree_has_work: 'Worktree, which holds unpushed work',
   fork: 'Temp clone, since the PR comes from a fork',
   no_local_clone: 'Temp clone, since no local repo folder holds the repo',
-  worktree: 'Worktree',
+  worktree_found: 'Worktree',
 }
 
 interface Checkout {
@@ -100,10 +101,27 @@ async function offBranchError(clone: CloneInfo): Promise<string | null> {
   const branch = await checkedOutBranch(clone)
   if (branch === clone.branch) return null
   const current = branch ? `\`${branch}\`` : 'a detached HEAD'
-  return `The ${checkoutNoun(clone)} at ${clone.path} has ${current} checked out, not the PR branch \`${clone.branch}\`. Switch it back, or send a message so Rally checks the PR branch out again.`
+  const advice =
+    checkoutKind(clone) === 'local_worktree'
+      ? 'Switch it back, or send a message so Rally checks the PR branch out in a worktree of its own.'
+      : 'Switch it back, finishing or aborting any rebase or merge first.'
+  return `The ${checkoutNoun(clone)} at ${clone.path} has ${current} checked out, not the PR branch \`${clone.branch}\`. ${advice}`
 }
 
 const hasWorkToKeep = (session: AuthorSession) => hasUnsharedWork(session) || session.mergeConflicts.length > 0 || session.reviewersToReRequest.length > 0
+
+/** Returns whether the checkout holds commits GitHub doesn't have or uncommitted edits. */
+async function holdsWork(clone: CloneInfo): Promise<boolean> {
+  return (await localCommits(clone)).length > 0 || (await uncommittedPaths(clone)).length > 0
+}
+
+/** Syncs a worktree for a turn, naming it in any failure. */
+async function syncLocalWorktree(clone: CloneInfo, reason: CheckoutReason): Promise<Checkout> {
+  const { clone: synced, state } = await syncWorktree(clone).catch((error: unknown) => {
+    throw new Error(`Rally couldn't update the worktree at ${clone.path}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
+  })
+  return { clone: synced, reason, warning: SYNC_WARNINGS[state] }
+}
 
 const sameFiles = (a: string[], b: string[]) => a.length === b.length && new Set([...a, ...b]).size === a.length
 
@@ -537,6 +555,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (!clone || this.cloneFolderGone(sessionId)) return
     const offBranch = await offBranchError(clone)
     if (offBranch) {
+      console.warn('Leaving fixes uncommitted in a checkout on another branch', { pr: session.pr.url, sessionId, path: clone.path, reason: offBranch })
       this.patch(sessionId, (s) => ({ responses: withoutPendingCommits(s.responses, offBranch) }), true)
       return
     }
@@ -602,7 +621,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     try {
       const checkout = await this.checkOut(sessionId)
       const next = checkout.clone
-      console.info('Checked out the PR branch for a turn', { pr: pr.url, sessionId, kind: next.kind ?? 'temp_clone', path: next.path, reason: checkout.reason })
+      console.info('Checked out the PR branch for a turn', { pr: pr.url, sessionId, kind: checkoutKind(next), path: next.path, reason: checkout.reason })
       this.patch(sessionId, () => ({ clone: next }), true)
       detail = `${CHECKOUT_REASONS[checkout.reason]}: ${next.path}`
       if (checkout.warning) this.append(sessionId, { kind: 'warning', id: randomUUID(), label: checkout.warning, detail: next.path, at: now() })
@@ -613,22 +632,25 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   /**
-   * Returns the checkout a turn runs in. A temp clone holding commits or edits stays in use until they are pushed or discarded.
-   * Otherwise Rally uses the local worktree for the branch, adding one when needed, and clones into the temp folder only when no
-   * configured folder holds the repo or the PR comes from a fork.
+   * Returns the checkout a turn runs in. A checkout holding commits or edits stays in use until they are pushed or discarded, and a temp clone
+   * or Rally worktree on another branch stops the turn. Otherwise Rally uses the local worktree for the branch, adding one when needed, and
+   * clones into the temp folder only when no configured folder holds the repo or the PR comes from a fork.
    */
   private async checkOut(sessionId: string): Promise<Checkout> {
     const { clone, pr, commits } = this.byId(sessionId)
-    const tempClone = clone && !isWorktree(clone) ? clone : null
-    if (tempClone && existsSync(tempClone.path)) {
-      if ((await localCommits(tempClone)).length > 0 || (await uncommittedPaths(tempClone)).length > 0) {
-        return { clone: await syncClone(tempClone), reason: 'temp_clone_has_work', warning: null }
+    const held = clone && existsSync(clone.path) ? clone : null
+    if (held) {
+      const offBranch = await offBranchError(held)
+      if (offBranch && checkoutKind(held) !== 'local_worktree') throw new Error(offBranch)
+      if (!offBranch && (await holdsWork(held))) {
+        return isWorktree(held) ? syncLocalWorktree(held, 'worktree_has_work') : { clone: await syncClone(held), reason: 'temp_clone_has_work', warning: null }
       }
-    } else if (tempClone && commits.length > 0) {
+    } else if (clone && !isWorktree(clone) && commits.length > 0) {
       this.assertCloneFolder(sessionId)
-    } else if (tempClone) {
+    } else if (clone) {
       this.cloneFolderGone(sessionId)
     }
+    const tempClone = held && !isWorktree(held) ? held : null
     const source = await fetchCloneSource(pr)
     const repo = `${pr.owner}/${pr.repo}`
     const fork = source.headUrl !== source.baseUrl
@@ -639,24 +661,22 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
           throw new Error(`Rally couldn't check out ${source.branch} in ${where}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
         })
     if (!worktree) {
-      const next = tempClone && existsSync(tempClone.path) ? await syncClone(tempClone) : await cloneBranch(sessionDir(sessionId), source)
+      const next = tempClone ? await syncClone(tempClone) : await cloneBranch(sessionDir(sessionId), source)
       return { clone: next, reason: fork ? 'fork' : 'no_local_clone', warning: null }
     }
     if (tempClone) await rm(tempClone.path, { recursive: true, force: true })
     const previous = clone?.path === worktree.path ? clone : undefined
-    const merged = { ...worktree, syncedHead: previous?.syncedHead, createdBranch: previous?.createdBranch || worktree.createdBranch }
-    const { clone: synced, state } = await syncWorktree(merged).catch((error: unknown) => {
-      throw new Error(`Rally couldn't update the worktree at ${worktree.path}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
-    })
-    return { clone: synced, reason: 'worktree', warning: SYNC_WARNINGS[state] }
+    const carriedOver = { ...worktree, syncedHead: previous?.syncedHead, createdBranch: previous?.createdBranch || worktree.createdBranch }
+    return syncLocalWorktree(carriedOver, 'worktree_found')
   }
 
   private async refreshClone(sessionId: string): Promise<void> {
     const clone = this.find(sessionId)?.clone
     if (!clone || this.cloneFolderGone(sessionId)) return
     try {
-      if (await offBranchError(clone)) {
-        console.warn('Skipping the read of a checkout on another branch', { sessionId, path: clone.path, branch: clone.branch })
+      const offBranch = await offBranchError(clone)
+      if (offBranch) {
+        console.warn('Skipping the read of a checkout on another branch', { pr: this.find(sessionId)?.pr.url, sessionId, path: clone.path, reason: offBranch })
         return
       }
       const [commits, uncommitted] = await Promise.all([localCommits(clone), uncommittedPaths(clone)])

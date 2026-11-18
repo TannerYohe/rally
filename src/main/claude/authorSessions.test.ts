@@ -150,6 +150,9 @@ mocks.stored = [
   stored(72, { sdkSessionId: 'temp-conversation' }),
   stored(73, { clone: WORKTREE, sdkSessionId: 'worktree-conversation', sdkCwd: WORKTREE.path }),
   stored(74, { clone: { ...WORKTREE, path: join(tmpdir(), 'rally-author-test-missing-worktree') }, commits: [{ oid: 'abc', subject: 'fix' }], uncommitted: ['a.ts'] }),
+  stored(75, { clone: WORKTREE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(76, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
+  stored(77, { clone: WORKTREE }),
   stored(71, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, syncedHead: 'prev' } }),
   stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
@@ -217,8 +220,14 @@ beforeEach(() => {
     mocks.removeRallyWorktree,
     mocks.requestReview,
     mocks.acknowledgeFeedbackItem,
+    mocks.checkedOutBranch,
+    mocks.latestCommitTouching,
+    mocks.headOf,
   ])
     mock.mockReset()
+  mocks.checkedOutBranch.mockImplementation(async (clone: { branch: string }) => clone.branch)
+  mocks.latestCommitTouching.mockResolvedValue(null)
+  mocks.headOf.mockResolvedValue('turn-start')
   mocks.fetchApprovers.mockResolvedValue([])
   mocks.integrateRemote.mockImplementation(async (clone) => ({ clone, rewritten: {} }))
   mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'u', branch: 'feature', baseUrl: 'u', baseBranch: 'main' })
@@ -810,6 +819,34 @@ describe('checking out the PR branch', () => {
     await authorSessions.feedback('author-71', 'go')
     await vi.waitFor(() => expect(session(71).status).toBe('awaiting_feedback'))
     expect(mocks.syncWorktree).toHaveBeenCalledWith(expect.objectContaining({ createdBranch: true, syncedHead: 'prev' }))
+  })
+
+  it('keeps using a worktree that holds unpushed commits even when no local repo folder finds it', async () => {
+    mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
+    finishTurn()
+    await authorSessions.feedback('author-75', 'go')
+    await vi.waitFor(() => expect(session(75).status).toBe('awaiting_feedback'))
+    expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
+    expect(mocks.cloneBranch).not.toHaveBeenCalled()
+    expect(turnOptions().cwd).toBe(WORKTREE.path)
+    expect(session(75).timeline).toContainEqual(expect.objectContaining({ kind: 'step', detail: `Worktree, which holds unpushed work: ${WORKTREE.path}` }))
+  })
+
+  it('stops the turn when a Rally worktree has another branch checked out, saying to switch it back', async () => {
+    mocks.checkedOutBranch.mockResolvedValueOnce('spike')
+    await expect(authorSessions.feedback('author-76', 'go')).rejects.toThrow('has `spike` checked out, not the PR branch `feature`. Switch it back, finishing or aborting')
+    expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
+    expect(mocks.query).not.toHaveBeenCalled()
+  })
+
+  it('checks the PR branch out again when your own worktree has another branch checked out', async () => {
+    mocks.checkedOutBranch.mockResolvedValueOnce('main')
+    mocks.checkoutWorktree.mockResolvedValue({ ...WORKTREE, path: OLD_TEMP_CLONE.path, kind: 'rally_worktree' })
+    finishTurn()
+    await authorSessions.feedback('author-77', 'go')
+    await vi.waitFor(() => expect(session(77).status).toBe('awaiting_feedback'))
+    expect(mocks.checkoutWorktree).toHaveBeenCalledWith(['~/src'], expect.anything(), WORKTREE.path)
+    expect(session(77).clone).toMatchObject({ kind: 'rally_worktree' })
   })
 
   it('clones into the temp folder for a PR from a fork', async () => {

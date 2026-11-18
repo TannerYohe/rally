@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { canReplyTo, checkoutKind, checkoutNoun, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { canReplyTo, checkoutNoun, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, isWorktree, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
@@ -265,7 +265,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (!session?.clone || existsSync(session.clone.path)) return false
     if (session.uncommitted.length > 0) {
       console.warn('Forgetting the uncommitted edits of a cleared clone', { pr: session.pr.url, sessionId, files: session.uncommitted })
-      const label = checkoutKind(session.clone) === 'temp_clone' ? CLONE_CLEARED_ERROR : WORKTREE_CLEARED_ERROR
+      const label = isWorktree(session.clone) ? WORKTREE_CLEARED_ERROR : CLONE_CLEARED_ERROR
       this.append(sessionId, { kind: 'warning', id: randomUUID(), label, detail: session.uncommitted.join(', '), at: now() })
       this.patch(sessionId, () => ({ uncommitted: [] }), true)
     }
@@ -276,7 +276,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   private assertCloneFolder(sessionId: string): void {
     if (!this.cloneFolderGone(sessionId)) return
     const { clone, commits } = this.byId(sessionId)
-    const error = clone && checkoutKind(clone) !== 'temp_clone' ? WORKTREE_GONE_ERROR : commits.length > 0 ? CLONE_LOST_ERROR : CLONE_CLEARED_ERROR
+    const error = isWorktree(clone) ? WORKTREE_GONE_ERROR : commits.length > 0 ? CLONE_LOST_ERROR : CLONE_CLEARED_ERROR
     this.patch(sessionId, () => ({ status: 'error', error }), true)
     throw new Error(error)
   }
@@ -553,7 +553,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
    */
   private async checkOut(sessionId: string): Promise<CloneInfo> {
     const { clone, pr, commits } = this.byId(sessionId)
-    const tempClone = clone && checkoutKind(clone) === 'temp_clone' ? clone : null
+    const tempClone = clone && !isWorktree(clone) ? clone : null
     if (tempClone && existsSync(tempClone.path)) {
       if ((await localCommits(tempClone)).length > 0 || (await uncommittedPaths(tempClone)).length > 0) return syncClone(tempClone)
     } else if (tempClone && commits.length > 0) {

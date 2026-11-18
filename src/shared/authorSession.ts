@@ -8,8 +8,11 @@ export const shortSha = (oid: string) => oid.slice(0, 7)
 /** Returns the checkout kind of a clone, treating a clone without one as a temp clone. */
 export const checkoutKind = (clone: CloneInfo): CheckoutKind => clone.kind ?? 'temp_clone'
 
+/** Returns whether the checkout is a worktree of a local clone rather than Rally's temp clone. */
+export const isWorktree = (clone: CloneInfo | null): boolean => !!clone && checkoutKind(clone) !== 'temp_clone'
+
 /** Names the checkout in UI text: a worktree, or Rally's clone. */
-export const checkoutNoun = (clone: CloneInfo | null): string => (clone && checkoutKind(clone) !== 'temp_clone' ? 'worktree' : 'clone')
+export const checkoutNoun = (clone: CloneInfo | null): string => (isWorktree(clone) ? 'worktree' : 'clone')
 
 /** Returns the Start over confirmation, naming what discarding the session deletes and what it keeps. */
 export function startOverQuestion(clone: CloneInfo | null): string {

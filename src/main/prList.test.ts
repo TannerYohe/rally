@@ -268,6 +268,9 @@ describe('prList', () => {
 
     authoredPrList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: false, openFindings: 2 }))
     expect(authoredPrList.get().prs[0]).toMatchObject({ phase: 'needs_response', openFindings: 2 })
+
+    authoredPrList.setSessionLookup(() => ({ status: 'awaiting_feedback', active: false, openFindings: 1 }))
+    expect(authoredPrList.get().prs[0]).toMatchObject({ phase: 'needs_response', openFindings: 1 })
   })
 
   it('refreshes each list without touching the files of the other list', async () => {

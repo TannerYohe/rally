@@ -37,7 +37,7 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
     <div className="space-y-2">
       <ul className="space-y-2">
         {rows.map((row) => (
-          <li key={row.concern.id} className="flex gap-3 rounded-xl border border-white/5 bg-ink-900/60 p-3 text-sm">
+          <li key={`${row.concern.prKey ?? ''}:${row.concern.id}`} className="flex gap-3 rounded-xl border border-white/5 bg-ink-900/60 p-3 text-sm">
             {isResolvable(row) ? (
               <input
                 type="checkbox"
@@ -53,6 +53,7 @@ export function PriorConcernList({ state, resolution, disabled, submitted }: Pro
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-semibold text-ink-200">{row.concern.id}</span>
+                {row.concern.prKey && <span className="font-mono text-ink-500">{row.concern.prKey}</span>}
                 {row.concern.status && (
                   <span className={`rounded px-1.5 py-0.5 ${statusStyle(row.concern.status)}`}>{CONCERN_STATUS_LABELS[row.concern.status]}</span>
                 )}

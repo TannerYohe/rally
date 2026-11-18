@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { priorConcernThreadIds, type AuthorSession, type FeedbackItem, type PrListKind, type PrListState, type PrRef, type ReviewSession, type ReviewThread, type InstallAttempt, type TimelineEntry, type UpdateState } from '@shared/types'
 import { errorMessage } from '@shared/errors'
+import { sessionCovers } from '@shared/unitDrafts'
 import { INITIAL_REVIEW_TAB_STATE, reviewTabReducer, selectedReviewTab, type ReviewTab } from './reviewTabs'
 import { playSound } from './sounds'
 import { concernRows, selectedThreadIds, type ConcernRow } from './threads'
@@ -48,7 +49,7 @@ export function useSession(prKey: string): [ReviewSession | null, (session: Revi
   useEffect(() => {
     window.rally.getSession(prKey).then(setSession)
     return window.rally.onSessionChanged((s) => {
-      if (s.prKey === prKey) setSession(s)
+      if (sessionCovers(s, prKey)) setSession(s)
     })
   }, [prKey])
   return [session, setSession]

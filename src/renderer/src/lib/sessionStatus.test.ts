@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ReviewSession, TimelineEntry, TurnMode } from '@shared/types'
-import { isSubmitted, lastSuccessfulTurnStartedAt, prUpdatedSinceLastSuccessfulTurn } from './sessionStatus'
+import { isSubmitted, lastSuccessfulTurnStartedAt, latestUpdatedAt, prUpdatedSinceLastSuccessfulTurn } from './sessionStatus'
 
 const createdAt = '2026-11-04T18:00:00.000Z'
 const user = (id: string, at: string, turn?: TurnMode): TimelineEntry => ({ kind: 'user', id, text: id, at, turn })
@@ -117,5 +117,14 @@ describe('isSubmitted', () => {
 
   it('is false before a review is submitted', () => {
     expect(isSubmitted({ status: 'awaiting_feedback', submitted: null })).toBe(false)
+  })
+})
+
+describe('latestUpdatedAt', () => {
+  it('returns the latest update among the PRs a review covers', () => {
+    expect(latestUpdatedAt([{ updatedAt: '2026-11-04T18:05:00.000Z' }, { updatedAt: '2026-11-04T19:00:00.000Z' }, { updatedAt: '2026-11-04T18:30:00.000Z' }])).toBe(
+      '2026-11-04T19:00:00.000Z',
+    )
+    expect(latestUpdatedAt([])).toBeNull()
   })
 })

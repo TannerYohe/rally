@@ -352,7 +352,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
           console.error('Committing uncommitted changes failed', { pr: pr.url, sessionId, error })
           throw error
         })
-        if (!oid) throw new Error('The clone has no changes to commit.')
+        if (!oid) throw new Error(`The ${checkoutNoun(clone)} has no changes to commit.`)
       } finally {
         await this.refreshClone(sessionId)
       }

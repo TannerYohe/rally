@@ -204,7 +204,6 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
     : { edits, summaryBodyEdit: summaryEdits[session.prKey], instructions: feedback }
   const message = feedbackMessage(drafts, changes)
   const keptComments = keptCommentCount(drafts, edits)
-  const pendingComments = drafts ? pending.reduce((sum, member) => sum + keptCommentCount(draftsForPr(drafts, keyOf(member)), edits), 0) : 0
   const lastSuccessfulTurnAt = lastSuccessfulTurnStartedAt(session)
   const reviewTab = useReviewTab({ busy, hasDrafts, timeline: session.timeline })
   const prUpdatedAfterLastSuccessfulTurn = prUpdatedSinceLastSuccessfulTurn(session, prUpdatedAt)
@@ -414,10 +413,14 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
           />
           {drafts && (
             <SubmitBar
-              members={members.map((member) => ({ prKey: keyOf(member), label: <MemberLabel member={member} pr={prOf(member)} />, posted: postedOf(member) }))}
+              members={members.map((member) => ({
+                prKey: keyOf(member),
+                label: <MemberLabel member={member} pr={prOf(member)} />,
+                posted: postedOf(member),
+                commentCount: keptCommentCount(draftsForPr(drafts, keyOf(member)), edits),
+              }))}
               disabled={busy || resolvingThreads}
               blockedReason={submitBlockedReason(feedback)}
-              commentCount={pendingComments}
               threadCount={threadResolution.selectedIds.length}
               onSubmit={submit}
             />

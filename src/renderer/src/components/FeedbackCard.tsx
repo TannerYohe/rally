@@ -1,15 +1,10 @@
 import { canReplyTo, isFindingHandled, isReplyPending, itemLocation, shortSha } from '@shared/authorSession'
 import { RESPONSE_ACTION_LABELS, RESPONSE_ACTIONS, RESPONSE_VERDICT_LABELS, type FeedbackComment, type ResponseAction, type ResponseVerdict } from '@shared/types'
-import type { FeedbackRow } from '../lib/authorView'
+import type { ActionPick, FeedbackRow } from '../lib/authorView'
 import { age, fullTime } from '../lib/format'
 import { Avatar } from './Avatar'
 import { BodyTextarea } from './BodyTextarea'
 import { Markdown } from './Markdown'
-
-export interface ActionPick {
-  action: ResponseAction
-  note: string
-}
 
 const VERDICT_STYLES: Record<ResponseVerdict, string> = {
   valid: 'bg-amber-500/15 text-amber-200',

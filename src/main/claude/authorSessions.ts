@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  actionableItems,
   canReplyTo,
   COMMIT_PLACEHOLDER,
   hasPendingWork,
@@ -121,10 +122,10 @@ const FINDING_ID_PREFIX = 'self-'
 
 const isFindingId = (id: string) => id.startsWith(FINDING_ID_PREFIX)
 
-/** Turns self-review draft comments into private feedback items the author can act on. */
-export function findingsFromDrafts(drafts: Drafts, at: string): FeedbackItem[] {
+/** Turns self-review draft comments into private feedback items the author can act on, with ids scoped to the review. */
+export function findingsFromDrafts(drafts: Drafts, reviewId: string, at: string): FeedbackItem[] {
   return drafts.comments.map((comment) => ({
-    id: `${FINDING_ID_PREFIX}${comment.id}`,
+    id: `${FINDING_ID_PREFIX}${reviewId}-${comment.id}`,
     kind: 'finding',
     author: null,
     authorIsBot: false,
@@ -182,7 +183,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (requests.length === 0) throw new Error('Pick an action for at least one comment.')
     const session = this.ensure(pr)
     await this.startCloneTurn(session.id, 'respond', async () => {
-      const items = [...(await fetchFeedbackItems(pr)), ...(session.selfReview?.findings ?? [])]
+      const items = actionableItems(await fetchFeedbackItems(pr), session)
       const available = new Set(items.map((item) => item.id))
       if (requests.some((request) => !available.has(request.itemId))) throw new Error(STALE_ITEMS_ERROR)
       const requested = new Set(requests.map((request) => request.itemId))
@@ -530,7 +531,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       },
       onDescription: (proposed) => this.receiveDescription(sessionId, proposed),
       onSelfReview: (drafts) => {
-        const selfReview = { verdict: drafts.verdict, reportMarkdown: drafts.reportMarkdown, findings: findingsFromDrafts(drafts, now()) }
+        const selfReview = { verdict: drafts.verdict, reportMarkdown: drafts.reportMarkdown, findings: findingsFromDrafts(drafts, randomUUID().slice(0, 8), now()) }
         this.patch(
           sessionId,
           (s) => ({ ...withoutItems(s, isFindingId), selfReview }),

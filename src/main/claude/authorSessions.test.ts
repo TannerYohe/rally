@@ -190,6 +190,9 @@ mocks.stored = [
   stored(64),
   stored(65),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
+  stored(54, {
+    selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-r-1'), kind: 'finding' }, { ...thread('self-r-2'), kind: 'finding' }] },
+  }),
 ]
 
 const { authorSessions, findingsFromDrafts } = await import('./authorSessions')
@@ -283,6 +286,18 @@ describe('runActions', () => {
     await expect(authorSessions.runActions(pr(21), [{ itemId: 'gone', action: 'fix', note: '' }], '')).rejects.toThrow('resolved or removed')
     expect(mocks.query).not.toHaveBeenCalled()
     expect(session(21).status).toBe('awaiting_feedback')
+  })
+
+  it('accepts listed findings and refuses dismissed ones', async () => {
+    mocks.fetchFeedbackItems.mockResolvedValue([thread('T1')])
+    authorSessions.clearFindings(session(54).id, ['self-r-2'])
+    await expect(authorSessions.runActions(pr(54), [{ itemId: 'self-r-2', action: 'fix', note: '' }], '')).rejects.toThrow('resolved or removed')
+    expect(mocks.query).not.toHaveBeenCalled()
+
+    finishTurn()
+    await authorSessions.runActions(pr(54), [{ itemId: 'self-r-1', action: 'investigate', note: '' }], '')
+    await vi.waitFor(() => expect(session(54).status).toBe('awaiting_feedback'))
+    expect(mocks.query.mock.calls[0][0].prompt).toContain('## Item self-r-1')
   })
 
   it('records a clone failure on the session', async () => {
@@ -610,11 +625,13 @@ describe('self-review', () => {
     await authorSessions.selfReview(pr(30))
     await vi.waitFor(() => expect(session(30).status).toBe('awaiting_feedback'))
     expect(mocks.query.mock.calls[0][0].prompt).toBe('/review-pr https://github.com/acme/api/pull/30')
-    expect(session(30).selfReview).toMatchObject({ verdict: 'Minor changes', findings: [{ id: 'self-1', kind: 'finding', severity: 'high' }] })
+    expect(session(30).selfReview).toMatchObject({ verdict: 'Minor changes', findings: [{ kind: 'finding', severity: 'high' }] })
+    const findingId = session(30).selfReview!.findings[0].id
+    expect(findingId).toMatch(/^self-.+-1$/)
 
     expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ active: false, openFindings: 1 })
 
-    authorSessions.clearFindings(session(30).id, ['self-1'])
+    authorSessions.clearFindings(session(30).id, [findingId])
     expect(session(30).selfReview?.findings).toEqual([])
     expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ openFindings: 0 })
   })
@@ -626,18 +643,24 @@ describe('self-review', () => {
     expect(session(32).selfReview?.findings.map((f) => f.id)).toEqual(['self-2'])
   })
 
-  it('drops the earlier self-review findings and their responses when a new one publishes', async () => {
+  it('drops the earlier self-review findings and their responses, and gives the new findings new ids, when a new one publishes', async () => {
     const sessionId = session(31).id
     finishTurn(() => mocks.handlers!.onSelfReview({ ...drafts, comments: [{ ...drafts.comments[0], body: 'Different problem' }] }))
     await authorSessions.feedback(sessionId, 'review again')
     await vi.waitFor(() => expect(session(31).status).toBe('awaiting_feedback'))
     expect(session(31).items.map((i) => i.id)).toEqual(['T1'])
     expect(Object.keys(session(31).responses)).toEqual(['T1'])
-    expect(session(31).selfReview?.findings[0]).toMatchObject({ id: 'self-1', comments: [{ body: 'Different problem' }] })
+    expect(session(31).selfReview?.findings[0]).toMatchObject({ comments: [{ body: 'Different problem' }] })
+    const firstId = session(31).selfReview!.findings[0].id
+
+    finishTurn(() => mocks.handlers!.onSelfReview({ ...drafts, comments: [{ ...drafts.comments[0], body: 'Different problem' }] }))
+    await authorSessions.feedback(sessionId, 'review again')
+    await vi.waitFor(() => expect(session(31).status).toBe('awaiting_feedback'))
+    expect(session(31).selfReview?.findings[0].id).not.toBe(firstId)
   })
 
-  it('maps draft comments to findings', () => {
-    expect(findingsFromDrafts(drafts, 'now')[0]).toMatchObject({ path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
+  it('maps draft comments to findings with ids scoped to the review', () => {
+    expect(findingsFromDrafts(drafts, 'r1', 'now')[0]).toMatchObject({ id: 'self-r1-1', path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
   })
 })
 

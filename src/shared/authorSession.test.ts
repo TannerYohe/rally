@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  actionableItems,
   canPush,
   cloneChangeCount,
   committableFiles,
@@ -43,6 +44,14 @@ describe('pendingReplies', () => {
       },
     })
     expect(pendingReplies(s).map((r) => r.itemId)).toEqual(['a', 'b'])
+  })
+})
+
+describe('actionableItems', () => {
+  it('lists the open items, then the self-review findings', () => {
+    const findings = [item('self-1', 'finding')]
+    expect(actionableItems([item('a')], { selfReview: { verdict: '', reportMarkdown: '', findings } }).map((i) => i.id)).toEqual(['a', 'self-1'])
+    expect(actionableItems([item('a')], null).map((i) => i.id)).toEqual(['a'])
   })
 })
 

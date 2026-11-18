@@ -1,5 +1,10 @@
-import { canReplyTo, isReplyPending, pendingReplies } from '@shared/authorSession'
-import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, SessionStatus } from '@shared/types'
+import { actionableItems, canReplyTo, isReplyPending, pendingReplies } from '@shared/authorSession'
+import type { ActionRequest, AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, ResponseAction, SessionStatus } from '@shared/types'
+
+export interface ActionPick {
+  action: ResponseAction
+  note: string
+}
 
 export interface FeedbackRow {
   item: FeedbackItem
@@ -25,6 +30,14 @@ export function feedbackRows(open: FeedbackItem[], session: SessionView | null):
   const pendingIds = new Set(pendingReplies(session).map((r) => r.itemId))
   const closed = session.items.filter((item) => canReplyTo(item) && !openIds.has(item.id) && pendingIds.has(item.id))
   return [...open.map((item) => row(item, false)), ...closed.map((item) => row(item, true)), ...(session.selfReview?.findings ?? []).map((item) => row(item, false))]
+}
+
+/** Returns the picked actions Run sends, skipping picks on items that are closed on GitHub or no longer listed. */
+export function actionRequests(picks: Record<string, ActionPick>, open: FeedbackItem[], session: SessionView | null): ActionRequest[] {
+  const actionable = new Set(actionableItems(open, session).map((item) => item.id))
+  return Object.entries(picks)
+    .filter(([itemId]) => actionable.has(itemId))
+    .map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
 }
 
 export interface SplitRows {

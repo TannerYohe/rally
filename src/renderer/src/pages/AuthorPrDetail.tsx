@@ -4,12 +4,12 @@ import { canPush, committableFiles, handledFindingIds, pendingChangeCount, PUSH_
 import { prKey, type AuthorSession, type PrDescription, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
-import { FeedbackCard, type ActionPick } from '../components/FeedbackCard'
+import { FeedbackCard } from '../components/FeedbackCard'
 import { PrHeader } from '../components/PrHeader'
 import { Composer, ErrorBox, ReportView, SessionHeader } from '../components/SessionPanel'
 import { ProgressTimeline } from '../components/ProgressTimeline'
 import { EmptyTab, TabBar, TabCount, TabPanel } from '../components/TabBar'
-import { AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, type AuthorTab, type FeedbackRow } from '../lib/authorView'
+import { actionRequests, AUTHOR_STATUS_LABELS, AUTHOR_TAB_LABELS, AUTHOR_TABS, feedbackRows, NO_CHANGES_MESSAGE, replyPosts, splitWaitingRows, type ActionPick, type AuthorTab, type FeedbackRow } from '../lib/authorView'
 import { age, fullTime, plural } from '../lib/format'
 import { useActionRunner, useAuthorSession, useFeedbackItems, usePrs } from '../lib/hooks'
 import { BUSY_STATUSES } from '../lib/sessionStatus'
@@ -61,7 +61,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
 
   const rows = feedbackRows(feedback.items, session)
   const { open: openRows, waiting: waitingRows } = splitWaitingRows(rows)
-  const requests = Object.entries(picks).map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
+  const requests = actionRequests(picks, feedback.items, session)
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
   const unpushed = session?.commits.length ?? 0
   const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null
@@ -100,7 +100,13 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
       feedback.reload()
     })
   }
-  const clearFindings = (itemIds: string[]) => session && run(() => window.rally.clearFindings(session.id, itemIds))
+  const dropPicks = (itemIds: string[]) => setPicks((current) => Object.fromEntries(Object.entries(current).filter(([itemId]) => !itemIds.includes(itemId))))
+  const clearFindings = (itemIds: string[]) =>
+    session &&
+    run(async () => {
+      await window.rally.clearFindings(session.id, itemIds)
+      dropPicks(itemIds)
+    })
   const acknowledge = (itemId: string) =>
     run(async () => {
       await window.rally.acknowledgeFeedback(prRef, itemId)
@@ -124,7 +130,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
         replyEdit={replyEdits[id]}
         resolve={resolve[id] ?? false}
         disabled={busy}
-        onPick={(pick) => setPicks(({ [id]: _removed, ...rest }) => (pick ? { ...rest, [id]: pick } : rest))}
+        onPick={(pick) => (pick ? setPicks((current) => ({ ...current, [id]: pick })) : dropPicks([id]))}
         onReplyEdit={(body) => setReplyEdits(({ [id]: _removed, ...rest }) => (body === undefined ? rest : { ...rest, [id]: body }))}
         onResolve={(value) => setResolve((current) => ({ ...current, [id]: value }))}
         onDropReply={() => session && run(() => window.rally.discardAuthorReply(session.id, id))}

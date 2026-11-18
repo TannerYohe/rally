@@ -353,6 +353,8 @@ export interface SessionCore {
   pr: PrRef
   prKey: string
   sdkSessionId: string | null
+  /** The folder the Claude conversation runs in; absent means the session's temp folder. */
+  sdkCwd?: string
   status: SessionStatus
   error: string | null
   timeline: TimelineEntry[]

@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { query, type CanUseTool, type HookCallback, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
+import { query, type CanUseTool, type HookCallback, type McpSdkServerConfigWithInstance, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { prKey, type PrRef, type SessionCore, type SessionStatus, type TimelineEntry, type TurnMode } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import type { JsonDir } from '../jsonFile'
@@ -16,6 +16,8 @@ import { closeOpenEntries, reduceTimeline } from './timeline'
 import { decideToolUse, type ToolAccess } from './toolPolicy'
 
 const FLUSH_INTERVAL_MS = 200
+
+const NEW_CONVERSATION_WARNING = 'Started a new Claude conversation, because this turn runs in a different folder from the last one.'
 
 export const now = () => new Date().toISOString()
 
@@ -32,6 +34,10 @@ export interface TurnSetup {
   mcpServer: McpSdkServerConfigWithInstance
   /** Absent means sandboxed. */
   toolAccess?: ToolAccess
+  /** The folder the turn runs in; absent means the session's temp folder. */
+  cwd?: string
+  /** Absent means only the user's own settings and CLAUDE.md. */
+  settingSources?: SettingSource[]
 }
 
 /** Persists one Claude session per PR and runs its turns through the Agent SDK under Rally's tool policy. */
@@ -168,6 +174,15 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     )
   }
 
+  /** Returns the conversation to resume, or undefined to start a new one when there is none or it ran in another folder, since Claude Code keeps each conversation with its folder. */
+  private resumableConversation(sessionId: string, cwd: string): string | undefined {
+    const session = this.find(sessionId)
+    if (!session?.sdkSessionId) return undefined
+    if ((session.sdkCwd ?? sessionDir(sessionId)) === cwd) return session.sdkSessionId
+    this.append(sessionId, { kind: 'warning', id: randomUUID(), label: NEW_CONVERSATION_WARNING, detail: cwd, at: now() })
+    return undefined
+  }
+
   protected async runTurn(sessionId: string, prompt: string, mode: TurnMode): Promise<void> {
     const controller = new AbortController()
     this.controllers.set(sessionId, controller)
@@ -183,10 +198,11 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
       true,
     )
 
-    const cwd = sessionDir(sessionId)
-    mkdirSync(cwd, { recursive: true })
-
+    const scratch = sessionDir(sessionId)
+    mkdirSync(scratch, { recursive: true })
     const setup = this.turnSetup(sessionId)
+    const cwd = setup.cwd ?? scratch
+    const resume = this.resumableConversation(sessionId, cwd)
     const decide = (toolName: string, input: unknown) =>
       decideToolUse(toolName, (input ?? {}) as Record<string, unknown>, { cwd, access: setup.toolAccess })
 
@@ -216,22 +232,22 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
       const stream = query({
         prompt,
         options: {
-          resume: this.find(sessionId)?.sdkSessionId ?? undefined,
+          resume,
           cwd,
           pathToClaudeCodeExecutable: claudeExecutable(),
           abortController: controller,
-          settingSources: ['user'],
+          settingSources: setup.settingSources ?? ['user'],
           skills: 'all',
           systemPrompt: { type: 'preset', preset: 'claude_code', append: setup.systemPromptAppend },
           mcpServers: { [RALLY_SERVER]: setup.mcpServer },
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
           canUseTool,
-          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: cwd }),
+          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: scratch }),
         },
       })
       for await (const message of stream) {
         if (message.type === 'system' && message.subtype === 'init') {
-          this.patchCore(sessionId, () => ({ sdkSessionId: message.session_id }), true)
+          this.patchCore(sessionId, () => ({ sdkSessionId: message.session_id, sdkCwd: cwd }), true)
         }
         if (message.type === 'result') resultOk = message.subtype === 'success' && !message.is_error
         this.updateTimeline(sessionId, (timeline) => reduceTimeline(timeline, message, now()))

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
-import { authorSession as stored, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
+import { authorSession as stored, descriptionDraft, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
 import type { AuthorSession, Drafts, FeedbackItem } from '@shared/types'
 import type { AuthorToolHandlers } from './authorTools'
 import { UncommittedChangesError } from '../git/prClone'
@@ -158,22 +158,22 @@ mocks.stored = [
     responses: { T1: response('T1', 'Done'), 'self-1': response('self-1', '', { action: 'push_back', summary: 'Intended' }) },
     selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }] },
   }),
-  stored(60, { description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' } }),
+  stored(60, { description: descriptionDraft() }),
   stored(61, {
     clone: CLONE,
     commits: [{ oid: 'abc', subject: 'fix' }],
-    description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' },
+    description: descriptionDraft(),
   }),
-  stored(62, { description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' } }),
+  stored(62, { description: descriptionDraft() }),
   stored(66, {
     clone: CLONE,
     commits: [{ oid: 'abc', subject: 'fix' }],
-    description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' },
+    description: descriptionDraft(),
   }),
   stored(67, {
     clone: CLONE,
     commits: [{ oid: 'abc', subject: 'fix' }],
-    description: { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z' },
+    description: descriptionDraft(),
   }),
   stored(63),
   stored(64),

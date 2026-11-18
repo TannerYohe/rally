@@ -11,7 +11,7 @@ import {
   pendingReplies,
   sameDescription,
 } from './authorSession'
-import { feedbackItem, itemResponse } from './authorSession.fixture'
+import { descriptionDraft, feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
 const response = (itemId: string, reply: string, at?: string) => itemResponse(itemId, reply, at ? { at } : {})
@@ -19,7 +19,7 @@ const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem
 
 type WorkFields = 'status' | 'commits' | 'uncommitted' | 'responses' | 'posted' | 'items' | 'description'
 
-const DESCRIPTION = { title: 'New', body: 'Body', base: { title: 'Old', body: '' }, at: '2026-11-02T00:00:00Z' }
+const DESCRIPTION = descriptionDraft()
 
 function session(overrides: Partial<AuthorSession> = {}): Pick<AuthorSession, WorkFields> {
   return { status: 'awaiting_feedback', commits: [], uncommitted: [], responses: {}, posted: {}, items: ['a', 'b', 'c'].map((id) => item(id)), description: null, ...overrides }

@@ -61,7 +61,6 @@ export function PrDetail() {
     runStart(async () => {
       const linked = unit.slice(1).map(toPrRef)
       if (!(await confirmReplacing([routeRef, ...linked], replacing))) return
-      if (replacing) await window.rally.discardSession(replacing.id)
       setSession(await window.rally.startReview(routeRef, linked))
     })
   const sessionPrs = session ? sessionMembers(session).flatMap((m) => prs.find((p) => keyOf(p) === keyOf(m)) ?? []) : unit

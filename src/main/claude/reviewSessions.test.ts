@@ -172,6 +172,7 @@ mocks.stored = [
   storedDocs(10),
   storedSession(51),
   storedDocs(11),
+  storedSession(53, { status: 'submitting', submitAttemptReviewId: 77 }),
   storedSession(52, { status: 'error', members: [storedSession(52).pr, docs(12)], memberSubmits: { 'acme/docs#12': { submitted: SUBMITTED } } }),
 ]
 
@@ -310,6 +311,14 @@ describe('submit', () => {
     await reviewSessions.submit('test-session-13', verdict(13, 'COMMENT'), NO_CHANGES, [])
     expect(mocks.submitReview.mock.calls[0][3]).toMatchObject({ attemptReviewId: 55 })
     expect(session(13).submitAttemptReviewId).toBeUndefined()
+  })
+
+  it('keeps a stored attempt id when a retry fails before finding the pending review', async () => {
+    mocks.submitReview.mockRejectedValueOnce(new Error('listing your reviews failed'))
+    await expect(reviewSessions.submit('test-session-53', verdict(53, 'COMMENT'), NO_CHANGES, [])).rejects.toThrow('listing your reviews failed')
+    mocks.submitReview.mockResolvedValueOnce(SUBMITTED)
+    await reviewSessions.submit('test-session-53', verdict(53, 'COMMENT'), NO_CHANGES, [])
+    expect(mocks.submitReview.mock.calls.map((call) => call[3].attemptReviewId)).toEqual([77, 77])
   })
 
   it('saves the pending review id while posting and checks it on retry when cleanup failed', async () => {

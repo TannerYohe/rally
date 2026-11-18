@@ -179,7 +179,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
       submitted = await submitReview(member, event, review, { attemptReviewId, onPendingReview })
     } catch (error) {
       const message = errorMessage(error)
-      const pending = this.find(sessionId)?.memberSubmits?.[key]?.attemptReviewId
+      const pending = this.find(sessionId)?.memberSubmits?.[key]?.attemptReviewId ?? attemptReviewId ?? undefined
       setMember({ submitted: null, attemptReviewId: pending, error: message })
       const sessionError = isUnitSession(session) ? `${key}: ${message}` : message
       this.patch(sessionId, () => ({ status: 'error', error: sessionError, threadsToResolveOnSubmit: undefined }), true)

@@ -164,6 +164,10 @@ mocks.stored = [
   storedDocs(8),
   storedDocs(9),
   storedSession(43),
+  storedUnit(44, { status: 'error', memberSubmits: { 'acme/web#2': { submitted: { ...SUBMITTED, reviewId: 2 } } } }),
+  storedUnit(45),
+  storedUnit(46),
+  storedUnit(47),
 ]
 
 const { PARTLY_POSTED_ERROR, reviewSessions } = await import('./reviewSessions')
@@ -551,6 +555,36 @@ describe('submitting a review of several PRs', () => {
     expect(session(34)).toMatchObject({ status: 'submitted', submitted: review(1, 'APPROVE') })
   })
 
+  it('stops at a failed first post without posting the rest', async () => {
+    mocks.submitReview.mockRejectedValueOnce(new Error('rate limited'))
+    await expect(reviewSessions.submit('test-session-46', unitVerdicts(46, 'APPROVE', 'REQUEST_CHANGES'), NO_CHANGES, [])).rejects.toThrow('rate limited')
+    expect(postedRepos()).toEqual(['web:REQUEST_CHANGES'])
+    expect(session(46).memberSubmits?.['acme/api#46']).toBeUndefined()
+    expect(mocks.recordRallyReview).not.toHaveBeenCalledWith('acme/api#46', expect.anything())
+  })
+
+  it('finishes a partly posted unit when every remaining PR is skipped', async () => {
+    await reviewSessions.submit('test-session-44', [{ prKey: 'acme/api#44', event: 'SKIP' }], NO_CHANGES, [])
+    expect(mocks.submitReview).not.toHaveBeenCalled()
+    expect(session(44)).toMatchObject({ status: 'submitted', submitted: { ...SUBMITTED, reviewId: 2 } })
+  })
+
+  it('records the posted sibling as the submitted review when the session PR is skipped', async () => {
+    mocks.submitReview.mockResolvedValue(review(2, 'COMMENT'))
+    await reviewSessions.submit('test-session-45', unitVerdicts(45, 'SKIP', 'COMMENT'), NO_CHANGES, [])
+    expect(postedRepos()).toEqual(['web:COMMENT'])
+    expect(session(45)).toMatchObject({ status: 'submitted', submitted: review(2, 'COMMENT') })
+  })
+
+  it('resolves selected threads only on the PRs that posted', async () => {
+    mocks.submitReview.mockResolvedValue(review(1, 'COMMENT'))
+    mocks.resolveOwnThreads.mockImplementation(async (_pr, ids: string[]) => ({ resolved: ids, failed: [] }))
+    await reviewSessions.submit('test-session-47', unitVerdicts(47, 'COMMENT', 'SKIP'), NO_CHANGES, ['T-api', 'T-web'])
+    await vi.waitFor(() => expect(session(47).threadResolution?.resolved).toEqual(['T-api']))
+    expect(mocks.resolveOwnThreads).toHaveBeenCalledTimes(1)
+    expect(mocks.resolveOwnThreads.mock.calls[0][0]).toMatchObject({ repo: 'api' })
+  })
+
   it('skips a PR and refuses to skip every PR', async () => {
     await expect(reviewSessions.submit('test-session-35', unitVerdicts(35, 'SKIP', 'SKIP'), NO_CHANGES, [])).rejects.toThrow('at least one PR')
     mocks.submitReview.mockResolvedValue(review(1, 'COMMENT'))
@@ -626,4 +660,5 @@ describe('starting a review of several PRs', () => {
     finish()
     await vi.waitFor(() => expect(reviewSessions.getByPr('acme/docs#9')?.status).toBe('awaiting_feedback'))
   })
+
 })

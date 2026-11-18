@@ -23,10 +23,13 @@ import {
   changesForPr,
   draftsForPr,
   emptyReviewError,
+  isPartlyPosted,
   isUnitSession,
+  memberPosted,
   sessionCovers,
   sessionMembers,
   unitDraftProblems,
+  unpostedMembers,
   withMemberComments,
 } from '@shared/unitDrafts'
 import { describeReplies, needsReplyTargets } from '../github/reviewComments'
@@ -59,7 +62,7 @@ function submitPlan(session: ReviewSession, drafts: Drafts, verdicts: MemberVerd
     const problems = unitDraftProblems(drafts, members.map(keyOf))
     if (problems.length > 0) throw new Error(`Ask Claude to fix its drafts before submitting: ${problems.join(' ')}`)
   }
-  const remaining = members.filter((member) => !session.memberSubmits?.[keyOf(member)]?.submitted)
+  const remaining = unpostedMembers(session)
   const remainingVerdicts = remaining.map((member) => {
     const key = keyOf(member)
     const event = verdicts.find((v) => v.prKey === key)?.event
@@ -72,8 +75,7 @@ function submitPlan(session: ReviewSession, drafts: Drafts, verdicts: MemberVerd
   const posts = remainingVerdicts.flatMap(({ member, prKey, event }): MemberPost[] =>
     event === 'SKIP' ? [] : [{ member, event, review: finalReview(draftsForPr(drafts, prKey), changesForPr(changes, prKey)) }],
   )
-  const anyPosted = remaining.length < members.length
-  if (posts.length === 0 && !anyPosted) throw new Error('Pick Comment, Approve, or Request changes for at least one PR.')
+  if (posts.length === 0 && !isPartlyPosted(session)) throw new Error('Pick Comment, Approve, or Request changes for at least one PR.')
   return posts.sort((a, b) => SUBMIT_ORDER.indexOf(a.event) - SUBMIT_ORDER.indexOf(b.event))
 }
 
@@ -236,8 +238,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   protected assertCanStartTurn(sessionId: string): void {
     super.assertCanStartTurn(sessionId)
     const session = this.byId(sessionId)
-    const anyPosted = Object.values(session.memberSubmits ?? {}).some((result) => result.submitted)
-    if (anyPosted && !session.submitted) throw new Error(PARTLY_POSTED_ERROR)
+    if (isPartlyPosted(session)) throw new Error(PARTLY_POSTED_ERROR)
   }
 
   discard(sessionId: string): void {
@@ -280,14 +281,16 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     }
   }
 
-  /** Marks the session submitted once every PR posted or was skipped, then resolves the selected threads and refreshes the PRs. */
+  /** Marks the session submitted once every PR posted or was skipped, then resolves the selected threads on posted PRs and refreshes the PRs. */
   private finishSubmit(sessionId: string): void {
     const session = this.byId(sessionId)
     const members = sessionMembers(session)
-    const posted = members.flatMap((member) => session.memberSubmits?.[keyOf(member)]?.submitted ?? [])
-    const submitted = session.memberSubmits?.[session.prKey]?.submitted ?? posted[0]
+    const postedMembers = members.filter((member) => memberPosted(session, keyOf(member)))
+    const posted = postedMembers.flatMap((member) => memberPosted(session, keyOf(member)) ?? [])
+    const submitted = memberPosted(session, session.prKey) ?? posted[0]
     this.patch(sessionId, () => ({ status: 'submitted', submitted, submitAttemptReviewId: undefined }), true)
-    const threadIds = this.find(sessionId)?.threadsToResolveOnSubmit ?? []
+    const postedThreadIds = new Set(postedMembers.flatMap((member) => priorConcernThreadIds(this.memberDrafts(session, member))))
+    const threadIds = (session.threadsToResolveOnSubmit ?? []).filter((id) => postedThreadIds.has(id))
     const clearPending = () => this.patch(sessionId, () => ({ threadsToResolveOnSubmit: undefined }), true)
     if (threadIds.length === 0) clearPending()
     else {

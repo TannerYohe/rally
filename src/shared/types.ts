@@ -449,7 +449,7 @@ export interface CloneInfo {
   path: string
   branch: string
   baseRef: string
-  /** The branch head on GitHub when Rally last synced, merged, or pushed; commits after it are Rally's own. */
+  /** The GitHub head the checkout last matched when Rally synced, merged, or pushed; commits after it are the PR's unpushed local commits. */
   syncedHead?: string
   /** Absent means a temp clone. */
   kind?: CheckoutKind

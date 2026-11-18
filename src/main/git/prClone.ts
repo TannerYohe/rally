@@ -62,7 +62,7 @@ async function revParse(cwd: string, ref: string): Promise<string> {
 
 const remoteRef = (clone: CloneInfo) => `origin/${clone.branch}`
 
-/** Returns the ref Rally's own commits start after, falling back to the remote branch for clones from before syncedHead existed. */
+/** Returns the ref the checkout's unpushed commits start after, falling back to the remote branch for clones from before syncedHead existed. */
 const syncedRef = (clone: CloneInfo) => clone.syncedHead ?? remoteRef(clone)
 
 async function fetchBranch(clone: CloneInfo): Promise<void> {
@@ -133,7 +133,7 @@ async function commitList(clone: CloneInfo, extra: string[]): Promise<LocalCommi
     })
 }
 
-/** Returns the commits Rally made in the clone that GitHub doesn't have, newest first. */
+/** Returns the checkout's commits that GitHub doesn't have, whoever made them, newest first. */
 export function localCommits(clone: CloneInfo): Promise<LocalCommit[]> {
   return commitList(clone, [])
 }
@@ -267,7 +267,7 @@ export async function concludeMerge(clone: CloneInfo, files: string[]): Promise<
   return { ...clone, syncedHead: await revParse(clone.path, remoteRef(clone)) }
 }
 
-/** Replays Rally's commits onto a force-pushed branch and returns each rewritten commit's old sha mapped to its new one. */
+/** Replays the checkout's unpushed commits onto a force-pushed branch and returns each rewritten commit's old sha mapped to its new one. */
 async function replayOntoRemote(clone: CloneInfo): Promise<Record<string, string>> {
   const before = await commitList(clone, ['--no-merges'])
   try {
@@ -296,7 +296,7 @@ export async function abortMerge(clone: CloneInfo): Promise<void> {
 }
 
 /**
- * Fetches the head branch and brings commits that landed on GitHub into the clone: merged in, or after a force push, with Rally's commits replayed on top.
+ * Fetches the head branch and brings commits that landed on GitHub into the clone: merged in, or after a force push, with the unpushed commits replayed on top.
  * The returned clone records GitHub's head as synced, so save it before pushing in case the push fails.
  */
 export async function integrateRemote(clone: CloneInfo): Promise<IntegrateResult> {

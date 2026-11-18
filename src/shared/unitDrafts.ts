@@ -60,6 +60,11 @@ export function changesForPr(changes: DraftChanges, prKey: string): DraftChanges
   return { ...changes, summaryBodyEdit: changes.summaryBodyEdits[prKey] }
 }
 
+/** Returns each value that appears more than once, in order of its second appearance. */
+function repeatedValues<T>(values: T[]): T[] {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))]
+}
+
 /** Returns what keeps a unit's drafts from mapping onto its PRs: comments or concerns without a member PR, repeated ids, or a PR without exactly one verdict. */
 export function unitDraftProblems(drafts: Drafts, memberKeys: string[]): string[] {
   const problems: string[] = []
@@ -70,15 +75,14 @@ export function unitDraftProblems(drafts: Drafts, memberKeys: string[]): string[
   }
   for (const comment of drafts.comments) checkPr(`Draft #${comment.id}`, comment.prKey)
   for (const concern of drafts.priorConcerns) checkPr(`Earlier comment ${concern.id}`, concern.prKey)
-  const ids = drafts.comments.map((c) => c.id)
-  const repeated = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))]
+  const repeated = repeatedValues(drafts.comments.map((c) => c.id))
   if (repeated.length > 0) problems.push(`Draft ids must be unique across the PRs; ${repeated.map((id) => `#${id}`).join(', ')} repeat.`)
   const reviewed = drafts.prReviews?.map((r) => r.prKey) ?? []
   const missing = memberKeys.filter((key) => !reviewed.includes(key))
   if (missing.length > 0) problems.push(`Give a verdict and review body for ${missing.join(', ')} in pr_reviews.`)
   const unknown = reviewed.filter((key) => !memberKeys.includes(key))
   if (unknown.length > 0) problems.push(`pr_reviews names ${unknown.join(', ')}, which isn't in this review.`)
-  const doubled = [...new Set(reviewed.filter((key, index) => reviewed.indexOf(key) !== index))]
+  const doubled = repeatedValues(reviewed)
   if (doubled.length > 0) problems.push(`Give ${doubled.join(', ')} one entry in pr_reviews.`)
   return problems
 }

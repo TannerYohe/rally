@@ -88,12 +88,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const draftDescription = () => run(async () => onSession(await window.rally.draftDescription(prRef)))
   const editDescription = (edit: PrDescription | null) =>
     setDescriptionEdit(edit && session?.description && sameDescription(edit, session.description) ? null : edit)
-  const push = () =>
-    session &&
-    run(async () => {
-      await window.rally.pushAuthorChanges(session.id, session.description ? descriptionEdit : null)
-      setDescriptionEdit(null)
-    })
+  const push = () => session && run(() => window.rally.pushAuthorChanges(session.id, session.description ? descriptionEdit : null))
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${repliesLabel} to GitHub as you?`)) return
     void run(async () => {

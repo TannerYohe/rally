@@ -411,6 +411,22 @@ describe('prList', () => {
         expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api', 'web', 'worker'])
       })
 
+      it('stops following links after three fetch rounds', async () => {
+        const docs = githubPr({ id: 'pr4', number: 4, repo: 'docs', url: 'https://github.com/acme/docs/pull/4', body: 'Linked PRs: acme/worker#3 acme/extra#5' })
+        const extra = githubPr({ id: 'pr5', number: 5, repo: 'extra', url: 'https://github.com/acme/extra/pull/5', body: 'Linked PR: acme/docs#4' })
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs
+          .mockResolvedValueOnce({ viewer: 'me', lookups: [found(web({ body: 'Linked PRs: acme/api#1 acme/worker#3' }))] })
+          .mockResolvedValueOnce({ viewer: 'me', lookups: [found(worker({ body: 'Linked PRs: acme/web#2 acme/docs#4' }))] })
+          .mockResolvedValueOnce({ viewer: 'me', lookups: [found(docs)] })
+          .mockResolvedValueOnce({ viewer: 'me', lookups: [found(extra)] })
+
+        await prList.refresh()
+
+        expect(mocks.fetchPrs).toHaveBeenCalledTimes(3)
+        expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api', 'web', 'worker', 'docs'])
+      })
+
       it('does not follow the links of a PR that only one side lists', async () => {
         mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
         mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [found(web({ body: 'Linked PR: acme/worker#3' }))] })

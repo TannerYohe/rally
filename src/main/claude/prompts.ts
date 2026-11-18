@@ -29,9 +29,23 @@ export const AUTHOR_PROTOCOL = `You are running inside Rally, a desktop app. The
 - Never post to GitHub, resolve review threads, or push. Rally does those itself.
 ${SHELL_AND_QUESTION_NOTES}`
 
-export function reviewPrompt(pr: PrRef, skill: string): string {
+/** Returns the first turn's prompt: the review skill with the URL of every PR the review covers. */
+export function reviewPrompt(prs: PrRef[], skill: string): string {
   const name = skill.trim().replace(/^\//, '') || DEFAULT_CONFIG.reviewSkill
-  return `/${name} ${pr.url}`
+  return `/${name} ${prs.map((pr) => pr.url).join(' ')}`
+}
+
+/** Returns the protocol appended for a review of several linked PRs, which Rally posts as one review per PR. */
+export function unitProtocol(members: PrRef[]): string {
+  const list = members.map((pr) => `- ${pr.owner}/${pr.repo}#${pr.number} (${pr.url})`).join('\n')
+  return `This review covers ${members.length} linked PRs that make one change across repos:
+${list}
+
+- Review them as one change. Besides each PR on its own, check the seams between them: API contracts and payload shapes each side sends and expects, shared names, constants, and feature flags, and the order the PRs must merge and deploy in.
+- Present one report covering every PR.
+- In ${PUBLISH_DRAFTS_TOOL}, give every PR its own verdict and review body in pr_reviews. Rally posts a separate review to each PR.
+- Tag every draft comment and every prior concern with its PR in the pr field, as owner/repo#N. Number drafts uniquely across all the PRs. A draft that names no PR is rejected.
+- Use one $WORK directory for the whole review, with one clone per PR at $WORK/<owner>-<repo>, and pass -R owner/repo to every gh command so it reaches the right repo.`
 }
 
 function quote(text: string): string {

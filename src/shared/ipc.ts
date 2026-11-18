@@ -39,7 +39,7 @@ export interface RallyApi {
   linkPrs(prKey: string, target: PrCoords): Promise<void>
   unlinkPr(prKey: string, others: string[]): Promise<void>
   getSession(prKey: string): Promise<ReviewSession | null>
-  startReview(pr: PrRef): Promise<ReviewSession>
+  startReview(pr: PrRef, linked: PrRef[]): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
   submitReview(sessionId: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]): Promise<void>
   getReviewThreads(sessionId: string): Promise<ReviewThread[]>

@@ -1,20 +1,37 @@
 import { describe, expect, it } from 'vitest'
 import { feedbackItem } from '@shared/authorSession.fixture'
-import { authorActionsPrompt, reviewPrompt } from './prompts'
+import { authorActionsPrompt, reviewPrompt, unitProtocol } from './prompts'
 
 const pr = { owner: 'acme', repo: 'api', number: 12, url: 'https://github.com/acme/api/pull/12' }
 
 describe('reviewPrompt', () => {
   it('invokes the configured skill with the PR URL', () => {
-    expect(reviewPrompt(pr, 'code-review')).toBe('/code-review https://github.com/acme/api/pull/12')
+    expect(reviewPrompt([pr], 'code-review')).toBe('/code-review https://github.com/acme/api/pull/12')
   })
 
   it('accepts a skill name with a leading slash or surrounding spaces', () => {
-    expect(reviewPrompt(pr, ' /code-review ')).toBe('/code-review https://github.com/acme/api/pull/12')
+    expect(reviewPrompt([pr], ' /code-review ')).toBe('/code-review https://github.com/acme/api/pull/12')
+  })
+
+  it('passes every PR URL for a review of several PRs', () => {
+    const web = { owner: 'acme', repo: 'web', number: 3, url: 'https://github.com/acme/web/pull/3' }
+    expect(reviewPrompt([pr, web], 'review-pr')).toBe('/review-pr https://github.com/acme/api/pull/12 https://github.com/acme/web/pull/3')
   })
 
   it('falls back to review-pr when the skill is blank', () => {
-    expect(reviewPrompt(pr, '  ')).toBe('/review-pr https://github.com/acme/api/pull/12')
+    expect(reviewPrompt([pr], '  ')).toBe('/review-pr https://github.com/acme/api/pull/12')
+  })
+})
+
+describe('unitProtocol', () => {
+  it('lists the PRs and asks for one report, a verdict per PR, tagged drafts, and one $WORK', () => {
+    const web = { owner: 'acme', repo: 'web', number: 3, url: 'https://github.com/acme/web/pull/3' }
+    const protocol = unitProtocol([pr, web])
+    expect(protocol).toContain('covers 2 linked PRs')
+    expect(protocol).toContain('- acme/web#3 (https://github.com/acme/web/pull/3)')
+    expect(protocol).toContain('pr_reviews')
+    expect(protocol).toContain('seams')
+    expect(protocol).toContain('$WORK/<owner>-<repo>')
   })
 })
 

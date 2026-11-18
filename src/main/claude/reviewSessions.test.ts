@@ -59,6 +59,12 @@ function storedUnit(number: number, overrides: Partial<ReviewSession> = {}): Rev
   return { ...base, members: [base.pr, WEB], drafts: unitDrafts(number), ...overrides }
 }
 
+const docs = (number: number) => ({ owner: 'acme', repo: 'docs', number, url: `https://github.com/acme/docs/pull/${number}` })
+
+function storedDocs(number: number, overrides: Partial<ReviewSession> = {}): ReviewSession {
+  return storedSession(number, { id: `test-docs-${number}`, pr: docs(number), prKey: `acme/docs#${number}`, ...overrides })
+}
+
 function storedSession(number: number, overrides: Partial<ReviewSession> = {}): ReviewSession {
   return {
     id: `test-session-${number}`,
@@ -153,6 +159,11 @@ mocks.stored = [
     memberSubmits: { 'acme/web#2': { submitted: SUBMITTED }, 'acme/api#38': { submitted: null, attemptReviewId: 66 } },
   }),
   storedUnit(39),
+  storedUnit(41, { members: [storedSession(41).pr, docs(7)], drafts: null }),
+  storedSession(42),
+  storedDocs(8),
+  storedDocs(9),
+  storedSession(43),
 ]
 
 const { PARTLY_POSTED_ERROR, reviewSessions } = await import('./reviewSessions')
@@ -579,5 +590,40 @@ describe('submitting a review of several PRs', () => {
     await reviewSessions.submit('test-session-39', unitVerdicts(39, 'COMMENT', 'COMMENT'), NO_CHANGES, ['T-api', 'T-web'])
     await vi.waitFor(() => expect(session(39).threadResolution?.resolved).toEqual(['T-api', 'T-web']))
     expect(mocks.resolveOwnThreads).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('starting a review of several PRs', () => {
+  it('finds a unit session from any of its PRs', () => {
+    expect(reviewSessions.getByPr('acme/docs#7')?.id).toBe('test-session-41')
+    expect(reviewSessions.sessionState('acme/docs#7')).toEqual({ status: 'awaiting_feedback', active: true })
+    expect(reviewSessions.getByPr('acme/docs#99')).toBeNull()
+  })
+
+  it('replaces the solo sessions its PRs had and sends every PR URL with the unit protocol', async () => {
+    mocks.query.mockImplementation(async function* () {
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+    const started = await reviewSessions.start(storedSession(42).pr, [docs(8)])
+    expect(started.members?.map((m) => m.number)).toEqual([42, 8])
+    expect(reviewSessions.getByPr('acme/docs#8')?.id).toBe(started.id)
+    expect(reviewSessions.getByPr('acme/api#42')?.id).toBe(started.id)
+    const [{ prompt, options }] = mocks.query.mock.calls[0]
+    expect(prompt).toBe('/review-pr https://github.com/acme/api/pull/42 https://github.com/acme/docs/pull/8')
+    expect(options.systemPrompt.append).toContain('covers 2 linked PRs')
+    await vi.waitFor(() => expect(session(42).status).toBe('awaiting_feedback'))
+  })
+
+  it('refuses while a member has a turn running', async () => {
+    let finish: () => void = () => {}
+    mocks.query.mockImplementation(async function* () {
+      await new Promise<void>((resolve) => (finish = resolve))
+      yield { type: 'result', subtype: 'success', is_error: false }
+    })
+    await reviewSessions.feedback('test-docs-9', 'go')
+    await expect(reviewSessions.start(storedSession(43).pr, [docs(9)])).rejects.toThrow('The review of acme/docs#9 is still running')
+    expect(reviewSessions.getByPr('acme/api#43')?.id).toBe('test-session-43')
+    finish()
+    await vi.waitFor(() => expect(reviewSessions.getByPr('acme/docs#9')?.status).toBe('awaiting_feedback'))
   })
 })

@@ -45,7 +45,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.linkPrs, (_event, key: string, target: PrCoords) => prList.link(key, target))
   ipcMain.handle(IPC.unlinkPr, (_event, key: string, others: string[]) => prList.unlink(key, others))
   ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.open(key))
-  ipcMain.handle(IPC.startReview, (_event, pr: PrRef) => reviewSessions.start(pr))
+  ipcMain.handle(IPC.startReview, (_event, pr: PrRef, linked: PrRef[]) => reviewSessions.start(pr, linked))
   ipcMain.handle(IPC.sendFeedback, (_event, id: string, message: string) => reviewSessions.feedback(id, message))
   ipcMain.handle(IPC.submitReview, (_event, id: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]) =>
     reviewSessions.submit(id, verdicts, changes, resolveThreadIds),

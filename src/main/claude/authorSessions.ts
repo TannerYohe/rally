@@ -165,7 +165,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   async selfReview(pr: PrRef): Promise<AuthorSession> {
     const session = this.ensure(pr)
     this.assertCanStartTurn(session.id)
-    void this.runTurn(session.id, reviewPrompt(pr, configFile.get().reviewSkill), 'self_review')
+    void this.runTurn(session.id, reviewPrompt([pr], configFile.get().reviewSkill), 'self_review')
     return this.byId(session.id)
   }
 

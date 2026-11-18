@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
-  EMPTY_COMMENT_REVIEW_ERROR,
   finalReview,
-  isEmptyCommentReview,
   submitBlockedReason,
   type DraftChanges,
   type FinalReview,
@@ -12,7 +10,6 @@ import {
   type Drafts,
   type MemberSubmit,
   type MemberVerdict,
-  prKey,
   type PrRef,
   type ReviewEvent,
   type ReviewSession,
@@ -22,14 +19,23 @@ import {
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { keyOf } from '@shared/prUnit'
-import { changesForPr, draftsForPr, isUnitSession, sessionMembers, unitDraftProblems, withMemberComments } from '@shared/unitDrafts'
+import {
+  changesForPr,
+  draftsForPr,
+  emptyReviewError,
+  isUnitSession,
+  sessionCovers,
+  sessionMembers,
+  unitDraftProblems,
+  withMemberComments,
+} from '@shared/unitDrafts'
 import { describeReplies, needsReplyTargets } from '../github/reviewComments'
 import { submitReview } from '../github/submitReview'
 import { fetchOwnThreads, resolveOwnThreads } from '../github/threads'
 import { prList, type SessionState } from '../prList'
 import { configFile, sessionsDir } from '../store'
 import { ClaudeSessions, now, removeSessionDir, type TurnSetup } from './claudeSessions'
-import { APP_PROTOCOL, reviewPrompt } from './prompts'
+import { APP_PROTOCOL, reviewPrompt, unitProtocol } from './prompts'
 import { createRallyServer } from './rallyTools'
 
 const ACTIVE_STATUSES = new Set(['running', 'submitting'])
@@ -54,19 +60,18 @@ function submitPlan(session: ReviewSession, drafts: Drafts, verdicts: MemberVerd
     if (problems.length > 0) throw new Error(`Ask Claude to fix its drafts before submitting: ${problems.join(' ')}`)
   }
   const remaining = members.filter((member) => !session.memberSubmits?.[keyOf(member)]?.submitted)
-  const posts = remaining.flatMap((member): MemberPost[] => {
+  const remainingVerdicts = remaining.map((member) => {
     const key = keyOf(member)
     const event = verdicts.find((v) => v.prKey === key)?.event
     if (!event) throw new Error(`Pick a verdict for ${key}.`)
-    if (event === 'SKIP') {
-      if (!unit) throw new Error('Pick Comment, Approve, or Request changes.')
-      return []
-    }
-    const memberDrafts = draftsForPr(drafts, key)
-    const memberChanges = changesForPr(changes, key)
-    if (isEmptyCommentReview(event, memberDrafts, memberChanges)) throw new Error(unit ? `${key}: ${EMPTY_COMMENT_REVIEW_ERROR}` : EMPTY_COMMENT_REVIEW_ERROR)
-    return [{ member, event, review: finalReview(memberDrafts, memberChanges) }]
+    if (event === 'SKIP' && !unit) throw new Error('Pick Comment, Approve, or Request changes.')
+    return { member, prKey: key, event }
   })
+  const empty = emptyReviewError(drafts, remainingVerdicts, changes, unit)
+  if (empty) throw new Error(empty)
+  const posts = remainingVerdicts.flatMap(({ member, prKey, event }): MemberPost[] =>
+    event === 'SKIP' ? [] : [{ member, event, review: finalReview(draftsForPr(drafts, prKey), changesForPr(changes, prKey)) }],
+  )
   const anyPosted = remaining.length < members.length
   if (posts.length === 0 && !anyPosted) throw new Error('Pick Comment, Approve, or Request changes for at least one PR.')
   return posts.sort((a, b) => SUBMIT_ORDER.indexOf(a.event) - SUBMIT_ORDER.indexOf(b.event))
@@ -103,6 +108,11 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     super(sessionsDir, restoreSession)
   }
 
+  /** Returns the session that reviews the PR, whether it was started from that PR or another PR of its unit. */
+  getByPr(key: string): ReviewSession | null {
+    return this.sessions.get(key) ?? [...this.sessions.values()].find((session) => sessionCovers(session, key)) ?? null
+  }
+
   open(key: string): ReviewSession | null {
     const session = this.getByPr(key)
     if (session?.drafts && !session.submitted) void this.lookUpReplyTargets(session.id, session.drafts)
@@ -110,17 +120,28 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   }
 
   sessionState(key: string): SessionState | null {
-    const session = this.sessions.get(key)
+    const session = this.getByPr(key)
     return session ? { status: session.status, active: session.status !== 'submitted' } : null
   }
 
-  async start(pr: PrRef): Promise<ReviewSession> {
-    const key = prKey(pr.owner, pr.repo, pr.number)
-    const existing = this.sessions.get(key)
-    if (existing && this.isTurnRunning(existing.id)) return existing
-    this.add({ ...this.newSessionCore(pr, 'running'), drafts: null, submitted: null })
+  /**
+   * Starts a review of the PR and the PRs linked with it. A PR belongs to one session at a time, so this replaces any
+   * session a member already has, and refuses while one of them is running a turn, posting, or resolving threads.
+   */
+  async start(pr: PrRef, linked: PrRef[] = []): Promise<ReviewSession> {
+    const members = [pr, ...linked].filter((member, index, all) => all.findIndex((other) => keyOf(other) === keyOf(member)) === index)
+    const key = keyOf(pr)
+    const covering = members
+      .map((member) => this.getByPr(keyOf(member)))
+      .filter((session, index, all): session is ReviewSession => session !== null && all.findIndex((other) => other?.id === session.id) === index)
+    const same = covering.find((session) => session.prKey === key && sessionMembers(session).length === members.length)
+    if (same && this.isTurnRunning(same.id)) return same
+    const busy = covering.find((session) => this.isTurnRunning(session.id) || this.publishing.has(session.id) || session.resolvingThreads)
+    if (busy) throw new Error(`The review of ${busy.prKey} is still running. Wait for it to finish or cancel it, then start again.`)
+    for (const session of covering) this.remove(session)
+    this.add({ ...this.newSessionCore(pr, 'running'), ...(members.length > 1 && { members }), drafts: null, submitted: null })
     const session = this.sessions.get(key)!
-    void this.runTurn(session.id, reviewPrompt(pr, configFile.get().reviewSkill), 'review')
+    void this.runTurn(session.id, reviewPrompt(members, configFile.get().reviewSkill), 'review')
     return this.sessions.get(key)!
   }
 
@@ -228,13 +249,18 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
 
 
   protected turnSetup(sessionId: string): TurnSetup {
-    const mcpServer = createRallyServer({
-      onDrafts: (drafts) => {
-        this.patch(sessionId, () => ({ drafts }), true)
-        void this.lookUpReplyTargets(sessionId, drafts)
+    const members = sessionMembers(this.byId(sessionId))
+    const mcpServer = createRallyServer(
+      {
+        onDrafts: (drafts) => {
+          this.patch(sessionId, () => ({ drafts }), true)
+          void this.lookUpReplyTargets(sessionId, drafts)
+        },
       },
-    })
-    return { systemPromptAppend: APP_PROTOCOL, mcpServer }
+      { members },
+    )
+    const systemPromptAppend = members.length > 1 ? `${APP_PROTOCOL}\n\n${unitProtocol(members)}` : APP_PROTOCOL
+    return { systemPromptAppend, mcpServer }
   }
 
   private async lookUpReplyTargets(sessionId: string, drafts: Drafts): Promise<void> {

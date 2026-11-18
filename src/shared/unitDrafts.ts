@@ -1,6 +1,6 @@
-import type { DraftChanges } from './feedback'
+import { EMPTY_COMMENT_REVIEW_ERROR, isEmptyCommentReview, type DraftChanges } from './feedback'
 import { keyOf } from './prUnit'
-import type { Drafts, PrRef, ReviewSession } from './types'
+import type { Drafts, MemberVerdict, PrRef, ReviewSession } from './types'
 
 /** Returns every PR a review session covers, its own PR first. */
 export function sessionMembers(session: Pick<ReviewSession, 'pr' | 'members'>): PrRef[] {
@@ -60,4 +60,15 @@ export function unitDraftProblems(drafts: Drafts, memberKeys: string[]): string[
   const unknown = reviewed.filter((key) => !memberKeys.includes(key))
   if (unknown.length > 0) problems.push(`pr_reviews names ${unknown.join(', ')}, which isn't in this review.`)
   return problems
+}
+
+/** Returns the error for the first PR whose Comment review would post nothing, naming the PR in a review of several PRs. */
+export function emptyReviewError(drafts: Drafts, verdicts: MemberVerdict[], changes: DraftChanges, unit: boolean): string | null {
+  for (const { prKey, event } of verdicts) {
+    if (event === 'SKIP') continue
+    if (isEmptyCommentReview(event, draftsForPr(drafts, prKey), changesForPr(changes, prKey))) {
+      return unit ? `${prKey}: ${EMPTY_COMMENT_REVIEW_ERROR}` : EMPTY_COMMENT_REVIEW_ERROR
+    }
+  }
+  return null
 }

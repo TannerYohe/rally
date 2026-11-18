@@ -105,10 +105,9 @@ function nextNonBlank(lines: string[], index: number): number {
   return index
 }
 
-/** Returns a marker's line and the block below it up to the next heading or blank line, where a heading's block runs past a blank line until it has a PR reference and the next line doesn't continue a list. */
-function markedText(lines: string[], start: number, marker: MarkerLine): string {
-  const covered = [lines[start]]
-  let hasRef = marker.hasText
+/** Returns the PR references on a marker's line and in the block below it, and the index of the first line after the block; the block runs to the next heading or blank line, and a heading's block runs past a blank line until it has a reference and the next line doesn't continue a list. */
+function markedBlock(lines: string[], start: number, marker: MarkerLine): { refs: PrCoords[]; end: number } {
+  const refs = prRefsIn(lines[start])
   let index = marker.hasText ? start + 1 : nextNonBlank(lines, start + 1)
   while (index < lines.length) {
     const line = lines[index]
@@ -116,28 +115,33 @@ function markedText(lines: string[], start: number, marker: MarkerLine): string 
     if (!line.trim()) {
       if (marker.kind === 'label') break
       const next = nextNonBlank(lines, index)
-      if (next === lines.length || (hasRef && !LIST_ITEM.test(lines[next]))) break
+      if (next === lines.length || (refs.length > 0 && !LIST_ITEM.test(lines[next]))) break
       index = next
       continue
     }
-    covered.push(line)
-    hasRef ||= prRefsIn(line).length > 0
+    refs.push(...prRefsIn(line))
     index++
   }
-  return covered.join('\n')
+  return { refs, end: index }
 }
 
 /** Returns the PRs in other repos that a description lists under a link marker, at most MAX_LINK_TARGETS. */
 export function parseLinkedPrs(body: string, self: PrCoords, markers: string[]): PrCoords[] {
   const lines = withoutCodeAndComments(body).split(/\r?\n/)
   const targets: PrCoords[] = []
-  lines.forEach((line, index) => {
-    const marker = markerLine(line, markers)
-    if (!marker) return
-    for (const ref of prRefsIn(markedText(lines, index, marker))) {
+  let index = 0
+  while (index < lines.length && targets.length < MAX_LINK_TARGETS) {
+    const marker = markerLine(lines[index], markers)
+    if (!marker) {
+      index++
+      continue
+    }
+    const block = markedBlock(lines, index, marker)
+    for (const ref of block.refs) {
       if (isSameRepo(ref, self) || targets.some((t) => isSamePr(t, ref))) continue
       targets.push(ref)
     }
-  })
+    index = Math.max(block.end, index + 1)
+  }
   return targets.slice(0, MAX_LINK_TARGETS)
 }

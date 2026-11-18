@@ -63,6 +63,12 @@ describe('parseLinkedPrs', () => {
     expect(Date.now() - started).toBeLessThan(500)
   })
 
+  it('parses a long run of marker lines in linear time', () => {
+    const started = Date.now()
+    parse('related PR: acme/web#3\n'.repeat(3000) + 'Related PR:\n'.repeat(3000))
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
   it('stops the block at the next heading', () => {
     const body = ['### Linked pull requests', 'acme/web#3', '### Testing', 'acme/other#4'].join('\n')
     expect(parse(body).map((r) => r.repo)).toEqual(['web'])

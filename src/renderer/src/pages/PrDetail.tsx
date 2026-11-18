@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { keyOf, toPrRef, unitMembers } from '@shared/prUnit'
 import { prKey, REVIEW_EVENT_LABELS, type MemberVerdict, type Pr, type PrRef, type ReviewSession, type SubmittedReview } from '@shared/types'
-import { draftsForPr, emptyReviewError, isUnitSession, sessionMembers } from '@shared/unitDrafts'
+import { draftsForPr, emptyReviewError, isPartlyPosted, isUnitSession, memberPosted, sessionMembers, unpostedMembers } from '@shared/unitDrafts'
 import { DraftList } from '../components/DraftList'
 import { LinkPrForm, OneSidedLinks, UnlinkButton } from '../components/LinkedPrControls'
 import { PriorConcernList } from '../components/PriorConcernList'
@@ -124,7 +124,7 @@ export function PrDetail() {
 
 /** Says which PRs joined or left the unit since the review started, and offers to start over with the current unit. */
 function MembershipNotice({ session, unit, onStartOver }: { session: ReviewSession; unit: Pr[]; onStartOver(): void }) {
-  if (unit.length === 0 || isSubmitted(session) || BUSY_STATUSES.includes(session.status)) return null
+  if (unit.length === 0 || isSubmitted(session) || isPartlyPosted(session) || BUSY_STATUSES.includes(session.status)) return null
   const reviewed = sessionMembers(session).map(keyOf)
   const current = unit.map(keyOf)
   const joined = current.filter((k) => !reviewed.includes(k))
@@ -195,9 +195,10 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
   const members = sessionMembers(session)
   const unit = members.length > 1
   const prOf = (member: PrRef) => memberPrs.find((pr) => keyOf(pr) === keyOf(member))
-  const postedOf = (member: PrRef) => session.memberSubmits?.[keyOf(member)]?.submitted ?? null
-  const pending = members.filter((member) => !postedOf(member))
+  const postedOf = (member: PrRef) => memberPosted(session, keyOf(member))
+  const pending = unpostedMembers(session)
   const anyPosted = pending.length < members.length
+  const partlyPosted = isPartlyPosted(session)
   const changes: DraftChanges = unit
     ? { edits, summaryBodyEdit: undefined, summaryBodyEdits: summaryEdits, instructions: feedback }
     : { edits, summaryBodyEdit: summaryEdits[session.prKey], instructions: feedback }
@@ -281,7 +282,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
                 Cancel
               </button>
             )}
-            {!busy && !submitted && (
+            {!busy && !submitted && !partlyPosted && (
               <button className={SECONDARY_BUTTON_CLASS} disabled={resolvingThreads} onClick={startOver}>
                 Start over
               </button>
@@ -292,7 +293,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
 
       <ErrorBox message={actionError ?? session.error} />
 
-      {unit && anyPosted && !submitted && (
+      {unit && partlyPosted && (
         <div className="space-y-1 rounded-xl bg-amber-950/60 px-4 py-3 text-sm text-amber-200 ring-1 ring-amber-500/20">
           {members.filter(postedOf).map((member) => (
             <div key={keyOf(member)} className="flex flex-wrap items-center gap-2">

@@ -7,6 +7,7 @@ vi.mock('./client', async (importOriginal) => ({
 }))
 
 const { feedbackItems, fetchFeedbackItems, PAGE_LIMIT } = await import('./authorFeedback')
+import type { ReviewState } from '@shared/types'
 import type { RawPrComment, RawReviewSummary, RawThread } from './feedbackFields'
 
 const PR = 'https://github.com/acme/api/pull/1'
@@ -48,7 +49,7 @@ const prComment = (id: number, login: string, body: string, kind = 'User'): RawP
   reactionGroups: [],
 })
 
-const review = (id: number, state: string, login: string, body = 'Please fix'): RawReviewSummary => ({
+const review = (id: number, state: ReviewState, login: string, body = 'Please fix'): RawReviewSummary => ({
   id: `R${id}`,
   url: `${PR}#pullrequestreview-${id}`,
   body,

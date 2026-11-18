@@ -31,9 +31,14 @@ function lists(node: LinkNode, other: LinkNode): boolean {
   return node.targets.some((target) => isSamePr(target, other.coords))
 }
 
-function linked(a: LinkNode, b: LinkNode, links: PrLinks): boolean {
+export function areLinked(a: LinkNode, b: LinkNode, links: PrLinks): boolean {
   if (hasPair(links.unlinked, a.key, b.key)) return false
   return (lists(a, b) && lists(b, a)) || hasPair(links.linked, a.key, b.key)
+}
+
+/** Returns the keys a PR was linked with by hand. */
+export function handLinkedKeys(key: string, links: PrLinks): string[] {
+  return links.linked.flatMap(([a, b]) => (a === key ? [b] : b === key ? [a] : []))
 }
 
 /** Returns the units the nodes form, as member keys in node order, for every unit of two or more. */
@@ -46,7 +51,7 @@ export function linkUnits(nodes: LinkNode[], links: PrLinks): string[][] {
   }
   nodes.forEach((a, i) => {
     for (const b of nodes.slice(i + 1)) {
-      if (!linked(a, b, links)) continue
+      if (!areLinked(a, b, links)) continue
       const [ra, rb] = [root(a.key), root(b.key)]
       if (ra === rb || size.get(ra)! + size.get(rb)! > MAX_UNIT_SIZE) continue
       parent.set(rb, ra)

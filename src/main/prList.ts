@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import {
   headKey,
+  isSamePr,
   prKey,
   type HideMode,
   type MyReview,
@@ -14,11 +15,13 @@ import {
   type StoredHide,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { keyOf, linkNode, linkUnits, oneSidedLinks, toPrRef, unitHide, type LinkNode } from '@shared/prUnit'
+import { parsePrRef, type PrCoords } from '@shared/linkedPrs'
+import { areLinked, handLinkedKeys, keyOf, linkNode, linkUnits, oneSidedLinks, toPrRef, unitHide, type LinkNode } from '@shared/prUnit'
 import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase } from './github/authorPhase'
 import { computePhase } from './github/phase'
-import { fetchPr, searchPrs, type GithubPr } from './github/queries'
+import { sameLogin } from './github/logins'
+import { fetchPr, fetchPrs, searchPrs, type GithubPr } from './github/queries'
 import { AUTHORED_SEARCH_QUERIES, buildSearchQueries } from './github/search'
 import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
 import type { JsonFile } from './jsonFile'
@@ -38,6 +41,7 @@ import {
 } from './store'
 
 const SUMMARY_CONCURRENCY = 3
+const MAX_LINK_ROUNDS = 3
 
 export interface SessionState {
   status: SessionStatus
@@ -76,6 +80,10 @@ interface PrListSource {
 interface LinkTarget {
   node: LinkNode
   ref: PrRef
+}
+
+function uniqueCoords(coords: PrCoords[]): PrCoords[] {
+  return coords.filter((c, index) => coords.findIndex((other) => isSamePr(other, c)) === index)
 }
 
 function unreciprocatedTargets(prs: Pr[]): Map<string, LinkTarget> {
@@ -164,7 +172,9 @@ class PrList extends EventEmitter {
     this.update({ refreshing: true, error: null })
     try {
       const { viewer, prs: searched } = await searchPrs(this.source.searchQueries(), this.kind)
-      const prs = searched.map((pr) => this.fetchedDuringRefresh.get(pr.id) ?? pr)
+      const fromSearch = searched.map((pr) => this.fetchedDuringRefresh.get(pr.id) ?? pr)
+      const companions = this.source.links ? await this.fetchCompanions(fromSearch, viewer, this.source.links) : []
+      const prs = [...fromSearch, ...companions.map((pr) => ({ ...(this.fetchedDuringRefresh.get(pr.id) ?? pr), companion: true }))]
       const refreshedAt = new Date().toISOString()
       const listed = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
       for (const prune of this.pruners) prune(listed)
@@ -174,6 +184,45 @@ class PrList extends EventEmitter {
     } catch (error) {
       this.update({ refreshing: false, error: errorMessage(error) })
     }
+  }
+
+  /**
+   * Fetches the open PRs in other repos that listed PRs link, following mutual and hand links for a few rounds,
+   * and returns those that join a unit with a listed PR. An unknown lookup reuses the PR's previous copy.
+   */
+  private async fetchCompanions(listed: GithubPr[], viewer: string, links: PrLinkSource): Promise<GithubPr[]> {
+    const markers = links.markers()
+    const handLinks = links.file.get()
+    const known: LinkNode[] = listed.map((pr) => linkNode(pr, markers))
+    const fetched = new Map<string, GithubPr>()
+    let frontier = known
+    for (let round = 0; round < MAX_LINK_ROUNDS && frontier.length > 0; round++) {
+      const handTargets = frontier.flatMap((node) => handLinkedKeys(node.key, handLinks).flatMap((key) => parsePrRef(key) ?? []))
+      const wanted = uniqueCoords([...frontier.flatMap((node) => node.targets), ...handTargets]).filter(
+        (coords) => !known.some((node) => isSamePr(node.coords, coords)),
+      )
+      if (wanted.length === 0) break
+      const { lookups } = await fetchPrs(wanted, this.kind)
+      const found = lookups.flatMap((lookup, i): GithubPr[] => {
+        switch (lookup.status) {
+          case 'found':
+            return sameLogin(lookup.pr.author, viewer) ? [] : [lookup.pr]
+          case 'unknown':
+            return this.state.prs.filter((pr) => isSamePr(pr, wanted[i]))
+          case 'gone':
+            return []
+        }
+      })
+      const nodes = found.map((pr) => linkNode(pr, markers))
+      for (const pr of found) fetched.set(keyOf(pr), pr)
+      frontier = nodes.filter((node) => known.some((other) => areLinked(node, other, handLinks)))
+      known.push(...nodes)
+    }
+    const listedKeys = new Set(listed.map(keyOf))
+    const memberKeys = new Set(linkUnits(known, handLinks).filter((unit) => unit.some((key) => listedKeys.has(key))).flat())
+    const outside = [...fetched.values()].filter((pr) => !memberKeys.has(keyOf(pr)))
+    this.linkTargets = new Map(outside.map((pr) => [keyOf(pr), { node: linkNode(pr, markers), ref: toPrRef(pr) }]))
+    return [...fetched.values()].filter((pr) => memberKeys.has(keyOf(pr)))
   }
 
   /** Fetches one PR; a full refresh already in flight keeps this newer copy instead of its own. */

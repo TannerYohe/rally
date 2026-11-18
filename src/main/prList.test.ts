@@ -22,12 +22,13 @@ const mocks = vi.hoisted(() => {
     },
     searchPrs: vi.fn(),
     fetchPr: vi.fn(),
+    fetchPrs: vi.fn(),
     summarizePr: vi.fn(),
   }
 })
 
 vi.mock('./store', () => mocks.store)
-vi.mock('./github/queries', () => ({ searchPrs: mocks.searchPrs, fetchPr: mocks.fetchPr }))
+vi.mock('./github/queries', () => ({ searchPrs: mocks.searchPrs, fetchPr: mocks.fetchPr, fetchPrs: mocks.fetchPrs }))
 vi.mock('./github/search', () => ({ buildSearchQueries: () => ['query'], AUTHORED_SEARCH_QUERIES: ['authored'] }))
 vi.mock('./claude/summarize', () => ({ summarizePr: mocks.summarizePr }))
 
@@ -71,6 +72,8 @@ describe('prList', () => {
     mocks.summarizePr.mockResolvedValue('A summary')
     mocks.store.rallyReviewsFile.set({})
     mocks.store.prLinksFile.set({ linked: [], unlinked: [] })
+    mocks.fetchPrs.mockReset()
+    mocks.fetchPrs.mockResolvedValue({ viewer: 'me', lookups: [] })
     prList.setSessionLookup(() => null)
   })
 
@@ -348,6 +351,100 @@ describe('prList', () => {
 
       prList.setSessionLookup((key) => (key === 'acme/api#1' ? { status: 'awaiting_feedback', active: true } : null))
       expect(prList.get().prs.map((pr) => pr.hidden)).toEqual([null, null])
+    })
+  
+    describe('companions', () => {
+      const worker = (overrides: Partial<GithubPr> = {}) =>
+        githubPr({ id: 'pr3', number: 3, repo: 'worker', url: 'https://github.com/acme/worker/pull/3', body: 'Linked PR: acme/web#2', ...overrides })
+      const found = (pr: GithubPr) => ({ status: 'found' as const, pr })
+
+      it('fetches a mutually linked PR outside the list as a full member, kept through pruners', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [found(web())] })
+        const pruner = vi.fn()
+        prList.addPruner(pruner)
+        mocks.store.summariesFile.set({ 'pr2:new': 'web summary' })
+
+        await prList.refresh()
+
+        expect(mocks.fetchPrs).toHaveBeenCalledWith([{ owner: 'acme', repo: 'web', number: 2 }], 'reviewing')
+        expect(prList.get().prs.map((pr) => [pr.repo, pr.companion, pr.linkedPrs])).toEqual([
+          ['api', undefined, ['acme/web#2']],
+          ['web', true, ['acme/api#1']],
+        ])
+        expect(pruner).toHaveBeenCalledWith(new Set(['acme/api#1', 'acme/web#2']))
+        expect(mocks.store.summariesFile.get()).toMatchObject({ 'pr2:new': 'web summary' })
+      })
+
+      it('follows mutual links for more rounds', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs
+          .mockResolvedValueOnce({ viewer: 'me', lookups: [found(web({ body: 'Linked PRs: acme/api#1 acme/worker#3' }))] })
+          .mockResolvedValueOnce({ viewer: 'me', lookups: [found(worker())] })
+
+        await prList.refresh()
+
+        expect(mocks.fetchPrs).toHaveBeenCalledTimes(2)
+        expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api', 'web', 'worker'])
+      })
+
+      it('does not follow the links of a PR that only one side lists', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [found(web({ body: 'Linked PR: acme/worker#3' }))] })
+
+        await prList.refresh()
+
+        expect(mocks.fetchPrs).toHaveBeenCalledTimes(1)
+        expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api'])
+        expect(prList.get().prs[0].unreciprocatedLinks).toEqual([{ owner: 'acme', repo: 'web', number: 2, url: 'https://github.com/acme/web/pull/2' }])
+      })
+
+      it('does not group a link target that is gone or mine', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: 'Linked PRs: acme/web#2 acme/worker#3' })] })
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'gone' }, found(worker({ author: 'ME', body: 'Linked PR: acme/api#1' }))] })
+
+        await prList.refresh()
+
+        expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api'])
+        expect(prList.get().prs[0].unreciprocatedLinks).toBeUndefined()
+      })
+
+      it('keeps the previous copy of a companion whose lookup failed, and drops one that closed', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [found(web({ title: 'Before' }))] })
+        await prList.refresh()
+
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'unknown' }] })
+        await prList.refresh()
+        expect(prList.get().prs.map((pr) => pr.title)).toEqual(['Change', 'Before'])
+
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'gone' }] })
+        await prList.refresh()
+        expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api'])
+      })
+
+      it('fails the refresh when the companion lookup fails outright', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockRejectedValueOnce(new Error('rate limited'))
+        await prList.refresh()
+        expect(prList.get().error).toBe('rate limited')
+      })
+
+      it('fetches a PR linked by hand', async () => {
+        mocks.store.prLinksFile.set({ linked: [['acme/api#1', 'acme/web#2']], unlinked: [] })
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' })] })
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [found(web({ body: '' }))] })
+
+        await prList.refresh()
+
+        expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['acme/web#2'], ['acme/api#1']])
+      })
+
+      it('never fetches companions for the authored list', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ author: 'me' })] })
+        await authoredPrList.refresh()
+        expect(mocks.fetchPrs).not.toHaveBeenCalled()
+      })
     })
   })
 })

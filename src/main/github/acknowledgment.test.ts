@@ -32,7 +32,7 @@ describe('threadAcknowledged', () => {
 })
 
 describe('pendingConversation', () => {
-  it('keeps comments and review bodies from people until I react or link to them', () => {
+  it('keeps comments and commented or change-request review bodies from people until I react or link to them', () => {
     const comments = [
       comment(1, 'bob', 'Why this approach?'),
       comment(2, 'carol', 'Nice', { reactionGroups: [{ viewerHasReacted: true }] }),
@@ -43,8 +43,11 @@ describe('pendingConversation', () => {
     ]
     const reviews = [
       review(10, 'bob', 'Overall looks good, a few questions'),
-      review(11, 'carol', '', { state: 'APPROVED' }),
-      review(12, 'dan', 'LGTM', { state: 'APPROVED' }),
+      review(11, 'carol', ''),
+      review(12, 'dan', 'Looks right, but why the retry?', { state: 'CHANGES_REQUESTED' }),
+      review(14, 'erin', 'LGTM, one nit', { state: 'APPROVED' }),
+      review(15, 'frank', 'LGTM', { state: 'DISMISSED' }),
+      review(16, 'gina', 'Draft note', { state: 'PENDING' }),
       review(13, 'copilot', 'Copilot reviewed 4 files', { author: { login: 'copilot', __typename: 'Bot' } }),
     ]
     const mine = [...comments, comment(7, 'me', 'Re #pullrequestreview-12: thanks!'), comment(8, 'me', `See ${PR}#issuecomment-10`)]

@@ -1,3 +1,4 @@
+import type { ReviewState } from '@shared/types'
 import { sameLogin } from './logins'
 
 export interface RawReactionGroup {
@@ -26,7 +27,7 @@ export interface RawConversationComment {
 export interface RawReviewBody {
   url: string
   body: string
-  state: string
+  state: ReviewState
   submittedAt: string | null
   author: RawActor | null
   reactionGroups?: RawReactionGroup[] | null
@@ -62,12 +63,16 @@ function needsAcknowledgment(item: { body: string; author: RawActor | null }, vi
   return Boolean(item.body.trim()) && !isViewer(item.author, viewer) && !isBot(item.author)
 }
 
+const REPLY_STATES = new Set<ReviewState>(['COMMENTED', 'CHANGES_REQUESTED'])
+
+const reviewStateWantsReply = (review: RawReviewBody) => REPLY_STATES.has(review.state)
+
 export interface PendingConversation<C extends RawConversationComment, R extends RawReviewBody> {
   comments: C[]
   reviews: R[]
 }
 
-/** Returns the PR comments and review bodies from people, not bots, that I haven't acknowledged. */
+/** Returns the PR comments and commented or change-request review bodies from people, not bots, that I haven't acknowledged. */
 export function pendingConversation<C extends RawConversationComment, R extends RawReviewBody>(
   comments: C[],
   reviews: R[],
@@ -76,6 +81,6 @@ export function pendingConversation<C extends RawConversationComment, R extends 
   const mine = comments.filter((c) => isViewer(c.author, viewer))
   return {
     comments: comments.filter((c) => !c.isMinimized && needsAcknowledgment(c, viewer) && !conversationAcknowledged(c, mine)),
-    reviews: reviews.filter((r) => r.state !== 'PENDING' && needsAcknowledgment(r, viewer) && !conversationAcknowledged(r, mine)),
+    reviews: reviews.filter((r) => reviewStateWantsReply(r) && needsAcknowledgment(r, viewer) && !conversationAcknowledged(r, mine)),
   }
 }

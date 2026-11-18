@@ -7,6 +7,7 @@ vi.mock('./client', async (importOriginal) => ({
 }))
 
 const { feedbackItems, fetchFeedbackItems, PAGE_LIMIT } = await import('./authorFeedback')
+import type { ReviewState } from '@shared/types'
 import type { RawPrComment, RawReviewSummary, RawThread } from './feedbackFields'
 
 const PR = 'https://github.com/acme/api/pull/1'
@@ -48,7 +49,7 @@ const prComment = (id: number, login: string, body: string, kind = 'User'): RawP
   reactionGroups: [],
 })
 
-const review = (id: number, state: string, login: string, body = 'Please fix'): RawReviewSummary => ({
+const review = (id: number, state: ReviewState, login: string, body = 'Please fix'): RawReviewSummary => ({
   id: `R${id}`,
   url: `${PR}#pullrequestreview-${id}`,
   body,
@@ -95,19 +96,18 @@ describe('feedbackItems', () => {
     expect(item).toMatchObject({ line: 2, outdated: true })
   })
 
-  it('lists unacknowledged PR comments and review bodies of any state', () => {
+  it('lists unacknowledged PR comments and review bodies, leaving out approvals', () => {
     const items = feedbackItems(
       [],
       [prComment(1, 'bob', 'Why not reuse the helper?'), prComment(2, 'codecov', 'Coverage', 'Bot')],
-      [review(10, 'CHANGES_REQUESTED', 'carol'), review(11, 'APPROVED', 'dan', 'LGTM, one nit'), review(12, 'APPROVED', 'erin', '')],
+      [review(10, 'CHANGES_REQUESTED', 'carol'), review(11, 'APPROVED', 'dan', 'LGTM, one nit'), review(12, 'COMMENTED', 'erin', '')],
       'me',
     )
     expect(items.map((i) => [i.id, i.kind])).toEqual([
       ['R10', 'review'],
-      ['R11', 'review'],
       ['IC1', 'comment'],
     ])
-    expect(items[2]).toMatchObject({ author: 'bob', path: null, reactionSubjectId: 'IC1', url: `${PR}#issuecomment-1` })
+    expect(items[1]).toMatchObject({ author: 'bob', path: null, reactionSubjectId: 'IC1', url: `${PR}#issuecomment-1` })
   })
 
   it('orders unanswered items by newest activity', () => {

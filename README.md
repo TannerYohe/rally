@@ -138,18 +138,18 @@ Reviewers resolve their own threads, so a comment counts as answered once you ac
 
 - A review thread is acknowledged while its latest comment is yours or carries your reaction. It stays listed until it's resolved.
 - A PR comment or review body is acknowledged once you react to it or a comment of yours links to it. Rally's replies always link to it.
-- Empty review bodies, hidden comments, and PR comments and review bodies from bots don't need a response. Review threads from bots, such as code scanning alerts, do.
+- Approval, dismissed, and pending review bodies, empty review bodies, hidden comments, and PR comments and review bodies from bots don't need a response. Review threads from bots, such as code scanning alerts, do.
 
 | Phase | Rule |
 |---|---|
 | In progress | Your Rally session for the PR has a running turn, an error, unpushed commits, unposted replies, or a description update to push. |
-| Needs response | A review thread, PR comment, or review body isn't acknowledged, or a self-review finding is still open. This outranks Approved. |
+| Needs response | A review thread, PR comment, or review body that needs a response isn't acknowledged, or a self-review finding is still open. This outranks Approved. |
 | Awaiting reviews | Anything else that isn't approved, including a change request whose comments you've all acknowledged. |
 | Approved | GitHub's review decision is Approved, or, in a repo that requires no reviews, a reviewer approved. |
 
 The list reads a PR's first 100 threads and its last 100 PR comments and reviews. A PR with more counts as Needs response and its card says so, since some feedback went unread; the PR page reads everything, including every comment in long threads. The My PRs search fetches 10 PRs per page to keep its GitHub rate-limit cost low. The logic lives in `src/main/github/authorPhase.ts` and `src/main/github/acknowledgment.ts`.
 
-The PR page lists each unresolved review thread and each unacknowledged PR comment and review body, newest first. Threads that wait on the reviewer collapse into a **waiting on reviewers** group at the bottom. **👍 Acknowledge** reacts 👍 on GitHub right away, with no Claude turn, for a comment that needs no reply. Or pick one action per comment, with an optional note for Claude:
+The PR page lists each unresolved review thread and each unacknowledged PR comment and review body that needs a response, newest first. Threads that wait on the reviewer collapse into a **waiting on reviewers** group at the bottom. **👍 Acknowledge** reacts 👍 on GitHub right away, with no Claude turn, for a comment that needs no reply. Or pick one action per comment, with an optional note for Claude:
 
 - **Investigate**: Claude checks whether the comment holds against the code and gives a verdict (valid, partly valid, not valid, unclear) with evidence. When it doesn't hold, Claude drafts the reply you'd post. No code changes.
 - **Fix**: Claude makes the change, runs the tests or specs that cover it, and lists the files it changed with a commit message. After the turn, Rally commits each fix separately and puts the commit's short sha into the reply where Claude wrote `{commit}`.

@@ -1,3 +1,4 @@
+import type { ReviewState } from '@shared/types'
 import { isViewer } from './acknowledgment'
 
 /** Selects each reviewer's latest approval or change request on a PR, with an optional directive such as `@include(if: $authored)`. */
@@ -65,7 +66,7 @@ export interface RawReviewSummary {
   id: string
   url: string
   body: string
-  state: string
+  state: ReviewState
   submittedAt: string | null
   author: RawAuthor | null
   reactionGroups: { viewerHasReacted: boolean }[] | null

@@ -543,12 +543,27 @@ export interface AuthorSession extends SessionCore {
   lastReRequest: ReviewReRequest | null
 }
 
-export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {
-  return a.number === b.number && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+export type PrCoords = Pick<PrRef, 'owner' | 'repo' | 'number'>
+
+export function isSameRepo(a: Pick<PrRef, 'owner' | 'repo'>, b: Pick<PrRef, 'owner' | 'repo'>): boolean {
+  return a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+}
+
+export function isSamePr(a: PrCoords, b: PrCoords): boolean {
+  return a.number === b.number && isSameRepo(a, b)
 }
 
 export function prKey(owner: string, repo: string, number: number): string {
   return `${owner}/${repo}#${number}`
+}
+
+/** Returns a PR's key, owner/repo#N. */
+export function keyOf(pr: PrCoords): string {
+  return prKey(pr.owner, pr.repo, pr.number)
+}
+
+export function toPrRef(pr: PrRef): PrRef {
+  return { owner: pr.owner, repo: pr.repo, number: pr.number, url: pr.url }
 }
 
 export function headKey(pr: { id: string; headRefOid: string }): string {

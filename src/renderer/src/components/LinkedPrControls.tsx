@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { parsePrRef } from '@shared/linkedPrs'
-import { keyOf } from '@shared/prUnit'
-import type { Pr, PrRef } from '@shared/types'
+import { keyOf, type Pr, type PrRef } from '@shared/types'
 import { useActionRunner } from '../lib/hooks'
 import { FIELD_CLASS, SECONDARY_BUTTON_CLASS, SMALL_BUTTON_CLASS } from '../lib/theme'
 

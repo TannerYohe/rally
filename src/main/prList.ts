@@ -2,11 +2,13 @@ import { EventEmitter } from 'node:events'
 import {
   headKey,
   isSamePr,
-  prKey,
+  keyOf,
+  toPrRef,
   type HideMode,
   type MyReview,
   type Phase,
   type Pr,
+  type PrCoords,
   type PrListKind,
   type PrLinks,
   type PrListState,
@@ -15,8 +17,8 @@ import {
   type StoredHide,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { parsePrRef, type PrCoords } from '@shared/linkedPrs'
-import { areLinked, handLinkedKeys, hasPair, keyOf, linkNode, linkUnits, oneSidedLinks, toPrRef, unitHide, type LinkNode } from '@shared/prUnit'
+import { parsePrRef } from '@shared/linkedPrs'
+import { areLinked, handLinkedKeys, hasPair, linkNode, linkUnits, oneSidedLinks, unitHide, type LinkNode } from '@shared/prUnit'
 import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase } from './github/authorPhase'
 import { computePhase } from './github/phase'
@@ -178,7 +180,7 @@ class PrList extends EventEmitter {
       const companions = this.source.links ? await this.fetchCompanions(fromSearch, viewer, this.source.links) : []
       const prs = [...fromSearch, ...companions.map((pr) => ({ ...(this.fetchedDuringRefresh.get(pr.id) ?? pr), companion: true }))]
       const refreshedAt = new Date().toISOString()
-      const listed = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
+      const listed = new Set(prs.map(keyOf))
       for (const prune of this.pruners) prune(listed)
       this.update({ prs: this.settle(this.decorate(prs, true)), viewer, refreshedAt, refreshing: false })
       this.files.cache.set({ viewer, refreshedAt, prs: this.state.prs })
@@ -422,7 +424,7 @@ class PrList extends EventEmitter {
 
   private withPhases(prs: PhaseInput[]): Omit<Pr, 'hidden'>[] {
     return prs.map((pr) => {
-      const session = this.sessionOf(prKey(pr.owner, pr.repo, pr.number))
+      const session = this.sessionOf(keyOf(pr))
       return { ...pr, reviewStatus: session?.status ?? null, phase: this.source.phase(pr, session?.active ?? false) }
     })
   }
@@ -505,7 +507,7 @@ function pruneRallyReviews(listed: Set<string>): void {
 }
 
 function reviewPhase(pr: PhaseInput, sessionActive: boolean): Phase {
-  const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviewsFile.get()[prKey(pr.owner, pr.repo, pr.number)] ?? [])
+  const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviewsFile.get()[keyOf(pr)] ?? [])
   return computePhase({ ...pr, myReviews, reviewInProgress: sessionActive })
 }
 

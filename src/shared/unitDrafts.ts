@@ -1,6 +1,5 @@
 import { EMPTY_COMMENT_REVIEW_ERROR, isEmptyCommentReview, type DraftChanges } from './feedback'
-import { keyOf } from './prUnit'
-import type { Drafts, MemberVerdict, PrRef, ReviewSession, SubmittedReview } from './types'
+import { keyOf, type Drafts, type MemberVerdict, type PrRef, type ReviewSession, type SubmittedReview } from './types'
 
 /** Returns every PR a review session covers, its own PR first. */
 export function sessionMembers(session: Pick<ReviewSession, 'pr' | 'members'>): PrRef[] {

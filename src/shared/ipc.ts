@@ -1,5 +1,4 @@
 import type { DraftChanges } from './feedback'
-import type { PrCoords } from './linkedPrs'
 import type {
   ActionRequest,
   AppInfo,
@@ -10,6 +9,7 @@ import type {
   Health,
   HideMode,
   InstallAttempt,
+  PrCoords,
   PrListKind,
   PrListState,
   PrRef,

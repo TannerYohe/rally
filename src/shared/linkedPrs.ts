@@ -1,6 +1,4 @@
-import { isSamePr, type PrRef } from './types'
-
-export type PrCoords = Pick<PrRef, 'owner' | 'repo' | 'number'>
+import { isSamePr, isSameRepo, type PrCoords } from './types'
 
 export const MAX_LINK_TARGETS = 5
 
@@ -137,8 +135,7 @@ export function parseLinkedPrs(body: string, self: PrCoords, markers: string[]):
     const marker = markerLine(line, markers)
     if (!marker) return
     for (const ref of prRefsIn(markedText(lines, index, marker))) {
-      const sameRepo = ref.owner.toLowerCase() === self.owner.toLowerCase() && ref.repo.toLowerCase() === self.repo.toLowerCase()
-      if (sameRepo || targets.some((t) => isSamePr(t, ref))) continue
+      if (isSameRepo(ref, self) || targets.some((t) => isSamePr(t, ref))) continue
       targets.push(ref)
     }
   })

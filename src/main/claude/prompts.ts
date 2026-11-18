@@ -1,5 +1,5 @@
 import { COMMIT_PLACEHOLDER, itemLocation } from '@shared/authorSession'
-import { DEFAULT_CONFIG, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneInfo, type FeedbackItem, type FeedbackItemKind, type PrRef } from '@shared/types'
+import { DEFAULT_CONFIG, keyOf, RESPONSE_ACTION_LABELS, type ActionRequest, type CloneInfo, type FeedbackItem, type FeedbackItemKind, type PrRef } from '@shared/types'
 import { PUBLISH_RESPONSES_TOOL } from './authorTools'
 import { PUBLISH_DRAFTS_TOOL } from './rallyTools'
 
@@ -37,7 +37,7 @@ export function reviewPrompt(prs: PrRef[], skill: string): string {
 
 /** Returns the protocol appended for a review of several linked PRs, which Rally posts as one review per PR. */
 export function unitProtocol(members: PrRef[]): string {
-  const list = members.map((pr) => `- ${pr.owner}/${pr.repo}#${pr.number} (${pr.url})`).join('\n')
+  const list = members.map((pr) => `- ${keyOf(pr)} (${pr.url})`).join('\n')
   return `This review covers ${members.length} linked PRs that make one change across repos:
 ${list}
 

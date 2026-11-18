@@ -6,6 +6,7 @@ import {
   type FinalReview,
 } from '@shared/feedback'
 import {
+  keyOf,
   priorConcernThreadIds,
   type Drafts,
   type MemberSubmit,
@@ -18,7 +19,6 @@ import {
   type ThreadResolution,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
-import { keyOf } from '@shared/prUnit'
 import {
   changesForPr,
   distinctSessions,

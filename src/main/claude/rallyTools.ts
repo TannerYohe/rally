@@ -1,8 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import { parsePrRef } from '@shared/linkedPrs'
-import { keyOf } from '@shared/prUnit'
-import { CONCERN_STATUSES, isSamePr, type Drafts, type PrRef } from '@shared/types'
+import { CONCERN_STATUSES, isSamePr, keyOf, type Drafts, type PrRef } from '@shared/types'
 import { unitDraftProblems } from '@shared/unitDrafts'
 
 export interface RallyToolHandlers {

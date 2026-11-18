@@ -1,6 +1,5 @@
 import { GraphqlResponseError } from '@octokit/graphql'
-import type { PrCoords } from '@shared/linkedPrs'
-import type { MyReview, Pr, PrListKind, ReviewState } from '@shared/types'
+import type { MyReview, Pr, PrCoords, PrListKind, ReviewState } from '@shared/types'
 import { authorFeedback, type RawAuthorFields } from './authorPhase'
 import { decisionsField, prCommentsField, reviewSummariesField, threadsField } from './feedbackFields'
 import { github, timeoutRequest, type GithubClient } from './client'

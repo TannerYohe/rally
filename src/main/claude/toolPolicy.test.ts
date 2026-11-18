@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { decideToolUse, pushBlockingGitEnv } from './toolPolicy'
-import { git as testGit, TEST_GIT_ENV } from '../git/testRepo.fixture'
+import { commitFile, git as testGit, TEST_GIT_ENV } from '../git/testRepo.fixture'
 
 const SESSION_CWD = join(tmpdir(), 'rally', 'test-session')
 const REVIEWING = { cwd: SESSION_CWD }
@@ -340,6 +340,20 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
       expect(bash('curl -X POST http://localhost:3000/graphql -d x', OPEN)).toBe(true)
     })
 
+    it('blocks config and environment changes that would get around the push URL rewrite', () => {
+      expect(bash('git remote set-url --push origin https://github.com/acme/api.git', OPEN)).toBe(false)
+      expect(bash('git config remote.origin.pushurl https://github.com/acme/api.git', OPEN)).toBe(false)
+      expect(bash('git config url.https://github.com/.pushInsteadOf x', OPEN)).toBe(false)
+      expect(bash('git -c url.x.insteadOf=y fetch', OPEN)).toBe(false)
+      expect(bash('GIT_CONFIG_COUNT=0 make release', OPEN)).toBe(false)
+      expect(bash('unset GIT_CONFIG_COUNT && npm run release', OPEN)).toBe(false)
+      expect(bash('env -u GIT_CONFIG_COUNT npm run release', OPEN)).toBe(false)
+      expect(bash('env -i PATH=/usr/bin npm run release', OPEN)).toBe(false)
+      expect(bash('/usr/libexec/git-core/git-send-pack git@github.com:acme/api.git HEAD:main', OPEN)).toBe(false)
+      expect(bash('git remote set-url origin https://github.com/acme/api.git && git config --get remote.origin.pushurl', OPEN)).toBe(true)
+      expect(bash('FOO=1 npm test', OPEN)).toBe(true)
+    })
+
     it('keeps blocking push through xargs, eval, a full path, and command substitution', () => {
       expect(bash('echo origin | xargs git push', OPEN)).toBe(false)
       expect(bash(`eval "git push"`, OPEN)).toBe(false)
@@ -355,19 +369,22 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
 describe('pushBlockingGitEnv', () => {
   it('appends after git config entries the environment already sets', () => {
     const env = pushBlockingGitEnv({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.editor', GIT_CONFIG_VALUE_0: 'vi' })
-    expect(env).toMatchObject({ GIT_CONFIG_COUNT: '4', GIT_CONFIG_KEY_1: 'url.rally-blocked-push://.pushInsteadOf', GIT_CONFIG_VALUE_1: 'https://github.com/' })
+    expect(env).toMatchObject({ GIT_CONFIG_COUNT: '7', GIT_CONFIG_KEY_1: 'url.rally-blocked-push://.pushInsteadOf', GIT_CONFIG_VALUE_1: 'https://github.com/' })
     expect(env.GIT_CONFIG_KEY_0).toBeUndefined()
   })
 
-  it('makes git push to a GitHub remote fail before reaching the network, over https or ssh', () => {
+  it('makes git push to GitHub fail before reaching the network, for a URL, a named remote, a user in the URL, or an explicit push URL', () => {
     const repo = mkdtempSync(join(tmpdir(), 'rally-push-block-'))
     try {
       testGit(repo, 'init', '--initial-branch=main')
-      writeFileSync(join(repo, 'a.txt'), 'a\n')
-      testGit(repo, 'add', 'a.txt')
-      testGit(repo, 'commit', '-m', 'a')
-      for (const url of ['https://github.com/acme/api.git', 'git@github.com:acme/api.git']) {
-        const push = () => execFileSync('git', ['push', url, 'HEAD:main'], { cwd: repo, env: { ...TEST_GIT_ENV, ...pushBlockingGitEnv(TEST_GIT_ENV) }, stdio: 'pipe' })
+      commitFile(repo, 'a.txt', 'a\n')
+      testGit(repo, 'remote', 'add', 'origin', 'https://me@github.com/acme/api.git')
+      testGit(repo, 'remote', 'add', 'mirror', 'https://github.com/acme/mirror.git')
+      testGit(repo, 'remote', 'set-url', '--push', 'mirror', 'https://me@github.com/acme/mirror-push.git')
+      const remotes = { urls: ['https://me@github.com/acme/api.git', 'https://github.com/acme/mirror.git'], pushUrls: ['https://me@github.com/acme/mirror-push.git'] }
+      const env = { ...TEST_GIT_ENV, ...pushBlockingGitEnv(TEST_GIT_ENV, remotes) }
+      for (const target of ['https://github.com/acme/api.git', 'git@github.com:acme/api.git', 'http://github.com/acme/api.git', 'origin', 'mirror']) {
+        const push = () => execFileSync('git', ['push', target, 'HEAD:main'], { cwd: repo, env, stdio: 'pipe' })
         expect(push).toThrow(/rally-blocked-push/)
       }
     } finally {

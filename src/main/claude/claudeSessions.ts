@@ -14,6 +14,7 @@ import { reviewModelOptions } from './modelOptions'
 import { RALLY_SERVER } from './rallyTools'
 import { closeOpenEntries, reduceTimeline } from './timeline'
 import { decideToolUse, pushBlockingGitEnv, type ToolAccess } from './toolPolicy'
+import type { GithubRemotes } from '../git/githubRemotes'
 
 const FLUSH_INTERVAL_MS = 200
 
@@ -38,6 +39,8 @@ export interface TurnSetup {
   cwd?: string
   /** Absent means only the user's own settings and CLAUDE.md. */
   settingSources?: SettingSource[]
+  /** The GitHub URLs of the checkout's remotes, which an open turn's push URL rewrite also covers. */
+  githubRemotes?: GithubRemotes
 }
 
 /** Persists one Claude session per PR and runs its turns through the Agent SDK under Rally's tool policy. */
@@ -71,7 +74,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
     void this.runTurn(sessionId, message, 'refine')
   }
 
-  protected abstract turnSetup(sessionId: string): TurnSetup
+  protected abstract turnSetup(sessionId: string): TurnSetup | Promise<TurnSetup>
 
   protected assertIdle(sessionId: string): void {
     this.byId(sessionId)
@@ -198,7 +201,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
 
     const scratch = sessionDir(sessionId)
     mkdirSync(scratch, { recursive: true })
-    const setup = this.turnSetup(sessionId)
+    const setup = await this.turnSetup(sessionId)
     const cwd = setup.cwd ?? scratch
     const resume = this.resumableConversation(sessionId, cwd)
     if (!resume && this.find(sessionId)?.sdkSessionId) {
@@ -243,7 +246,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
           mcpServers: { [RALLY_SERVER]: setup.mcpServer },
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
           canUseTool,
-          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: scratch, ...(setup.toolAccess === 'open' ? pushBlockingGitEnv(process.env) : {}) }),
+          ...reviewModelOptions(configFile.get(), { ...process.env, TMPDIR: scratch, ...(setup.toolAccess === 'open' ? pushBlockingGitEnv(process.env, setup.githubRemotes) : {}) }),
         },
       })
       for await (const message of stream) {

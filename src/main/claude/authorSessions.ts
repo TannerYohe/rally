@@ -41,6 +41,7 @@ import {
   type WorktreeSyncState,
 } from '../git/prClone'
 import { checkoutWorktree, removeRallyWorktree } from '../git/localWorktree'
+import { githubRemotes } from '../git/githubRemotes'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
 import { github } from '../github/client'
 import { uniqueLogins } from '../github/logins'
@@ -487,7 +488,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.remove(session)
   }
 
-  protected turnSetup(sessionId: string): TurnSetup {
+  protected async turnSetup(sessionId: string): Promise<TurnSetup> {
     const mcpServer = createAuthorServer({
       onResponses: (responses) => {
         const at = now()
@@ -518,7 +519,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     })
     const clone = this.find(sessionId)?.clone
     const cwd = clone && existsSync(clone.path) ? clone.path : undefined
-    return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer, toolAccess: 'open', cwd, settingSources: PROJECT_SETTINGS }
+    const remotes = cwd ? await githubRemotes(cwd) : undefined
+    return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer, toolAccess: 'open', cwd, settingSources: PROJECT_SETTINGS, githubRemotes: remotes }
   }
 
   /**

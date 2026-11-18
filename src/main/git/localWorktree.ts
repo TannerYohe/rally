@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path'
 import { checkoutKind, RALLY_WORKTREES_FOLDER } from '@shared/authorSession'
 import type { CloneInfo } from '@shared/types'
 import { git, gitSucceeds, NETWORK_TIMEOUT_MS, trackingRefspec } from './gitCommand'
+import { githubRepoOf } from './githubRemotes'
 
 export interface WorktreeTarget {
   /** owner/name on GitHub. */
@@ -16,12 +17,6 @@ export interface WorktreeTarget {
 const expandHome = (folder: string) => folder.trim().replace(/^~(?=\/|$)/, homedir())
 
 const RALLY_WORKTREES_DIR = expandHome(RALLY_WORKTREES_FOLDER)
-
-/** Returns owner/name, lowercased, for a GitHub remote URL, or null for any other URL. */
-export function githubRepoOf(url: string): string | null {
-  const match = url.trim().match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)
-  return match ? `${match[1]}/${match[2]}`.toLowerCase() : null
-}
 
 /** Lists each folder and the folders directly inside it that hold a .git entry. */
 async function candidateRepos(folders: string[]): Promise<string[]> {

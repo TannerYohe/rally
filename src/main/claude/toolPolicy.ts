@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { topLevelMutationFields } from './graphqlMutations'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
+import { GITHUB_URL_PREFIXES, NO_GITHUB_REMOTES, type GithubRemotes } from '../git/githubRemotes'
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
@@ -126,25 +127,34 @@ const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and re
 
 const GIT_PUSH_REASON = 'git push is not permitted in Rally. Rally pushes once the user approves the diff.'
 
-const GIT_ALIAS_REASON = 'Rally blocks defining git aliases, since an alias can push under another name.'
+const GIT_CONFIG_REASON = 'Rally blocks git aliases, URL rewrite rules, and remote push URLs, since they can push around its guardrails.'
+
+const GIT_CONFIG_ENV_REASON = "Rally blocks changing the GIT_CONFIG_* environment, which carries its push URL rewrite."
+
+const GIT_CONFIG_ENV = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)(?:\+?=|$)/
+
+const GIT_PUSH_PROGRAMS = new Set(['git-push', 'git-send-pack', 'git-receive-pack'])
 
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
 
 const WORK_STAND_IN = join(realPath(tmpdir()), 'rally-work')
 
-const GITHUB_PUSH_URLS = ['https://github.com/', 'git@github.com:', 'ssh://git@github.com/']
-
 const BLOCKED_PUSH_URL = 'rally-blocked-push://'
 
 /**
  * Returns git config entries for the environment of a turn with open access, added after any the environment already sets, that rewrite
- * every GitHub push URL to one git can't push to, whatever command runs git.
+ * every common GitHub URL form, and each GitHub URL the checkout's remotes use, to one git can't push to, whatever command runs git.
+ * pushInsteadOf covers remote URLs; insteadOf covers explicit push URLs, which pushInsteadOf skips.
  */
-export function pushBlockingGitEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+export function pushBlockingGitEnv(env: NodeJS.ProcessEnv, remotes: GithubRemotes = NO_GITHUB_REMOTES): Record<string, string> {
+  const rules = [
+    ...[...GITHUB_URL_PREFIXES, ...remotes.urls].map((url) => ['pushInsteadOf', url]),
+    ...remotes.pushUrls.map((url) => ['insteadOf', url]),
+  ]
   const start = Number(env.GIT_CONFIG_COUNT) || 0
-  const entries: Record<string, string> = { GIT_CONFIG_COUNT: String(start + GITHUB_PUSH_URLS.length) }
-  GITHUB_PUSH_URLS.forEach((url, i) => {
-    entries[`GIT_CONFIG_KEY_${start + i}`] = `url.${BLOCKED_PUSH_URL}.pushInsteadOf`
+  const entries: Record<string, string> = { GIT_CONFIG_COUNT: String(start + rules.length) }
+  rules.forEach(([rule, url], i) => {
+    entries[`GIT_CONFIG_KEY_${start + i}`] = `url.${BLOCKED_PUSH_URL}.${rule}`
     entries[`GIT_CONFIG_VALUE_${start + i}`] = url
   })
   return entries
@@ -226,6 +236,7 @@ function decideSegment(segment: string, state: ShellState, context: PolicyContex
     start < words.length &&
     (SHELL_KEYWORDS.has(words[start]) || words[start].endsWith('()') || ASSIGNMENT.test(words[start]))
   ) {
+    if (isOpen(context) && GIT_CONFIG_ENV.test(words[start])) return deny(GIT_CONFIG_ENV_REASON)
     start++
   }
   if (start === words.length) return ALLOW
@@ -292,6 +303,8 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
 
 /** Under open access, checks only commands that could push or write to GitHub, following them into nested shells and wrappers. */
 function decideOpenCommand(program: string, args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
+  if (GIT_PUSH_PROGRAMS.has(program)) return deny(GIT_PUSH_REASON)
+  if (touchesGitConfigEnv(program, args)) return deny(GIT_CONFIG_ENV_REASON)
   if (SHELLS.has(program)) return decideShell(args, state, context)
   if (WRAPPER_COMMANDS.has(program)) return decideWrapped(args, segment, state, context)
   if (INPUT_ARGUMENT_COMMANDS.has(program)) return decideXargs(args, segment, state, context)
@@ -493,16 +506,33 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
   return ALLOW
 }
 
-/** Under open access, blocks git push, send-pack, and defining git aliases, which could run push under another name. */
+/**
+ * Under open access, blocks git push and send-pack, and git config that could push under another name or around Rally's push URL rewrite:
+ * aliases, URL rewrite rules, and remote push URLs.
+ */
 function decideOpenGit(args: string[], state: ShellState): ToolDecision {
   const { configs, subcommand, rest } = parseGit(args, state)
   if (subcommand === 'push' || subcommand === 'send-pack') return deny(GIT_PUSH_REASON)
-  const setsAlias = subcommand === 'config' && rest.some(isGitAliasKey) && !rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))
-  if (configs.some(isGitAliasKey) || setsAlias) return deny(GIT_ALIAS_REASON)
+  const setsGuardedKey = subcommand === 'config' && rest.some(isGuardedGitKey) && !rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))
+  const setsPushUrl = subcommand === 'remote' && rest[0] === 'set-url' && rest.includes('--push')
+  if (configs.some(isGuardedGitKey) || setsGuardedKey || setsPushUrl) return deny(GIT_CONFIG_REASON)
   return ALLOW
 }
 
-const isGitAliasKey = (word: string) => /^alias\./i.test(word)
+const isGuardedGitKey = (word: string) => /^(?:alias\.|url\.|remote\..+\.pushurl(?:=|$))/i.test(word)
+
+/** Under open access, blocks commands that set, clear, or drop the git config environment carrying Rally's push URL rewrite. */
+function touchesGitConfigEnv(program: string, args: string[]): boolean {
+  switch (program) {
+    case 'unset':
+    case 'export':
+      return args.some((a) => GIT_CONFIG_ENV.test(a))
+    case 'env':
+      return args.some((a, i) => GIT_CONFIG_ENV.test(a) || a === '-i' || a === '--ignore-environment' || (a === '-u' && GIT_CONFIG_ENV.test(args[i + 1] ?? '')))
+    default:
+      return false
+  }
+}
 
 /** Under open access, blocks curl and wget requests to GitHub other than reads. */
 function decideOpenRequest(args: string[], methodFlags: string[], bodyFlags: string[]): ToolDecision {

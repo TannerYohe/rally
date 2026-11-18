@@ -428,6 +428,8 @@ describe('push', () => {
     await authorSessions.feedback('author-49', 'still working')
     await expect(authorSessions.commitUncommitted('author-49', 'Tidy up')).rejects.toThrow('already working')
     expect(mocks.commitAll).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(mocks.query).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
     release()
     await vi.waitFor(() => expect(session(49).status).toBe('awaiting_feedback'))
   })

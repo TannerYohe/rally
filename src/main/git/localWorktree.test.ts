@@ -9,7 +9,8 @@ const home = join(root, 'home')
 
 vi.mock('node:os', async (importOriginal) => ({ ...(await importOriginal<typeof import('node:os')>()), homedir: () => home }))
 
-const { checkoutWorktree, findLocalClone, githubRepoOf, rallyWorktreePath, removeRallyWorktree } = await import('./localWorktree')
+const { checkoutWorktree, findLocalClone, rallyWorktreePath, removeRallyWorktree } = await import('./localWorktree')
+const { githubRepoOf } = await import('./githubRemotes')
 
 const remote = join(root, 'remote.git')
 const src = join(home, 'src')

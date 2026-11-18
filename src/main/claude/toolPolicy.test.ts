@@ -326,5 +326,26 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
       expect(decideToolUse('mcp__plugin_originations_github__pull_request_read', {}, OPEN).allow).toBe(true)
       expect(decideToolUse('AskUserQuestion', {}, OPEN).allow).toBe(false)
     })
+
+    it('blocks push under another name and GitHub writes through curl or wget', () => {
+      expect(bash('git -c alias.p=push p origin HEAD', OPEN)).toBe(false)
+      expect(bash('git config alias.p push && git p', OPEN)).toBe(false)
+      expect(bash('git config --get alias.p', OPEN)).toBe(true)
+      expect(bash('git send-pack origin HEAD:refs/heads/feature', OPEN)).toBe(false)
+      expect(bash('curl -X POST -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/acme/api/issues/1/comments -d x', OPEN)).toBe(false)
+      expect(bash(`wget --post-data='{"body":"x"}' https://api.github.com/repos/acme/api/issues/1/comments`, OPEN)).toBe(false)
+      expect(bash('curl -s https://api.github.com/repos/acme/api/pulls/1', OPEN)).toBe(true)
+      expect(bash('curl -X POST http://localhost:3000/graphql -d x', OPEN)).toBe(true)
+    })
+
+    it('keeps blocking push through xargs, eval, a full path, and command substitution', () => {
+      expect(bash('echo origin | xargs git push', OPEN)).toBe(false)
+      expect(bash(`eval "git push"`, OPEN)).toBe(false)
+      expect(bash('/usr/bin/git push', OPEN)).toBe(false)
+      expect(bash('echo $(git push)', OPEN)).toBe(false)
+      expect(bash('gh pr merge 12', OPEN)).toBe(false)
+      expect(bash('gh pr create --fill', OPEN)).toBe(false)
+      expect(bash(`gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'`, OPEN)).toBe(false)
+    })
   })
 })

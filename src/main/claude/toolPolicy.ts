@@ -97,6 +97,10 @@ const GIT_REPO_FLAGS = new Set(['-C', '--git-dir', '--work-tree'])
 
 const GIT_VALUE_FLAGS = new Set(['-c', '--config-env', '--namespace', '--super-prefix'])
 
+const GIT_CONFIG_FLAGS = new Set(['-c', '--config-env'])
+
+const GITHUB_HOST = /(?:^|[/@.])github\.com(?:[/:]|$)/i
+
 const GIT_WORKTREE_COMMANDS = new Set([
   'add', 'am', 'apply', 'checkout', 'cherry-pick', 'clean', 'commit', 'merge', 'mv', 'pull', 'rebase', 'reset', 'restore',
   'revert', 'rm', 'stash', 'switch',
@@ -121,6 +125,8 @@ const READ_METHODS = new Set(['GET', 'HEAD'])
 const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and replies itself when the user asks.'
 
 const GIT_PUSH_REASON = 'git push is not permitted in Rally. Rally pushes once the user approves the diff.'
+
+const GIT_ALIAS_REASON = 'Rally blocks defining git aliases, since an alias can push under another name.'
 
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
 
@@ -276,6 +282,10 @@ function decideOpenCommand(program: string, args: string[], segment: string, sta
       return decideOpenGh(args)
     case 'git':
       return decideOpenGit(args, state)
+    case 'curl':
+      return decideOpenRequest(args, CURL_METHOD_FLAGS, CURL_BODY_FLAGS)
+    case 'wget':
+      return decideOpenRequest(args, WGET_METHOD_FLAGS, WGET_BODY_FLAGS)
     case 'eval':
       return decideScript(args.join(' '), { ...state }, context)
     case 'find':
@@ -431,6 +441,8 @@ function isTempPath(word: string, state: ShellState): boolean {
 
 interface GitInvocation {
   repoDir: string | null
+  /** The values of `-c` and `--config-env` flags before the subcommand. */
+  configs: string[]
   subcommand: string
   rest: string[]
 }
@@ -438,16 +450,17 @@ interface GitInvocation {
 /** Splits git's arguments into the repo it runs in, the subcommand, and the subcommand's arguments. */
 function parseGit(args: string[], state: ShellState): GitInvocation {
   let repoDir = state.cwd
+  const configs: string[] = []
   let index = 0
   while (index < args.length && args[index].startsWith('-')) {
     const [flag, inline] = args[index].split(/=(.*)/s)
-    if (GIT_REPO_FLAGS.has(flag)) {
-      repoDir = expandPath(inline ?? args[index + 1] ?? '', { ...state, cwd: repoDir })
-    }
+    const value = inline ?? args[index + 1] ?? ''
+    if (GIT_REPO_FLAGS.has(flag)) repoDir = expandPath(value, { ...state, cwd: repoDir })
+    if (GIT_CONFIG_FLAGS.has(flag)) configs.push(value)
     index += inline === undefined && (GIT_REPO_FLAGS.has(flag) || GIT_VALUE_FLAGS.has(flag)) ? 2 : 1
   }
   const [subcommand = '', ...rest] = args.slice(index)
-  return { repoDir, subcommand, rest }
+  return { repoDir, configs, subcommand, rest }
 }
 
 function decideGit(args: string[], state: ShellState): ToolDecision {
@@ -462,9 +475,21 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
   return ALLOW
 }
 
-/** Under open access, blocks only git push. */
+/** Under open access, blocks git push, send-pack, and defining git aliases, which could run push under another name. */
 function decideOpenGit(args: string[], state: ShellState): ToolDecision {
-  return parseGit(args, state).subcommand === 'push' ? deny(GIT_PUSH_REASON) : ALLOW
+  const { configs, subcommand, rest } = parseGit(args, state)
+  if (subcommand === 'push' || subcommand === 'send-pack') return deny(GIT_PUSH_REASON)
+  const setsAlias = subcommand === 'config' && rest.some(isGitAliasKey) && !rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))
+  if (configs.some(isGitAliasKey) || setsAlias) return deny(GIT_ALIAS_REASON)
+  return ALLOW
+}
+
+const isGitAliasKey = (word: string) => /^alias\./i.test(word)
+
+/** Under open access, blocks curl and wget requests to GitHub other than reads. */
+function decideOpenRequest(args: string[], methodFlags: string[], bodyFlags: string[]): ToolDecision {
+  if (!args.some((a) => GITHUB_HOST.test(a))) return ALLOW
+  return READ_METHODS.has(requestMethod(args, methodFlags, bodyFlags)) ? ALLOW : deny(GITHUB_WRITE_REASON)
 }
 
 function decideGh(args: string[], state: ShellState): ToolDecision {

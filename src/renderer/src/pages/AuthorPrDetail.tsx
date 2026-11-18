@@ -89,6 +89,8 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const editDescription = (edit: PrDescription | null) =>
     setDescriptionEdit(edit && session?.description && sameDescription(edit, session.description) ? null : edit)
   const push = () => session && run(() => window.rally.pushAuthorChanges(session.id, session.description ? descriptionEdit : null))
+  const pushFromFeedback = () =>
+    (!session?.description || window.confirm(`Push ${plural(unpushed, 'commit')} and update the PR title and description on GitHub as you? The Changes tab shows the update.`)) && push()
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${repliesLabel} to GitHub as you?`)) return
     void run(async () => {
@@ -281,7 +283,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
                 {session && canPush(session) && (
                   <>
                     {leftBehind > 0 && <span className="text-xs text-amber-300">Push leaves out {plural(leftBehind, 'uncommitted file')}, and stops if GitHub has new commits.</span>}
-                    <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
+                    <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={pushFromFeedback}>
                       Push {plural(unpushed, 'commit')}
                       {session.description && ' and update description'}
                     </button>

@@ -1,20 +1,19 @@
 import { useMemo, useState } from 'react'
 import { normalizedDescription } from '@shared/authorSession'
 import type { DescriptionDraft, PrDescription } from '@shared/types'
+import { DIFF_LINE_PREFIX } from '../lib/diff'
 import { age, fullTime } from '../lib/format'
 import { lineDiff } from '../lib/lineDiff'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
 import { BodyTextarea } from './BodyTextarea'
 import { DiffLines } from './DiffView'
 
-const LINE_PREFIX = { add: '+', remove: '-', context: ' ' } as const
-
 /** Shows how a description update changes the title and body, line by line. */
 function DescriptionDiff({ base, next }: { base: PrDescription; next: PrDescription }) {
   const before = normalizedDescription(base)
   const after = normalizedDescription(next)
   const bodyLines = useMemo(
-    () => lineDiff(before.body, after.body).map((line) => ({ kind: line.kind, text: `${LINE_PREFIX[line.kind]} ${line.text}` })),
+    () => lineDiff(before.body, after.body).map((line) => ({ kind: line.kind, text: `${DIFF_LINE_PREFIX[line.kind]} ${line.text}` })),
     [before.body, after.body],
   )
   return (

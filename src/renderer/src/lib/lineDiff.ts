@@ -1,14 +1,13 @@
-import type { DiffLineKind } from './diff'
+import type { DIFF_LINE_PREFIX, DiffLine } from './diff'
 
-export interface DiffLine {
-  kind: Exclude<DiffLineKind, 'hunk'>
-  text: string
+export interface LineChange extends DiffLine {
+  kind: keyof typeof DIFF_LINE_PREFIX
 }
 
 const splitLines = (text: string) => (text === '' ? [] : text.replaceAll('\r\n', '\n').split('\n'))
 
 /** Returns a line-by-line diff from `before` to `after` that keeps their longest common run of lines as context. */
-export function lineDiff(before: string, after: string): DiffLine[] {
+export function lineDiff(before: string, after: string): LineChange[] {
   const a = splitLines(before)
   const b = splitLines(after)
   const common = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0))
@@ -17,7 +16,7 @@ export function lineDiff(before: string, after: string): DiffLine[] {
       common[i][j] = a[i] === b[j] ? common[i + 1][j + 1] + 1 : Math.max(common[i + 1][j], common[i][j + 1])
     }
   }
-  const lines: DiffLine[] = []
+  const lines: LineChange[] = []
   let i = 0
   let j = 0
   while (i < a.length && j < b.length) {

@@ -1,4 +1,4 @@
-import { diffLineKind, splitDiffFiles, type DiffLineKind } from '../lib/diff'
+import { diffLineKind, splitDiffFiles, type DiffLine, type DiffLineKind } from '../lib/diff'
 
 const LINE_STYLES: Record<DiffLineKind, string> = {
   hunk: 'text-secondary-300/80',
@@ -23,7 +23,7 @@ export function DiffView({ diff }: { diff: string }) {
 }
 
 /** Renders diff lines colored by kind; `className` styles the surrounding block. */
-export function DiffLines({ lines, className = '' }: { lines: { kind: DiffLineKind; text: string }[]; className?: string }) {
+export function DiffLines({ lines, className = '' }: { lines: DiffLine[]; className?: string }) {
   return (
     <pre className={`overflow-x-auto text-xs leading-5 ${className}`}>
       {lines.map((line, index) => (

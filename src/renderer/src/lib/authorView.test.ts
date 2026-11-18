@@ -49,6 +49,10 @@ describe('actionRequests', () => {
       { itemId: 'self-1', action: 'investigate', note: '' },
     ])
   })
+
+  it('sends picks on open comments before a session exists', () => {
+    expect(actionRequests({ fresh: { action: 'fix', note: '' } }, [item('fresh')], null)).toEqual([{ itemId: 'fresh', action: 'fix', note: '' }])
+  })
 })
 
 describe('replyPosts', () => {

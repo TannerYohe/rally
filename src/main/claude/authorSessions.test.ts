@@ -568,9 +568,11 @@ describe('self-review', () => {
     await authorSessions.selfReview(pr(30))
     await vi.waitFor(() => expect(session(30).status).toBe('awaiting_feedback'))
     expect(mocks.query.mock.calls[0][0].prompt).toBe('/review-pr https://github.com/acme/api/pull/30')
-    expect(session(30).selfReview).toMatchObject({ verdict: 'Minor changes', findings: [{ id: 'self-1', kind: 'finding', severity: 'high' }] })
+    expect(session(30).selfReview).toMatchObject({ verdict: 'Minor changes', findings: [{ kind: 'finding', severity: 'high' }] })
+    const findingId = session(30).selfReview!.findings[0].id
+    expect(findingId).toMatch(/^self-.+-1$/)
 
-    authorSessions.dismissFinding(session(30).id, 'self-1')
+    authorSessions.dismissFinding(session(30).id, findingId)
     expect(session(30).selfReview?.findings).toEqual([])
   })
 
@@ -581,11 +583,16 @@ describe('self-review', () => {
     await vi.waitFor(() => expect(session(31).status).toBe('awaiting_feedback'))
     expect(session(31).items.map((i) => i.id)).toEqual(['T1'])
     expect(Object.keys(session(31).responses)).toEqual(['T1'])
-    expect(session(31).selfReview?.findings[0]).toMatchObject({ id: 'self-1', comments: [{ body: 'Different problem' }] })
+    expect(session(31).selfReview?.findings[0]).toMatchObject({ comments: [{ body: 'Different problem' }] })
+    expect(session(31).selfReview?.findings[0].id).not.toBe('self-1')
   })
 
   it('maps draft comments to findings', () => {
     expect(findingsFromDrafts(drafts, 'now')[0]).toMatchObject({ path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
+  })
+
+  it('gives each self-review its own finding ids, so a pick on an earlier finding never matches a later one', () => {
+    expect(findingsFromDrafts(drafts, 'now')[0].id).not.toBe(findingsFromDrafts(drafts, 'now')[0].id)
   })
 })
 

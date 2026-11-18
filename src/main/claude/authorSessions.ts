@@ -82,8 +82,9 @@ function restoreAuthorSession(stored: AuthorSession): AuthorSession {
 
 /** Turns self-review draft comments into private feedback items the author can act on. */
 export function findingsFromDrafts(drafts: Drafts, at: string): FeedbackItem[] {
+  const review = randomUUID().slice(0, 8)
   return drafts.comments.map((comment) => ({
-    id: `${FINDING_ID_PREFIX}${comment.id}`,
+    id: `${FINDING_ID_PREFIX}${review}-${comment.id}`,
     kind: 'finding',
     author: null,
     authorIsBot: false,

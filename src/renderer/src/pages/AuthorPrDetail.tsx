@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { canPush, cloneChangeCount, committableFiles, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
+import { canPush, checkoutNoun, cloneChangeCount, committableFiles, PUSH_BEFORE_POSTING_ERROR, startOverQuestion } from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
@@ -98,7 +98,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
       feedback.reload()
     })
   const startOver = () => {
-    if (!session || !window.confirm('Discard this session, its clone, unpushed commits, and unposted replies?')) return
+    if (!session || !window.confirm(startOverQuestion(session.clone))) return
     void run(async () => {
       await window.rally.discardAuthorSession(session.id)
       onSession(null)
@@ -214,7 +214,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
             onDiscardUncommitted={() =>
-              window.confirm(`Discard ${plural(leftBehind, 'uncommitted file')} in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
+              window.confirm(`Discard ${plural(leftBehind, 'uncommitted file')} in the ${checkoutNoun(session.clone)}?`) && run(() => window.rally.discardUncommitted(session.id))
             }
             onCommitUncommitted={(message) => run(() => window.rally.commitUncommitted(session.id, message))}
           />

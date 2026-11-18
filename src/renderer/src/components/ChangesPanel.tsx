@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { canPush, cloneChangeCount, committableFiles, shortSha } from '@shared/authorSession'
+import { canPush, checkoutNoun, cloneChangeCount, committableFiles, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF, MAX_DIFF_CHARS } from '@shared/diff'
 import type { AuthorSession, DiffResult } from '@shared/types'
 import { errorMessage } from '@shared/errors'
@@ -69,7 +69,7 @@ function DiffSection({ loaded, what }: { loaded: LoadedDiff; what: string }) {
   )
 }
 
-/** Describes what the clone holds that GitHub doesn't: committable files, unpushed commits, or both. */
+/** Describes what the checkout holds that GitHub doesn't, committable files, unpushed commits, or both, naming a worktree's path. */
 function changesSummary(session: AuthorSession): ReactNode {
   const committable = committableFiles(session)
   const parts = [
@@ -79,6 +79,11 @@ function changesSummary(session: AuthorSession): ReactNode {
   return (
     <>
       {parts.join(' and ')} on <span className="font-mono">{session.clone?.branch}</span>
+      {checkoutNoun(session.clone) === 'worktree' && (
+        <>
+          {' '}in <span className="font-mono">{session.clone?.path}</span>
+        </>
+      )}
     </>
   )
 }

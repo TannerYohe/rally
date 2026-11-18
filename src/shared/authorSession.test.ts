@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canPush, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
+import { canPush, checkoutNoun, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies, startOverQuestion } from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
@@ -90,5 +90,23 @@ describe('cloneChangeCount', () => {
     const commits = [{ oid: 'a', subject: 'fix' }]
     expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'b.ts'], mergeConflicts: [] })).toBe(3)
     expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'merged.ts'], mergeConflicts: ['a.ts'] })).toBe(1)
+  })
+})
+
+describe('startOverQuestion', () => {
+  const clone = { path: '/w/api', branch: 'feature', baseRef: 'origin/main' }
+
+  it('names what discarding deletes for each kind of checkout', () => {
+    expect(startOverQuestion(null)).toBe('Discard this session and its unposted replies?')
+    expect(startOverQuestion(clone)).toContain('its clone, unpushed commits')
+    expect(startOverQuestion({ ...clone, kind: 'local_worktree' })).toContain('Your worktree at /w/api keeps its edits and commits')
+    expect(startOverQuestion({ ...clone, kind: 'rally_worktree', createdBranch: true })).toContain('with its edits and unpushed commits')
+    expect(startOverQuestion({ ...clone, kind: 'rally_worktree', createdBranch: false })).toContain('Commits stay on feature')
+  })
+
+  it('calls a worktree a worktree and anything else the clone', () => {
+    expect(checkoutNoun({ ...clone, kind: 'rally_worktree' })).toBe('worktree')
+    expect(checkoutNoun(clone)).toBe('clone')
+    expect(checkoutNoun(null)).toBe('clone')
   })
 })

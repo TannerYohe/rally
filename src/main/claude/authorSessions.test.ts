@@ -83,8 +83,7 @@ vi.mock('../git/prClone', async (importOriginal) => ({
   cloneDiff: vi.fn(async () => ''),
   uncommittedDiff: mocks.uncommittedDiff,
 }))
-vi.mock('../git/localWorktree', async (importOriginal) => ({
-  checkoutKind: (await importOriginal<typeof import('../git/localWorktree')>()).checkoutKind,
+vi.mock('../git/localWorktree', () => ({
   checkoutWorktree: mocks.checkoutWorktree,
   removeRallyWorktree: mocks.removeRallyWorktree,
 }))

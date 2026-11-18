@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { canReplyTo, checkoutKind, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
@@ -37,7 +37,7 @@ import {
   uncommittedDiff,
   uncommittedPaths,
 } from '../git/prClone'
-import { checkoutKind, checkoutWorktree, removeRallyWorktree } from '../git/localWorktree'
+import { checkoutWorktree, removeRallyWorktree } from '../git/localWorktree'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
 import { github } from '../github/client'
 import { uniqueLogins } from '../github/logins'

@@ -2,7 +2,8 @@ import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { CheckoutKind, CloneInfo } from '@shared/types'
+import { checkoutKind } from '@shared/authorSession'
+import type { CloneInfo } from '@shared/types'
 import { git, NETWORK_TIMEOUT_MS, trackingRefspec, type GitFailure } from './gitCommand'
 
 export const RALLY_WORKTREES_DIR = join(homedir(), 'rally-worktrees')
@@ -13,9 +14,6 @@ export interface WorktreeTarget {
   branch: string
   baseBranch: string
 }
-
-/** Returns the checkout kind of a clone, treating a clone without one as a temp clone. */
-export const checkoutKind = (clone: CloneInfo): CheckoutKind => clone.kind ?? 'temp_clone'
 
 const expandHome = (folder: string) => folder.trim().replace(/^~(?=\/|$)/, homedir())
 

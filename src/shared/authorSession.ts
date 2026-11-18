@@ -1,9 +1,30 @@
-import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, SessionCore } from './types'
+import type { AuthorSession, CheckoutKind, CloneInfo, FeedbackItem, ItemResponse, PostedReply, SessionCore } from './types'
 
 /** Where a fix reply names its commit; Rally replaces it with the short sha once it commits. */
 export const COMMIT_PLACEHOLDER = '{commit}'
 
 export const shortSha = (oid: string) => oid.slice(0, 7)
+
+/** Returns the checkout kind of a clone, treating a clone without one as a temp clone. */
+export const checkoutKind = (clone: CloneInfo): CheckoutKind => clone.kind ?? 'temp_clone'
+
+/** Names the checkout in UI text: a worktree, or Rally's clone. */
+export const checkoutNoun = (clone: CloneInfo | null): string => (clone && checkoutKind(clone) !== 'temp_clone' ? 'worktree' : 'clone')
+
+/** Returns the Start over confirmation, naming what discarding the session deletes and what it keeps. */
+export function startOverQuestion(clone: CloneInfo | null): string {
+  if (!clone) return 'Discard this session and its unposted replies?'
+  switch (checkoutKind(clone)) {
+    case 'temp_clone':
+      return 'Discard this session, its clone, unpushed commits, and unposted replies?'
+    case 'local_worktree':
+      return `Discard this session and its unposted replies? Your worktree at ${clone.path} keeps its edits and commits.`
+    case 'rally_worktree':
+      return clone.createdBranch
+        ? `Discard this session, its unposted replies, and the worktree Rally added at ${clone.path} with its edits and unpushed commits?`
+        : `Discard this session, its unposted replies, and the worktree Rally added at ${clone.path} with its edits? Commits stay on ${clone.branch}.`
+  }
+}
 
 /** Returns a new author session with nothing cloned, answered, or queued yet. */
 export function newAuthorSession(core: SessionCore): AuthorSession {

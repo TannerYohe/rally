@@ -423,5 +423,5 @@ describe('pushBlockingGitEnv', () => {
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
 })

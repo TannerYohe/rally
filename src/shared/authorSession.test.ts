@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canPush, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
+import { actionableItems, canPush, cloneChangeCount, committableFiles, hasPendingWork, hasUnsharedWork, itemLocation, pendingReplies } from './authorSession'
 import { feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
 
@@ -28,6 +28,14 @@ describe('pendingReplies', () => {
       },
     })
     expect(pendingReplies(s).map((r) => r.itemId)).toEqual(['a', 'b'])
+  })
+})
+
+describe('actionableItems', () => {
+  it('lists the open items, then the self-review findings', () => {
+    const findings = [item('self-1', 'finding')]
+    expect(actionableItems([item('a')], { selfReview: { verdict: '', reportMarkdown: '', findings } }).map((i) => i.id)).toEqual(['a', 'self-1'])
+    expect(actionableItems([item('a')], null).map((i) => i.id)).toEqual(['a'])
   })
 })
 

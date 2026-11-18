@@ -66,6 +66,11 @@ export function canPush(session: Pick<AuthorSession, 'commits' | 'mergeConflicts
   return session.commits.length > 0 && session.mergeConflicts.length === 0
 }
 
+/** Returns the items Run can act on: those open on GitHub, then the session's self-review findings. */
+export function actionableItems(open: FeedbackItem[], session: Pick<AuthorSession, 'selfReview'> | null): FeedbackItem[] {
+  return [...open, ...(session?.selfReview?.findings ?? [])]
+}
+
 export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {
   return item.kind !== 'finding'
 }

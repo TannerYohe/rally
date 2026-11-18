@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
+import { actionableItems, canReplyTo, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
   prKey,
@@ -147,7 +147,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.assertCanStartTurn(session.id)
     await this.whilePublishing(session.id, async () => {
       try {
-        const items = [...(await fetchFeedbackItems(pr)), ...(session.selfReview?.findings ?? [])]
+        const items = actionableItems(await fetchFeedbackItems(pr), session)
         const available = new Set(items.map((item) => item.id))
         if (requests.some((request) => !available.has(request.itemId))) throw new Error(STALE_ITEMS_ERROR)
         const requested = new Set(requests.map((request) => request.itemId))

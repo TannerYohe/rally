@@ -91,6 +91,18 @@ export interface Pr {
   summary: string | null
   summaryError: string | null
   hidden: PrHide | null
+  /** Keys of the other PRs reviewed together with this one, absent when it is reviewed on its own. */
+  linkedPrs?: string[]
+  /** PRs in other repos this PR's description links that don't link back, so they aren't grouped with it. */
+  unreciprocatedLinks?: PrRef[]
+  /** True for a PR listed only because a PR in the list is linked with it. */
+  companion?: boolean
+}
+
+/** PR pairs linked or unlinked by hand, as prKeys. */
+export interface PrLinks {
+  linked: [string, string][]
+  unlinked: [string, string][]
 }
 
 export type ModelChoice = 'opus' | 'opus[1m]' | 'sonnet' | 'sonnet[1m]' | 'haiku'

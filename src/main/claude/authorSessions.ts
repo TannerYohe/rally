@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { canReplyTo, checkoutKind, checkoutNoun, COMMIT_PLACEHOLDER, hasPendingWork, hasUnsharedWork, isWorktree, newAuthorSession, PUSH_BEFORE_POSTING_ERROR, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
@@ -20,8 +19,6 @@ import {
 import { errorMessage } from '@shared/errors'
 import {
   abortMerge,
-  checkedOutBranch,
-  cloneBranch,
   cloneDiff,
   commitAll,
   commitFiles,
@@ -32,28 +29,25 @@ import {
   localCommits,
   MergeConflictError,
   integrateRemote,
-  isForkSource,
   pushClone,
-  syncClone,
-  syncWorktree,
   UncommittedChangesError,
   uncommittedDiff,
   uncommittedPaths,
-  type WorktreeSyncState,
 } from '../git/prClone'
-import { checkoutWorktree, LocalCloneError, removeRallyWorktree } from '../git/localWorktree'
+import { removeRallyWorktree } from '../git/localWorktree'
 import { githubRemotes } from '../git/githubRemotes'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
 import { github } from '../github/client'
 import { uniqueLogins } from '../github/logins'
 import { fetchApprovers, isRejectedRequest, repliedReviewers, requestReview, reviewersReady } from '../github/reviewRequests'
-import { fetchCloneSource, postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
+import { postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
 import { authoredPrList, type SessionState } from '../prList'
 import { authorSessionsDir, configFile } from '../store'
 import { createAuthorServer, type PublishedResponse } from './authorTools'
 import type { SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeSessions, now, sessionDir, type TurnSetup } from './claudeSessions'
 import { AUTHOR_PROTOCOL, authorActionsPrompt, mergeConflictPrompt, reviewPrompt } from './prompts'
+import { assertOnPrBranch, CHECKOUT_REASONS, chooseCheckout, offBranchError, type Checkout } from './authorCheckout'
 
 const INTERRUPTED_TURN_ERROR = 'Interrupted when Rally closed. Send a message or run actions to resume.'
 const INTERRUPTED_PUBLISH_ERROR = 'Rally closed while pushing or posting. Check the PR on GitHub before trying again.'
@@ -65,30 +59,6 @@ const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp 
 const WORKTREE_GONE_ERROR = 'The worktree for this PR is gone. Send a message or run actions to check the branch out again; commits on the branch are kept.'
 const WORKTREE_CLEARED_ERROR = 'The worktree for this PR was removed, and its uncommitted edits with it.'
 const DISCARD_CHANGED_ERROR = 'The uncommitted files changed since Rally last read them. Check the list in the Changes tab and discard again.'
-const LOCAL_CLONE_RECOVERY = 'Fix that clone, or remove the folder holding it from Settings → Local repo folders; Rally then uses temp clones for every repo in that folder.'
-const SYNC_WARNINGS: Record<WorktreeSyncState, string | null> = {
-  synced: null,
-  diverged: "The worktree has commits GitHub doesn't, and GitHub has commits it doesn't, so Rally left it as is. Push merges GitHub's commits in.",
-  fast_forward_failed: "Rally couldn't fast-forward the worktree to GitHub's head, likely because uncommitted edits touch the same files, so Claude works on older code.",
-}
-
-/** Why a turn runs in the checkout it does. */
-type CheckoutReason = 'temp_clone_has_work' | 'worktree_has_work' | 'fork' | 'no_local_clone' | 'worktree_found'
-
-const CHECKOUT_REASONS: Record<CheckoutReason, string> = {
-  temp_clone_has_work: 'Temp clone, which holds unpushed work',
-  worktree_has_work: 'Worktree, which holds unpushed work',
-  fork: 'Temp clone, since the PR comes from a fork',
-  no_local_clone: 'Temp clone, since no local repo folder holds the repo',
-  worktree_found: 'Worktree',
-}
-
-interface Checkout {
-  clone: CloneInfo
-  reason: CheckoutReason
-  warning: string | null
-}
-
 const PROJECT_SETTINGS: SettingSource[] = ['user', 'project', 'local']
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 
@@ -97,39 +67,9 @@ function withoutPendingCommits(responses: Record<string, ItemResponse>, commitEr
   return Object.fromEntries(Object.entries(responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError } : r]))
 }
 
-/** Returns why Rally won't act on the checkout when it has a branch other than the PR's checked out, or null when it has the PR branch. */
-async function offBranchError(clone: CloneInfo): Promise<string | null> {
-  const branch = await checkedOutBranch(clone)
-  if (branch === clone.branch) return null
-  const current = branch ? `\`${branch}\`` : 'a detached HEAD'
-  const advice =
-    checkoutKind(clone) === 'local_worktree'
-      ? 'Switch it back, or send a message so Rally checks the PR branch out in a worktree of its own.'
-      : 'Switch it back, finishing or aborting any rebase or merge first.'
-  return `The ${checkoutNoun(clone)} at ${clone.path} has ${current} checked out, not the PR branch \`${clone.branch}\`. ${advice}`
-}
-
 const hasWorkToKeep = (session: AuthorSession) => hasUnsharedWork(session) || session.mergeConflicts.length > 0 || session.reviewersToReRequest.length > 0
 
-/** Returns whether the checkout holds commits GitHub doesn't have or uncommitted edits. */
-async function holdsWork(clone: CloneInfo): Promise<boolean> {
-  return (await localCommits(clone)).length > 0 || (await uncommittedPaths(clone)).length > 0
-}
-
-/** Syncs a worktree for a turn, naming it in any failure. */
-async function syncLocalWorktree(clone: CloneInfo, reason: CheckoutReason): Promise<Checkout> {
-  const { clone: synced, state } = await syncWorktree(clone).catch((error: unknown) => {
-    throw new Error(`Rally couldn't update the worktree at ${clone.path}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
-  })
-  return { clone: synced, reason, warning: SYNC_WARNINGS[state] }
-}
-
 const sameFiles = (a: string[], b: string[]) => a.length === b.length && new Set([...a, ...b]).size === a.length
-
-async function assertOnPrBranch(clone: CloneInfo): Promise<void> {
-  const error = await offBranchError(clone)
-  if (error) throw new Error(error)
-}
 
 function restoreAuthorSession(stored: AuthorSession): AuthorSession {
   const session = {
@@ -253,7 +193,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       await before()
       try {
         this.patch(sessionId, () => ({ status: 'running', error: null }), true)
-        const clone = await this.prepareClone(sessionId)
+        const clone = await this.prepareCheckout(sessionId)
         this.turnStartHeads.set(sessionId, await headOf(clone))
         void this.runTurn(sessionId, prompt(clone), mode)
       } catch (error) {
@@ -613,7 +553,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
   }
 
-  private async prepareClone(sessionId: string): Promise<CloneInfo> {
+  private async prepareCheckout(sessionId: string): Promise<CloneInfo> {
     const { clone, pr } = this.byId(sessionId)
     const stepId = randomUUID()
     const label = clone ? 'Updating the PR branch' : 'Checking out the PR branch'
@@ -632,43 +572,13 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }
   }
 
-  /**
-   * Returns the checkout a turn runs in. A checkout holding commits or edits stays in use until they are pushed or discarded, and a temp clone
-   * or Rally worktree on another branch stops the turn. Otherwise Rally uses the local worktree for the branch, adding one when needed, and
-   * clones into the temp folder only when no configured folder holds the repo or the PR comes from a fork.
-   */
+  /** Returns the checkout a turn runs in, first noting a checkout whose folder is gone. */
   private async checkOut(sessionId: string): Promise<Checkout> {
     const { clone, pr, commits } = this.byId(sessionId)
     const held = clone && existsSync(clone.path) ? clone : null
-    if (held) {
-      const offBranch = await offBranchError(held)
-      if (offBranch && checkoutKind(held) !== 'local_worktree') throw new Error(offBranch)
-      if (!offBranch && (await holdsWork(held))) {
-        return isWorktree(held) ? syncLocalWorktree(held, 'worktree_has_work') : { clone: await syncClone(held), reason: 'temp_clone_has_work', warning: null }
-      }
-    } else if (clone && !isWorktree(clone) && commits.length > 0) {
-      this.assertCloneFolder(sessionId)
-    } else if (clone) {
-      this.cloneFolderGone(sessionId)
-    }
-    const tempClone = held && !isWorktree(held) ? held : null
-    const source = await fetchCloneSource(pr)
-    const repo = `${pr.owner}/${pr.repo}`
-    const fork = isForkSource(source)
-    const worktree = fork
-      ? null
-      : await checkoutWorktree(configFile.get().localRepoFolders, { repo, branch: source.branch, baseBranch: source.baseBranch }, clone?.path).catch((error: unknown) => {
-          const where = error instanceof LocalCloneError ? `your clone at ${error.root}` : `your clone of ${repo}`
-          throw new Error(`Rally couldn't check out ${source.branch} in ${where}. ${LOCAL_CLONE_RECOVERY} ${errorMessage(error)}`)
-        })
-    if (!worktree) {
-      const next = tempClone ? await syncClone(tempClone) : await cloneBranch(sessionDir(sessionId), source)
-      return { clone: next, reason: fork ? 'fork' : 'no_local_clone', warning: null }
-    }
-    if (tempClone) await rm(tempClone.path, { recursive: true, force: true })
-    const previous = clone?.path === worktree.path ? clone : undefined
-    const carriedOver = { ...worktree, syncedHead: previous?.syncedHead, createdBranch: previous?.createdBranch || worktree.createdBranch }
-    return syncLocalWorktree(carriedOver, 'worktree_found')
+    if (!held && clone && !isWorktree(clone) && commits.length > 0) this.assertCloneFolder(sessionId)
+    else if (!held && clone) this.cloneFolderGone(sessionId)
+    return chooseCheckout({ pr, clone, held, folders: configFile.get().localRepoFolders, cloneDir: sessionDir(sessionId) })
   }
 
   private async refreshClone(sessionId: string): Promise<void> {

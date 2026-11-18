@@ -149,6 +149,7 @@ mocks.stored = [
   stored(70),
   stored(72, { sdkSessionId: 'temp-conversation' }),
   stored(73, { clone: WORKTREE, sdkSessionId: 'worktree-conversation', sdkCwd: WORKTREE.path }),
+  stored(74, { clone: { ...WORKTREE, path: join(tmpdir(), 'rally-author-test-missing-worktree') }, commits: [{ oid: 'abc', subject: 'fix' }], uncommitted: ['a.ts'] }),
   stored(71, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, syncedHead: 'prev' } }),
   stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
@@ -394,6 +395,14 @@ describe('push', () => {
     expect(mocks.pushClone).not.toHaveBeenCalled()
     expect(mocks.discardUncommitted).not.toHaveBeenCalled()
     expect(mocks.commitAll).not.toHaveBeenCalled()
+  })
+
+  it('says a missing worktree keeps its commits on the branch, and forgets its uncommitted edits', async () => {
+    await expect(authorSessions.push('author-74')).rejects.toThrow('The worktree for this PR is gone')
+    expect(session(74).timeline.at(-1)).toMatchObject({ kind: 'warning', label: expect.stringContaining('worktree for this PR was removed'), detail: 'a.ts' })
+    await expect(authorSessions.commitUncommitted('author-74', 'Tidy')).rejects.toThrow('commits on the branch are kept')
+    await expect(authorSessions.diff('author-74')).rejects.toThrow('The worktree for this PR is gone')
+    expect(session(74)).toMatchObject({ uncommitted: [], status: 'error' })
   })
 
   it('commits uncommitted edits with the given message', async () => {

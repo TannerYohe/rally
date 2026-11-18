@@ -122,6 +122,18 @@ describe('checkoutWorktree', () => {
     expect(git(clonePath, 'branch', '--list', 'local-only').trim()).toContain('local-only')
   })
 
+  it('adds the worktree again after its folder was deleted by hand', async () => {
+    const target = { repo: 'acme/api', branch: 'mine-again', baseBranch: 'main' }
+    git(join(root, 'seed'), 'checkout', '-b', target.branch, 'main')
+    git(join(root, 'seed'), 'push', 'origin', target.branch)
+    const first = await checkoutWorktree(['~/src'], target)
+    rmSync(first!.path, { recursive: true, force: true })
+
+    const again = await checkoutWorktree(['~/src'], target)
+    expect(again).toEqual({ path: first!.path, branch: target.branch, baseRef: 'origin/main', kind: 'rally_worktree', createdBranch: false })
+    expect(git(again!.path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(target.branch)
+  })
+
   it('never removes a worktree Rally did not add', async () => {
     const found = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'mine', baseBranch: 'main' })
     await removeRallyWorktree(found!, { dropWork: true })

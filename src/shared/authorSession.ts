@@ -83,6 +83,11 @@ export function sameDescription(a: PrDescription, b: PrDescription): boolean {
   return left.title === right.title && left.body === right.body
 }
 
+/** Returns whether GitHub's title and description are exactly the ones a draft was proposed against. */
+export function unchangedSince(current: PrDescription, base: PrDescription): boolean {
+  return current.title === base.title && current.body === base.body
+}
+
 export function canReplyTo(item: Pick<FeedbackItem, 'kind'>): boolean {
   return item.kind !== 'finding'
 }

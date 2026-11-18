@@ -175,6 +175,7 @@ mocks.stored = [
     commits: [{ oid: 'abc', subject: 'fix' }],
     description: descriptionDraft(),
   }),
+  stored(68, { description: descriptionDraft(), status: 'error', error: 'Rally couldn\'t update the PR description: timeout' }),
   stored(63),
   stored(64),
   stored(65),
@@ -700,6 +701,13 @@ describe('description updates', () => {
     expect(mocks.fetchDescription).not.toHaveBeenCalled()
     expect(mocks.updateDescription).not.toHaveBeenCalled()
     expect(mocks.refreshOne).not.toHaveBeenCalled()
+  })
+
+  it('clears a draft GitHub already has without updating it again', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix the bug', body: 'New body\r\n' })
+    await authorSessions.push('author-68')
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(session(68)).toMatchObject({ status: 'awaiting_feedback', error: null, description: null, descriptionUpdatedAt: expect.any(String) })
   })
 
   it('refuses to overwrite a description that changed on GitHub, keeping the draft', async () => {

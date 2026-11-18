@@ -11,6 +11,7 @@ import {
   PUSH_BEFORE_POSTING_ERROR,
   sameDescription,
   shortSha,
+  unchangedSince,
 } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
@@ -240,7 +241,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const { clone, pr, commits, description, mergeConflicts } = this.byId(sessionId)
     if (mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
     if (commits.length === 0 && !description) throw new Error(NOTHING_TO_PUSH_ERROR)
-    if (description && !(descriptionEdit ?? description).title.trim()) throw new Error(EMPTY_TITLE_ERROR)
+    const nextDescription = description ? normalizedDescription(descriptionEdit ?? description) : null
+    if (nextDescription && !nextDescription.title) throw new Error(EMPTY_TITLE_ERROR)
     if (commits.length > 0) {
       if (!clone) throw new Error(CLONE_LOST_ERROR)
       this.assertCloneFolder(sessionId)
@@ -253,7 +255,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         return conflicts
       }
       try {
-        if (description) await this.publishDescription(sessionId, description, descriptionEdit, commits.length > 0)
+        if (description && nextDescription) await this.publishDescription(sessionId, description.base, nextDescription, commits.length > 0)
         this.patch(sessionId, () => ({ status: 'awaiting_feedback' }), true)
       } finally {
         this.refreshPr(pr)
@@ -287,22 +289,30 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     }
   }
 
-  /** Updates the PR's title and description on GitHub, refusing when they changed there since Claude proposed the update. */
-  private async publishDescription(sessionId: string, draft: DescriptionDraft, edit: PrDescription | null, afterCommits: boolean): Promise<void> {
+  /** Updates the PR's title and description on GitHub unless it already has them, refusing when they changed there since `base`. */
+  private async publishDescription(sessionId: string, base: PrDescription, next: PrDescription, afterCommits: boolean): Promise<void> {
     const { pr } = this.byId(sessionId)
+    let current: PrDescription
     try {
-      const current = await fetchDescription(pr)
-      if (current.title === draft.base.title && current.body === draft.base.body) {
-        const next = edit ?? draft
-        await updateDescription(pr, { title: next.title.trim(), body: next.body })
-        this.patch(sessionId, () => ({ description: null, descriptionUpdatedAt: now() }), true)
-        return
-      }
+      current = await fetchDescription(pr)
     } catch (error) {
-      console.error('Updating the PR description failed', { pr: pr.url, error })
-      this.failDescription(sessionId, `Rally couldn't update the PR description: ${errorMessage(error)}`, afterCommits)
+      this.descriptionRequestFailed(sessionId, error, afterCommits)
     }
-    this.failDescription(sessionId, DESCRIPTION_CHANGED_ERROR, afterCommits)
+    if (!sameDescription(current, next)) {
+      if (!unchangedSince(current, base)) this.failDescription(sessionId, DESCRIPTION_CHANGED_ERROR, afterCommits)
+      try {
+        await updateDescription(pr, next)
+      } catch (error) {
+        this.descriptionRequestFailed(sessionId, error, afterCommits)
+      }
+    }
+    this.patch(sessionId, () => ({ description: null, descriptionUpdatedAt: now() }), true)
+  }
+
+  /** Logs a failed GitHub request for the description update, then records and throws it. */
+  private descriptionRequestFailed(sessionId: string, error: unknown, afterCommits: boolean): never {
+    console.error('Updating the PR description failed', { pr: this.byId(sessionId).pr.url, error })
+    this.failDescription(sessionId, `Rally couldn't update the PR description: ${errorMessage(error)}`, afterCommits)
   }
 
   /** Records and throws a failed description update, noting when the commits pushed just before it went through. */

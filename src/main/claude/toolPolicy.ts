@@ -1,6 +1,6 @@
-import { existsSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { basename, isAbsolute, join, resolve, sep } from 'node:path'
+import { realPath } from '../realPath'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { topLevelMutationFields } from './graphqlMutations'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
@@ -469,11 +469,6 @@ function isRemotePath(path: string): boolean {
   return REMOTE_PATH.test(path) && !(IS_WINDOWS && WINDOWS_DRIVE_PATH.test(path))
 }
 
-function realPath(path: string): string {
-  if (existsSync(path)) return realpathSync.native(path)
-  const parent = dirname(path)
-  return parent === path ? path : join(realPath(parent), basename(path))
-}
 
 function isTempPath(word: string, state: ShellState): boolean {
   const path = expandPath(word, state)

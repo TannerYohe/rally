@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { checkoutKind } from '@shared/authorSession'
 import type { CloneInfo } from '@shared/types'
 import { git, NETWORK_TIMEOUT_MS, trackingRefspec, type GitFailure } from './gitCommand'
@@ -42,18 +42,29 @@ async function mainWorktree(dir: string): Promise<string | null> {
   }
 }
 
-/** Finds the local clone whose origin remote is the GitHub repo, searching each folder and the folders directly inside it. */
+/** Returns the GitHub repo, as lowercased owner/name, that a folder's repo has as its origin, or null. */
+async function originRepo(dir: string): Promise<{ root: string; repo: string | null } | null> {
+  const root = await mainWorktree(dir)
+  if (!root) return null
+  const url = await git(root, ['config', '--get', 'remote.origin.url']).catch(() => '')
+  return { root, repo: githubRepoOf(url) }
+}
+
+/**
+ * Finds the local clone whose origin remote is the GitHub repo, searching each folder and the folders directly inside it.
+ * It checks folders named after the repo first, then reads the rest in parallel.
+ */
 export async function findLocalClone(folders: string[], repo: string): Promise<string | null> {
   const wanted = repo.toLowerCase()
-  const checked = new Set<string>()
-  for (const dir of await candidateRepos(folders)) {
-    const root = await mainWorktree(dir)
-    if (!root || checked.has(root)) continue
-    checked.add(root)
-    const url = await git(root, ['config', '--get', 'remote.origin.url']).catch(() => '')
-    if (githubRepoOf(url) === wanted) return root
+  const name = wanted.split('/').pop() ?? wanted
+  const candidates = await candidateRepos(folders)
+  const named = candidates.filter((dir) => basename(dir).toLowerCase() === name)
+  for (const dir of named) {
+    const origin = await originRepo(dir)
+    if (origin?.repo === wanted) return origin.root
   }
-  return null
+  const others = await Promise.all(candidates.filter((dir) => !named.includes(dir)).map(originRepo))
+  return others.find((origin) => origin?.repo === wanted)?.root ?? null
 }
 
 /** Returns the path of the worktree that has the branch checked out, or null when none does. */

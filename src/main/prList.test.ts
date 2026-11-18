@@ -470,6 +470,61 @@ describe('prList', () => {
         expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['web'])
       })
 
+      it('links a PR outside the list by hand and fetches it as a companion', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' })] })
+        await prList.refresh()
+        mocks.fetchPrs.mockResolvedValueOnce(fetched(web({ body: '', owner: 'Acme' }))).mockResolvedValueOnce(fetched(web({ body: '', owner: 'Acme' })))
+
+        await prList.link('acme/api#1', { owner: 'acme', repo: 'WEB', number: 2 })
+
+        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [['acme/api#1', 'Acme/web#2']], unlinked: [] })
+        expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['Acme/web#2'], ['acme/api#1']])
+      })
+
+      it('refreshes again when a link lands during a refresh', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' }), web({ body: '' })] })
+        await prList.refresh()
+        let finishSearch: (value: unknown) => void = () => {}
+        mocks.searchPrs.mockReturnValueOnce(new Promise((resolve) => (finishSearch = resolve)))
+        const refreshing = prList.refresh()
+
+        await prList.link('acme/api#1', { owner: 'acme', repo: 'web', number: 2 })
+        finishSearch({ viewer: 'me', prs: [api({ body: '' }), web({ body: '' })] })
+        await refreshing
+
+        expect(mocks.searchPrs).toHaveBeenCalledTimes(3)
+        expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['acme/web#2'], ['acme/api#1']])
+      })
+
+      it('refuses to link my own PR or one that is closed', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' })] })
+        await prList.refresh()
+        mocks.fetchPrs.mockResolvedValueOnce(fetched(web({ author: 'me' })))
+        await expect(prList.link('acme/api#1', { owner: 'acme', repo: 'web', number: 2 })).rejects.toThrow('That PR is yours')
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'gone' }] })
+        await expect(prList.link('acme/api#1', { owner: 'acme', repo: 'web', number: 2 })).rejects.toThrow('closed, merged, or not visible')
+        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [], unlinked: [] })
+      })
+
+      it('unlinks a PR from the rest of its unit and drops a companion that no longer joins one', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockResolvedValueOnce(fetched(web()))
+        await prList.refresh()
+
+        prList.unlink('acme/web#2', ['acme/api#1'])
+
+        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [], unlinked: [['acme/web#2', 'acme/api#1']] })
+        expect(prList.get().prs.map((pr) => [pr.repo, pr.linkedPrs])).toEqual([['api', undefined]])
+      })
+
+      it('forgets hand links whose PRs both left the list', async () => {
+        mocks.store.prLinksFile.set({ linked: [['acme/api#1', 'acme/gone#9']], unlinked: [['acme/old#1', 'acme/gone#9']] })
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' })] })
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'gone' }] })
+        await prList.refresh()
+        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [['acme/api#1', 'acme/gone#9']], unlinked: [] })
+      })
+
       it('never fetches companions for the authored list', async () => {
         mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ author: 'me' })] })
         await authoredPrList.refresh()

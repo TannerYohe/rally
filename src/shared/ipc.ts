@@ -1,4 +1,5 @@
 import type { DraftChanges } from './feedback'
+import type { PrCoords } from './linkedPrs'
 import type {
   ActionRequest,
   AppInfo,
@@ -35,6 +36,8 @@ export interface RallyApi {
   onPrsChanged(listener: (change: PrListChange) => void): () => void
   hidePr(list: PrListKind, ids: string[], mode: HideMode): Promise<void>
   unhidePr(list: PrListKind, ids: string[]): Promise<void>
+  linkPrs(prKey: string, target: PrCoords): Promise<void>
+  unlinkPr(prKey: string, others: string[]): Promise<void>
   getSession(prKey: string): Promise<ReviewSession | null>
   startReview(pr: PrRef): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
@@ -82,6 +85,8 @@ export const IPC = {
   prsChanged: 'prs:changed',
   hidePr: 'prs:hide',
   unhidePr: 'prs:unhide',
+  linkPrs: 'prs:link',
+  unlinkPr: 'prs:unlink',
   getSession: 'session:get',
   startReview: 'session:start',
   sendFeedback: 'session:feedback',

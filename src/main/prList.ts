@@ -16,7 +16,7 @@ import {
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { parsePrRef, type PrCoords } from '@shared/linkedPrs'
-import { areLinked, handLinkedKeys, keyOf, linkNode, linkUnits, oneSidedLinks, toPrRef, unitHide, type LinkNode } from '@shared/prUnit'
+import { areLinked, handLinkedKeys, hasPair, keyOf, linkNode, linkUnits, oneSidedLinks, toPrRef, unitHide, type LinkNode } from '@shared/prUnit'
 import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase } from './github/authorPhase'
 import { computePhase } from './github/phase'
@@ -111,6 +111,7 @@ class PrList extends EventEmitter {
   private fetchedDuringRefresh = new Map<string, GithubPr>()
   private pruners: Pruner[] = []
   private linkTargets = new Map<string, LinkTarget>()
+  private refreshAgain = false
   private readonly files: PrListFiles
 
   constructor(private readonly source: PrListSource) {
@@ -184,6 +185,10 @@ class PrList extends EventEmitter {
     } catch (error) {
       this.update({ refreshing: false, error: errorMessage(error) })
     }
+    if (this.refreshAgain) {
+      this.refreshAgain = false
+      await this.refresh()
+    }
   }
 
   /**
@@ -251,6 +256,56 @@ class PrList extends EventEmitter {
     ])
     this.update({ prs })
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
+  }
+
+  /** Links a listed PR with another PR by hand, then refreshes so the other PR joins its unit. */
+  async link(key: string, target: PrCoords): Promise<void> {
+    const links = this.linkSource()
+    const pr = this.state.prs.find((p) => keyOf(p) === key)
+    if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
+    if (isSamePr(pr, target)) throw new Error("A PR can't be linked with itself.")
+    const targetKey = await this.linkableKey(target)
+    const { linked, unlinked } = links.file.get()
+    links.file.set({
+      linked: [...linked.filter((pair) => !hasPair([pair], key, targetKey)), [key, targetKey]],
+      unlinked: unlinked.filter((pair) => !hasPair([pair], key, targetKey)),
+    })
+    if (this.state.refreshing) this.refreshAgain = true
+    else await this.refresh()
+  }
+
+  /** Unlinks a PR from each of the given PRs by hand, which outranks links in either description. */
+  unlink(key: string, others: string[]): void {
+    const links = this.linkSource()
+    const pairs = others.filter((other) => other !== key).map((other): [string, string] => [key, other])
+    const { linked, unlinked } = links.file.get()
+    const outsidePairs = (pair: [string, string]) => !pairs.some(([x, y]) => hasPair([pair], x, y))
+    links.file.set({ linked: linked.filter(outsidePairs), unlinked: [...unlinked.filter(outsidePairs), ...pairs] })
+    const prs = this.settle(this.state.prs)
+    this.update({ prs })
+    this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
+  }
+
+  private linkSource(): PrLinkSource {
+    if (!this.source.links) throw new Error('This list does not link PRs.')
+    return this.source.links
+  }
+
+  /** Returns the key of an open PR by someone else, from the list or GitHub, so keys keep GitHub's casing. */
+  private async linkableKey(target: PrCoords): Promise<string> {
+    const known = [...this.state.prs, ...[...this.linkTargets.values()].map((t) => t.ref)].find((pr) => isSamePr(pr, target))
+    if (known) return keyOf(known)
+    const { viewer, lookups } = await fetchPrs([target], this.kind)
+    const [lookup] = lookups
+    switch (lookup.status) {
+      case 'found':
+        if (sameLogin(lookup.pr.author, viewer)) throw new Error('That PR is yours. Rally only groups PRs you review.')
+        return keyOf(lookup.pr)
+      case 'gone':
+        throw new Error(`${keyOf(target)} is closed, merged, or not visible to you.`)
+      case 'unknown':
+        throw new Error(`Rally couldn't look up ${keyOf(target)}. Try again.`)
+    }
   }
 
   /** Hides every PR in a unit together. */
@@ -407,6 +462,12 @@ class ReviewPrList extends PrList {
   }
 }
 
+function prunePrLinks(listed: Set<string>): void {
+  const touchesListed = ([a, b]: [string, string]) => listed.has(a) || listed.has(b)
+  const { linked, unlinked } = prLinksFile.get()
+  prLinksFile.set({ linked: linked.filter(touchesListed), unlinked: unlinked.filter(touchesListed) })
+}
+
 function pruneRallyReviews(listed: Set<string>): void {
   rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => listed.has(key))))
 }
@@ -430,6 +491,7 @@ export const prList = new ReviewPrList({
 })
 
 prList.addPruner(pruneRallyReviews)
+prList.addPruner(prunePrLinks)
 
 export const authoredPrList = new PrList({
   kind: 'authored',

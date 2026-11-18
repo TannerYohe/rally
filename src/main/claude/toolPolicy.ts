@@ -127,7 +127,7 @@ const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and re
 
 const GIT_PUSH_REASON = 'git push is not permitted in Rally. Rally pushes once the user approves the diff.'
 
-const GIT_CONFIG_REASON = 'Rally blocks setting git aliases, URL rewrite rules, and remote URLs, and remotes pointed at GitHub URLs its push rewrite misses.'
+const GIT_CONFIG_REASON = 'Rally blocks setting git aliases, URL rewrite rules, and push URLs, setting remote URLs through git config, and remotes pointed at GitHub URLs its push rewrite misses.'
 
 const GIT_CONFIG_ENV_REASON = "Rally blocks changing the GIT_CONFIG_* environment, which carries its push URL rewrite."
 
@@ -139,9 +139,11 @@ const GIT_CONFIG_WRITE_SUBCOMMANDS = new Set(['set', 'unset', 'rename-section', 
 
 const GIT_CONFIG_READ_SUBCOMMANDS = new Set(['get', 'list'])
 
-const ENV_VALUE_FLAGS = new Set(['u', 'C', 'P'])
+const GIT_CONFIG_SUBCOMMANDS = new Set([...GIT_CONFIG_WRITE_SUBCOMMANDS, ...GIT_CONFIG_READ_SUBCOMMANDS])
 
-const ENV_VALUE_OPTIONS = ['--chdir', '--block-signal', '--default-signal', '--ignore-signal']
+const GIT_CONFIG_VALUE_FLAGS = new Set(['--file', '-f', '--blob', '--type', '--default', '--comment'])
+
+const ENV_VALUE_FLAGS = new Set(['u', 'C', 'P'])
 
 const GIT_CONFIG_ENV = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)(?:\+?=|$)/
 
@@ -505,7 +507,7 @@ function decideGit(args: string[], state: ShellState): ToolDecision {
   const { repoDir, subcommand, rest } = parseGit(args, state)
   if (subcommand === 'push') return deny(GIT_PUSH_REASON)
   if (subcommand === 'config' && rest.some((a) => a === '--global' || a === '--system')) {
-    if (!rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return deny('Rally does not change your global git config.')
+    if (isGitConfigWrite(rest.filter((a) => a !== '--global' && a !== '--system'))) return deny('Rally does not change your global git config.')
   }
   if (GIT_WORKTREE_COMMANDS.has(subcommand) && !(repoDir && isTempPath(repoDir, state))) {
     return deny(`Rally only runs \`git ${subcommand}\` in repos under the temp directory.`)
@@ -532,11 +534,23 @@ const isGuardedGitKey = (word: string) => /^(?:alias\.|url\.|remote\..+\.(?:push
 
 const isUncoveredGithubUrl = (url: string) => githubRepoOf(url) !== null && !GITHUB_URL_PREFIXES.some((prefix) => url.startsWith(prefix))
 
-/** Returns whether `git config` arguments change a value rather than read one: a write flag or subcommand, or a key followed by a value. */
+/**
+ * Returns whether `git config` arguments change a value rather than read one: a write flag or subcommand, or a key followed by a value.
+ * In the form without a subcommand, every argument after the key is a value, even one starting with a dash.
+ */
 function isGitConfigWrite(args: string[]): boolean {
-  if (args.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return false
-  if (args.some((a) => GIT_CONFIG_WRITE_FLAGS.has(a.split('=')[0]))) return true
-  const operands = args.filter((a) => !a.startsWith('-'))
+  const flags: string[] = []
+  const operands: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    if (operands.length > 0 && !GIT_CONFIG_SUBCOMMANDS.has(operands[0])) operands.push(args[i])
+    else if (!args[i].startsWith('-')) operands.push(args[i])
+    else {
+      flags.push(args[i])
+      if (GIT_CONFIG_VALUE_FLAGS.has(args[i])) i++
+    }
+  }
+  if (flags.some((flag) => READ_ONLY_GIT_CONFIG_FLAGS.has(flag))) return false
+  if (flags.some((flag) => GIT_CONFIG_WRITE_FLAGS.has(flag.split('=')[0]))) return true
   if (GIT_CONFIG_WRITE_SUBCOMMANDS.has(operands[0])) return true
   if (GIT_CONFIG_READ_SUBCOMMANDS.has(operands[0])) return false
   return operands.length >= 2
@@ -577,7 +591,7 @@ function envClearsGitConfig(args: string[]): boolean {
       if (isLong('--ignore-environment', 3) || isLong('--split-string', 3)) return true
       if (isLong('--unset', 3)) {
         if (GIT_CONFIG_ENV.test(inline ?? args[++i] ?? '')) return true
-      } else if (inline === undefined && ENV_VALUE_OPTIONS.some((option) => isLong(option, 4))) {
+      } else if (inline === undefined && isLong('--chdir', 3)) {
         i++
       }
       continue

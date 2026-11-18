@@ -9,7 +9,7 @@ const home = join(root, 'home')
 
 vi.mock('node:os', async (importOriginal) => ({ ...(await importOriginal<typeof import('node:os')>()), homedir: () => home }))
 
-const { checkoutWorktree, findLocalClone, rallyWorktreePath, removeRallyWorktree } = await import('./localWorktree')
+const { checkoutWorktree, findLocalClone, LocalCloneError, rallyWorktreePath, removeRallyWorktree } = await import('./localWorktree')
 const { localCommits, syncWorktree } = await import('./prClone')
 
 const remote = join(root, 'remote.git')
@@ -87,11 +87,11 @@ describe('checkoutWorktree', () => {
     expect(rallyWorktreePath(target.repo, 'feature-new')).not.toBe(path)
 
     const added = await checkoutWorktree(['~/src'], target)
-    expect(added).toEqual({ path, branch: 'feature/new', baseRef: 'origin/main', kind: 'rally_worktree', createdBranch: true })
+    expect(added).toEqual({ path, branch: 'feature/new', baseRef: 'origin/main', kind: 'rally_worktree', createdBranch: true, cloneRoot: clonePath })
     expect(git(path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('feature/new')
     expect(git(path, 'rev-parse', '--abbrev-ref', '@{upstream}').trim()).toBe('origin/feature/new')
 
-    expect(await checkoutWorktree(['~/src'], target)).toEqual({ path, branch: 'feature/new', baseRef: 'origin/main', kind: 'rally_worktree' })
+    expect(await checkoutWorktree(['~/src'], target)).toEqual({ path, branch: 'feature/new', baseRef: 'origin/main', kind: 'rally_worktree', cloneRoot: clonePath })
 
     await removeRallyWorktree(added!, { dropWork: false })
     expect(existsSync(path)).toBe(false)
@@ -131,7 +131,7 @@ describe('checkoutWorktree', () => {
     rmSync(first!.path, { recursive: true, force: true })
 
     const again = await checkoutWorktree(['~/src'], target)
-    expect(again).toEqual({ path: first!.path, branch: target.branch, baseRef: 'origin/main', kind: 'rally_worktree', createdBranch: false })
+    expect(again).toEqual({ path: first!.path, branch: target.branch, baseRef: 'origin/main', kind: 'rally_worktree', createdBranch: false, cloneRoot: clonePath })
     expect(git(again!.path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(target.branch)
   })
 
@@ -175,6 +175,46 @@ describe('checkoutWorktree', () => {
     writeFileSync(join(orphan, '.git'), `gitdir: ${join(root, 'missing', '.git', 'worktrees', 'orphan')}\n`)
     const clone = { path: orphan, branch: 'orphan', baseRef: 'origin/main', kind: 'rally_worktree' as const }
     await expect(removeRallyWorktree(clone, { dropWork: true })).rejects.toThrow("can't find the clone")
+  })
+
+  it('refuses to check out a branch your own worktree is rebasing', async () => {
+    const seed = join(root, 'seed')
+    git(seed, 'checkout', '-b', 'rebasing', 'main')
+    commitFile(seed, 'conflict.txt', 'theirs\n')
+    git(seed, 'push', 'origin', 'rebasing')
+    const mine = join(root, 'conductor', 'rebasing')
+    git(clonePath, 'fetch', 'origin', 'rebasing:refs/remotes/origin/rebasing')
+    git(clonePath, 'worktree', 'add', '-b', 'rebasing', mine, 'main')
+    commitFile(mine, 'conflict.txt', 'mine\n')
+    expect(() => git(mine, 'rebase', 'origin/rebasing')).toThrow()
+
+    await expect(checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'rebasing', baseBranch: 'main' })).rejects.toThrow(LocalCloneError)
+    expect(existsSync(rallyWorktreePath('acme/api', 'rebasing'))).toBe(false)
+    git(mine, 'rebase', '--abort')
+  })
+
+  it('stops when your own worktree for the branch is registered but its folder is missing', async () => {
+    const seed = join(root, 'seed')
+    git(seed, 'checkout', '-b', 'lost', 'main')
+    git(seed, 'push', 'origin', 'lost')
+    const mine = join(root, 'conductor', 'lost')
+    git(clonePath, 'worktree', 'add', '-b', 'lost', mine, 'main')
+    rmSync(mine, { recursive: true, force: true })
+
+    await expect(checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'lost', baseBranch: 'main' })).rejects.toThrow('its folder is missing. Restore it, or run `git worktree prune`')
+  })
+
+  it('removes the branch Rally created after the worktree folder was deleted by hand', async () => {
+    const seed = join(root, 'seed')
+    git(seed, 'checkout', '-b', 'deleted', 'main')
+    git(seed, 'push', 'origin', 'deleted')
+    const added = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'deleted', baseBranch: 'main' })
+    commitFile(added!.path, 'local.txt', 'local\n')
+    rmSync(added!.path, { recursive: true, force: true })
+
+    await removeRallyWorktree(added!, { dropWork: true })
+    expect(git(clonePath, 'branch', '--list', 'deleted').trim()).toBe('')
+    expect(git(clonePath, 'worktree', 'list')).not.toContain(added!.path)
   })
 
   it('never removes a worktree Rally did not add', async () => {

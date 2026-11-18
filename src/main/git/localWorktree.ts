@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -6,6 +6,7 @@ import { checkoutKind, RALLY_WORKTREES_FOLDER } from '@shared/authorSession'
 import type { CloneInfo } from '@shared/types'
 import { git, gitSucceeds, NETWORK_TIMEOUT_MS, trackingRefspec } from './gitCommand'
 import { githubRepoOf } from './githubRemotes'
+import { realPath } from '../realPath'
 
 export interface WorktreeTarget {
   /** owner/name on GitHub. */
@@ -96,7 +97,7 @@ export function rallyWorktreePath(repo: string, branch: string): string {
   return join(RALLY_WORKTREES_DIR, ...repo.split('/'), ...branch.split('/'))
 }
 
-const samePath = (a: string, b: string) => existsSync(a) && existsSync(b) && realpathSync(a) === realpathSync(b)
+const samePath = (a: string, b: string) => realPath(a) === realPath(b)
 
 const localBranchExists = (root: string, branch: string) => gitSucceeds(root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
 
@@ -113,8 +114,8 @@ export class LocalCloneError extends Error {
 
 /**
  * Checks out the PR branch in a worktree of the local clone: the worktree that already has it, or one Rally adds under RALLY_WORKTREES_FOLDER.
- * Returns null when no folder holds a clone of the repo. Fetches the branch only when it creates the local branch, and forces the add only to
- * reuse Rally's own path when its folder was deleted.
+ * Returns null when no folder holds a clone of the repo. Fetches the branch only when it creates the local branch, unregisters Rally's own path
+ * when its folder was deleted, and stops when your own worktree for the branch is registered with a missing folder.
  */
 export async function checkoutWorktree(folders: string[], target: WorktreeTarget, hint?: string): Promise<CloneInfo | null> {
   const root = await findLocalClone(folders, target.repo, hint)
@@ -124,18 +125,24 @@ export async function checkoutWorktree(folders: string[], target: WorktreeTarget
   try {
     const worktrees = await registeredWorktrees(root)
     const existing = worktrees.find((w) => w.branch === target.branch && existsSync(w.path))?.path
-    if (existing) return { ...base, path: existing, kind: samePath(existing, rallyPath) ? 'rally_worktree' : 'local_worktree' }
+    if (existing) return samePath(existing, rallyPath) ? { ...base, path: existing, kind: 'rally_worktree', cloneRoot: root } : { ...base, path: existing, kind: 'local_worktree' }
+    const missing = worktrees.filter((w) => !existsSync(w.path))
+    const lostOwn = missing.find((w) => w.branch === target.branch && !samePath(w.path, rallyPath))
+    if (lostOwn) {
+      throw new Error(`Your worktree at ${lostOwn.path} has ${target.branch} checked out, but its folder is missing. Restore it, or run \`git worktree prune\` in your clone, then try again.`)
+    }
+    const staleRally = missing.find((w) => samePath(w.path, rallyPath))
+    if (staleRally) await git(root, ['worktree', 'remove', '--force', staleRally.path])
     const createdBranch = !(await localBranchExists(root, target.branch))
     if (createdBranch) await git(root, ['fetch', 'origin', trackingRefspec('origin', target.branch)], NETWORK_TIMEOUT_MS)
-    const force = worktrees.some((w) => w.path === rallyPath && !existsSync(w.path)) ? ['--force'] : []
     await mkdir(dirname(rallyPath), { recursive: true })
     await git(
       root,
       createdBranch
-        ? ['worktree', 'add', ...force, '--track', '-b', target.branch, rallyPath, `origin/${target.branch}`]
-        : ['worktree', 'add', ...force, rallyPath, target.branch],
+        ? ['worktree', 'add', '--track', '-b', target.branch, rallyPath, `origin/${target.branch}`]
+        : ['worktree', 'add', rallyPath, target.branch],
     )
-    return { ...base, path: rallyPath, kind: 'rally_worktree', createdBranch }
+    return { ...base, path: rallyPath, kind: 'rally_worktree', createdBranch, cloneRoot: root }
   } catch (error) {
     throw new LocalCloneError(root, error)
   }
@@ -144,17 +151,22 @@ export async function checkoutWorktree(folders: string[], target: WorktreeTarget
 /**
  * Removes a worktree Rally added, and its local branch when Rally created that too. With dropWork, the worktree's uncommitted edits and the
  * branch's unpushed commits go with them; without it, Rally refuses when either exists. Commits up to the head Rally last synced or pushed
- * count as pushed, even after GitHub deletes the branch.
+ * count as pushed, even after GitHub deletes the branch. When the folder is gone, Rally unregisters it through the clone it recorded.
  */
 export async function removeRallyWorktree(clone: CloneInfo, { dropWork }: { dropWork: boolean }): Promise<void> {
-  if (checkoutKind(clone) !== 'rally_worktree' || !existsSync(clone.path)) return
-  const root = await mainWorktree(clone.path)
-  if (!root) throw new Error(`Rally can't find the clone the worktree at ${clone.path} belongs to. Delete that folder yourself.`)
+  if (checkoutKind(clone) !== 'rally_worktree') return
+  const present = existsSync(clone.path)
+  const root = present ? await mainWorktree(clone.path) : clone.cloneRoot && existsSync(clone.cloneRoot) ? clone.cloneRoot : null
+  if (!root) {
+    if (present) throw new Error(`Rally can't find the clone the worktree at ${clone.path} belongs to. Delete that folder yourself.`)
+    return
+  }
   if (!dropWork && clone.createdBranch) {
     const pushed = ['--remotes=origin', ...(clone.syncedHead ? [clone.syncedHead] : [])]
     const unpushed = (await git(root, ['rev-list', '--count', `refs/heads/${clone.branch}`, '--not', ...pushed])).trim()
     if (unpushed !== '0') throw new Error(`The branch ${clone.branch} has commits GitHub doesn't.`)
   }
-  await git(root, ['worktree', 'remove', ...(dropWork ? ['--force'] : []), clone.path])
-  if (clone.createdBranch) await git(root, ['branch', '-D', clone.branch])
+  const registered = present || (await registeredWorktrees(root)).some((w) => samePath(w.path, clone.path))
+  if (registered) await git(root, ['worktree', 'remove', ...(dropWork || !present ? ['--force'] : []), clone.path])
+  if (clone.createdBranch && (await localBranchExists(root, clone.branch))) await git(root, ['branch', '-D', clone.branch])
 }

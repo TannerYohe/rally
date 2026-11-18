@@ -455,6 +455,8 @@ export interface CloneInfo {
   kind?: CheckoutKind
   /** Whether Rally created the local branch when it added the worktree, so removing the worktree deletes the branch too. */
   createdBranch?: boolean
+  /** The local clone a Rally worktree belongs to, so Rally can remove the worktree and its branch after its folder is gone. */
+  cloneRoot?: string
 }
 
 export interface PushRecord {

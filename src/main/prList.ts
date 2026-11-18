@@ -21,7 +21,7 @@ import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase } from './github/authorPhase'
 import { computePhase } from './github/phase'
 import { sameLogin } from './github/logins'
-import { fetchPrs, searchPrs, type GithubPr } from './github/queries'
+import { fetchPrs, searchPrs, type GithubPr, type PrLookup } from './github/queries'
 import { AUTHORED_SEARCH_QUERIES, buildSearchQueries } from './github/search'
 import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
 import type { JsonFile } from './jsonFile'
@@ -208,7 +208,7 @@ class PrList extends EventEmitter {
         (coords) => !known.some((node) => isSamePr(node.coords, coords)),
       )
       if (wanted.length === 0) break
-      const { lookups } = await fetchPrs(wanted, this.kind)
+      const lookups = await this.lookupCompanions(wanted)
       const found = lookups.flatMap((lookup, i): GithubPr[] => {
         switch (lookup.status) {
           case 'found':
@@ -229,6 +229,16 @@ class PrList extends EventEmitter {
     const outside = [...fetched.values()].filter((pr) => !memberKeys.has(keyOf(pr)))
     this.linkTargets = new Map(outside.map((pr) => [keyOf(pr), { node: linkNode(pr, markers), ref: toPrRef(pr) }]))
     return [...fetched.values()].filter((pr) => memberKeys.has(keyOf(pr)))
+  }
+
+  /** Looks up linked PRs, treating every one as unknown when the whole request fails so the refresh keeps their previous copies. */
+  private async lookupCompanions(wanted: PrCoords[]): Promise<PrLookup[]> {
+    try {
+      return (await fetchPrs(wanted, this.kind)).lookups
+    } catch (error) {
+      console.warn('Fetching linked PRs failed', { prs: wanted.map(keyOf), error })
+      return wanted.map(() => ({ status: 'unknown' }))
+    }
   }
 
   async refreshOne(owner: string, repo: string, number: number): Promise<void> {

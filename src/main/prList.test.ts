@@ -73,6 +73,7 @@ describe('prList', () => {
     mocks.summarizePr.mockResolvedValue('A summary')
     mocks.store.rallyReviewsFile.set({})
     mocks.store.prLinksFile.set({ linked: [], unlinked: [] })
+    mocks.store.configFile.set({ pollIntervalMinutes: 5, linkMarkers: ['linked PR'] })
     mocks.fetchPrs.mockReset()
     mocks.fetchPrs.mockResolvedValue({ viewer: 'me', lookups: [] })
     prList.setSessionLookup(() => null)
@@ -310,6 +311,16 @@ describe('prList', () => {
       expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['acme/web#2'], ['acme/api#1']])
     })
 
+    it('regroups when the link markers change', async () => {
+      mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api(), web()] })
+      await prList.refresh()
+      expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['acme/web#2'], ['acme/api#1']])
+
+      mocks.store.configFile.set({ ...mocks.store.configFile.get(), linkMarkers: ['depends on'] })
+      prList.reapplyPhases()
+      expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([undefined, undefined])
+    })
+
     it('flags a one-sided link and leaves both PRs on their own', async () => {
       mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api(), web({ body: '' })] })
       await prList.refresh()
@@ -424,11 +435,19 @@ describe('prList', () => {
         expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api'])
       })
 
-      it('fails the refresh when the companion lookup fails outright', async () => {
+      it('applies the search and keeps previous companions when the companion lookup fails outright', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
         mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [found(web({ title: 'Before' }))] })
+        await prList.refresh()
+
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ title: 'Searched' })] })
         mocks.fetchPrs.mockRejectedValueOnce(new Error('rate limited'))
         await prList.refresh()
-        expect(prList.get().error).toBe('rate limited')
+
+        expect(prList.get().error).toBeNull()
+        expect(prList.get().prs.map((pr) => pr.title)).toEqual(['Searched', 'Before'])
+        expect(warn).toHaveBeenCalledWith('Fetching linked PRs failed', expect.objectContaining({ prs: ['acme/web#2'] }))
       })
 
       it('fetches a PR linked by hand', async () => {

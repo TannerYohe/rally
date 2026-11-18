@@ -74,15 +74,21 @@ export async function findLocalClone(folders: string[], repo: string, hint?: str
   return found
 }
 
-/** Returns the path of the worktree that has the branch checked out, or null when none does. */
-async function worktreeWithBranch(root: string, branch: string): Promise<string | null> {
-  const blocks = (await git(root, ['worktree', 'list', '--porcelain'])).split('\n\n')
-  for (const block of blocks) {
-    const lines = block.split('\n')
-    const path = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length)
-    if (path && lines.includes(`branch refs/heads/${branch}`) && existsSync(path)) return path
-  }
-  return null
+interface RegisteredWorktree {
+  path: string
+  branch: string | null
+}
+
+/** Lists the worktrees the clone registers, including ones whose folder is missing. */
+async function registeredWorktrees(root: string): Promise<RegisteredWorktree[]> {
+  return (await git(root, ['worktree', 'list', '--porcelain']))
+    .split('\n\n')
+    .map((block) => block.split('\n'))
+    .filter((lines) => lines[0]?.startsWith('worktree '))
+    .map((lines) => ({
+      path: lines[0].slice('worktree '.length),
+      branch: lines.find((line) => line.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length) ?? null,
+    }))
 }
 
 /** Returns where Rally adds a worktree for the branch: ~/rally-worktrees/<owner>/<name>/<branch>, with each part of the branch a folder. */
@@ -107,8 +113,8 @@ export class LocalCloneError extends Error {
 
 /**
  * Checks out the PR branch in a worktree of the local clone: the worktree that already has it, or one Rally adds under RALLY_WORKTREES_FOLDER.
- * Returns null when no folder holds a clone of the repo. Rally fetches the branch only when it creates the local branch, so a worktree added on
- * an existing branch still has the GitHub head it last fetched for syncWorktree to compare against.
+ * Returns null when no folder holds a clone of the repo. Fetches the branch only when it creates the local branch, and forces the add only to
+ * reuse Rally's own path when its folder was deleted.
  */
 export async function checkoutWorktree(folders: string[], target: WorktreeTarget, hint?: string): Promise<CloneInfo | null> {
   const root = await findLocalClone(folders, target.repo, hint)
@@ -116,16 +122,18 @@ export async function checkoutWorktree(folders: string[], target: WorktreeTarget
   const base = { branch: target.branch, baseRef: `origin/${target.baseBranch}` }
   const rallyPath = rallyWorktreePath(target.repo, target.branch)
   try {
-    const existing = await worktreeWithBranch(root, target.branch)
+    const worktrees = await registeredWorktrees(root)
+    const existing = worktrees.find((w) => w.branch === target.branch && existsSync(w.path))?.path
     if (existing) return { ...base, path: existing, kind: samePath(existing, rallyPath) ? 'rally_worktree' : 'local_worktree' }
     const createdBranch = !(await localBranchExists(root, target.branch))
     if (createdBranch) await git(root, ['fetch', 'origin', trackingRefspec('origin', target.branch)], NETWORK_TIMEOUT_MS)
+    const force = worktrees.some((w) => w.path === rallyPath && !existsSync(w.path)) ? ['--force'] : []
     await mkdir(dirname(rallyPath), { recursive: true })
     await git(
       root,
       createdBranch
-        ? ['worktree', 'add', '--force', '--track', '-b', target.branch, rallyPath, `origin/${target.branch}`]
-        : ['worktree', 'add', '--force', rallyPath, target.branch],
+        ? ['worktree', 'add', ...force, '--track', '-b', target.branch, rallyPath, `origin/${target.branch}`]
+        : ['worktree', 'add', ...force, rallyPath, target.branch],
     )
     return { ...base, path: rallyPath, kind: 'rally_worktree', createdBranch }
   } catch (error) {

@@ -843,6 +843,12 @@ describe('checking out the PR branch', () => {
     expect(mocks.query).not.toHaveBeenCalled()
   })
 
+  it('stops the turn when your own worktree has a detached HEAD, such as mid-rebase', async () => {
+    mocks.checkedOutBranch.mockResolvedValue(null)
+    await expect(authorSessions.feedback('author-77', 'go')).rejects.toThrow('has a detached HEAD checked out, not the PR branch `feature`. Switch it back, finishing or aborting')
+    expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
+  })
+
   it('checks the PR branch out again when your own worktree has another branch checked out', async () => {
     mocks.checkedOutBranch.mockResolvedValueOnce('main')
     mocks.checkoutWorktree.mockResolvedValue({ ...WORKTREE, path: OLD_TEMP_CLONE.path, kind: 'rally_worktree' })

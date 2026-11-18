@@ -39,7 +39,7 @@ export async function offBranchError(clone: CloneInfo): Promise<string | null> {
   if (branch === clone.branch) return null
   const current = branch ? `\`${branch}\`` : 'a detached HEAD'
   const advice =
-    checkoutKind(clone) === 'local_worktree'
+    checkoutKind(clone) === 'local_worktree' && branch
       ? 'Switch it back, or send a message so Rally checks the PR branch out in a worktree of its own.'
       : 'Switch it back, finishing or aborting any rebase or merge first.'
   return `The ${checkoutNoun(clone)} at ${clone.path} has ${current} checked out, not the PR branch \`${clone.branch}\`. ${advice}`
@@ -76,13 +76,14 @@ export interface CheckoutRequest {
 
 /**
  * Returns the checkout a turn runs in. A checkout holding commits or edits stays in use until they are pushed or discarded, and a temp clone
- * or Rally worktree on another branch stops the turn. Otherwise Rally uses the local worktree for the branch, adding one when needed, and
+ * or Rally worktree on another branch, or your own worktree with a detached HEAD such as mid-rebase, stops the turn. Otherwise Rally uses the local worktree for the branch, adding one when needed, and
  * clones into the temp folder only when no configured folder holds the repo or the PR comes from a fork.
  */
 export async function chooseCheckout({ pr, clone, held, folders, cloneDir }: CheckoutRequest): Promise<Checkout> {
   if (held) {
     const offBranch = await offBranchError(held)
-    if (offBranch && checkoutKind(held) !== 'local_worktree') throw new Error(offBranch)
+    const detached = offBranch !== null && (await checkedOutBranch(held)) === null
+    if (offBranch && (checkoutKind(held) !== 'local_worktree' || detached)) throw new Error(offBranch)
     if (!offBranch && (await holdsWork(held))) {
       return isWorktree(held) ? syncLocalWorktree(held, 'worktree_has_work') : { clone: await syncClone(held), reason: 'temp_clone_has_work', warning: null }
     }

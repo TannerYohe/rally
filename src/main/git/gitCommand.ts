@@ -37,4 +37,15 @@ export async function git(cwd: string, args: string[], timeoutMs = LOCAL_TIMEOUT
   }
 }
 
+/** Runs a git command that answers yes or no, returning false when git exits with 1 and throwing on any other failure. */
+export async function gitSucceeds(cwd: string, args: string[]): Promise<boolean> {
+  try {
+    await git(cwd, args)
+    return true
+  } catch (error) {
+    if ((error as GitFailure).code === 1) return false
+    throw error
+  }
+}
+
 export const trackingRefspec = (remote: string, branch: string) => `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`

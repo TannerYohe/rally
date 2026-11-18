@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { checkoutKind, RALLY_WORKTREES_FOLDER } from '@shared/authorSession'
 import type { CloneInfo } from '@shared/types'
-import { git, NETWORK_TIMEOUT_MS, trackingRefspec, type GitFailure } from './gitCommand'
+import { git, gitSucceeds, NETWORK_TIMEOUT_MS, trackingRefspec } from './gitCommand'
 
 export interface WorktreeTarget {
   /** owner/name on GitHub. */
@@ -85,15 +85,7 @@ export function rallyWorktreePath(repo: string, branch: string): string {
 
 const samePath = (a: string, b: string) => existsSync(a) && existsSync(b) && realpathSync(a) === realpathSync(b)
 
-async function localBranchExists(root: string, branch: string): Promise<boolean> {
-  try {
-    await git(root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
-    return true
-  } catch (error) {
-    if ((error as GitFailure).code === 1) return false
-    throw error
-  }
-}
+const localBranchExists = (root: string, branch: string) => gitSucceeds(root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
 
 /**
  * Checks out the PR branch in a worktree of the local clone: the worktree that already has it, or one Rally adds under RALLY_WORKTREES_FOLDER.

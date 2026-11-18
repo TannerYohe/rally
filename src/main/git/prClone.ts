@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { MAX_DIFF_CHARS } from '@shared/diff'
 import { plural } from '@shared/format'
 import type { CloneInfo, DiffResult, LocalCommit, PushRecord } from '@shared/types'
-import { CLONE_TIMEOUT_MS, git, LOCAL_TIMEOUT_MS, NETWORK_TIMEOUT_MS, trackingRefspec, type GitFailure } from './gitCommand'
+import { CLONE_TIMEOUT_MS, git, gitSucceeds, LOCAL_TIMEOUT_MS, NETWORK_TIMEOUT_MS, trackingRefspec, type GitFailure } from './gitCommand'
 
 const FIELD_SEPARATOR = '\x1f'
 
@@ -210,15 +210,7 @@ export async function checkedOutBranch(clone: CloneInfo): Promise<string | null>
   }
 }
 
-async function isAncestor(clone: CloneInfo, ancestor: string, descendant = 'HEAD'): Promise<boolean> {
-  try {
-    await git(clone.path, ['merge-base', '--is-ancestor', ancestor, descendant])
-    return true
-  } catch (error) {
-    if ((error as GitFailure).code === 1) return false
-    throw error
-  }
-}
+const isAncestor = (clone: CloneInfo, ancestor: string, descendant = 'HEAD') => gitSucceeds(clone.path, ['merge-base', '--is-ancestor', ancestor, descendant])
 
 /** Commits the listed files, including deletions, and returns the new commit's sha, or null when they have no changes. */
 export async function commitFiles(clone: CloneInfo, files: string[], message: string): Promise<string | null> {

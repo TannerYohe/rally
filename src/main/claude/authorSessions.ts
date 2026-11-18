@@ -229,7 +229,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     prompt: (clone: CloneInfo) => string,
     before: () => Promise<void> = async () => {},
   ): Promise<void> {
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       await before()
       try {
         this.patch(sessionId, () => ({ status: 'running', error: null }), true)
@@ -267,7 +267,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
     this.assertCloneFolder(sessionId)
     let conflicts: string[] = []
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       await assertOnPrBranch(clone)
       this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
       try {
@@ -329,7 +329,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /** Throws away edits in the clone that no fix committed, refusing when its uncommitted files are no longer the ones the user confirmed. */
   async discardUncommitted(sessionId: string, confirmedFiles: string[]): Promise<void> {
     const clone = this.assertCanTouchUncommitted(sessionId, 'There is nothing to discard.')
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       await assertOnPrBranch(clone)
       if (!sameFiles(await uncommittedPaths(clone), confirmedFiles)) {
         await this.refreshClone(sessionId)
@@ -345,7 +345,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const clone = this.assertCanTouchUncommitted(sessionId, 'There is nothing to commit.')
     const { pr } = this.byId(sessionId)
     if (!message.trim()) throw new Error('Write a commit message first.')
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       await assertOnPrBranch(clone)
       try {
         const oid = await commitAll(clone, message.trim()).catch((error: unknown) => {
@@ -371,7 +371,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.assertIdle(sessionId)
     const { clone } = this.byId(sessionId)
     if (!clone) throw new Error('There is no merge to abort.')
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       await abortMerge(clone)
       this.patch(sessionId, () => ({ mergeConflicts: [], error: null, status: 'awaiting_feedback' }), true)
       await this.refreshClone(sessionId)
@@ -393,7 +393,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
     let failures = 0
     const answered: FeedbackItem[] = []
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
       try {
         for (const post of replies) {
@@ -416,7 +416,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   async acknowledge(pr: PrRef, itemId: string): Promise<void> {
     await acknowledgeFeedbackItem(pr, itemId)
     const session = this.getByPr(prKey(pr.owner, pr.repo, pr.number))
-    if (session && !this.isTurnRunning(session.id) && !this.publishing.has(session.id)) await this.settleReRequests(session.id)
+    if (session && !this.isTurnRunning(session.id) && !this.busy.has(session.id)) await this.settleReRequests(session.id)
     this.refreshPr(pr)
   }
 
@@ -444,7 +444,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
    */
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
-      if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
+      if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.busy.has(session.id)) continue
       if (isWorktree(session.clone)) {
         void this.pruneWorktreeSession(session.id)
         continue
@@ -457,7 +457,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   private async pruneWorktreeSession(sessionId: string): Promise<void> {
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       await this.refreshClone(sessionId)
       const session = this.find(sessionId)
       if (!session || hasWorkToKeep(session)) return
@@ -475,8 +475,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /** Discards the session, its unposted replies, and any worktree Rally added for it with that worktree's edits and unpushed commits. */
   async discard(sessionId: string): Promise<void> {
     const session = this.byId(sessionId)
-    if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish pushing or posting before discarding this session')
-    await this.whilePublishing(sessionId, async () => {
+    if (this.busy.has(sessionId)) throw new Error('Wait for Rally to finish its current step before discarding this session')
+    await this.whileBusy(sessionId, async () => {
       this.cancel(sessionId)
       if (!session.clone) return
       await removeRallyWorktree(session.clone, { dropWork: true }).catch((error: unknown) => {

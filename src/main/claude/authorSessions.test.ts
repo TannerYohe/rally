@@ -358,7 +358,7 @@ describe('push', () => {
     mocks.discardUncommitted.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
     mocks.uncommittedPaths.mockResolvedValue(['a.ts'])
     const discarding = authorSessions.discardUncommitted('author-27', ['a.ts'])
-    await expect(authorSessions.feedback('author-27', 'go')).rejects.toThrow('already posting')
+    await expect(authorSessions.feedback('author-27', 'go')).rejects.toThrow('still working on this PR')
     finish()
     await discarding
   })

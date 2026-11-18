@@ -111,6 +111,7 @@ class PrList extends EventEmitter {
   private fetchedDuringRefresh = new Map<string, GithubPr>()
   private pruners: Pruner[] = []
   private linkTargets = new Map<string, LinkTarget>()
+  private linkNodes = new Map<string, { body: string; markers: string[]; node: LinkNode }>()
   private refreshAgain = false
   private readonly files: PrListFiles
 
@@ -286,6 +287,16 @@ class PrList extends EventEmitter {
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
+  /** Returns the PR's link node, parsing its description again only when the description or markers changed, since settle runs on every session update. */
+  private linkNodeOf(pr: Pr, markers: string[]): LinkNode {
+    const key = keyOf(pr)
+    const cached = this.linkNodes.get(key)
+    if (cached && cached.body === pr.body && cached.markers === markers) return cached.node
+    const node = linkNode(pr, markers)
+    this.linkNodes.set(key, { body: pr.body, markers, node })
+    return node
+  }
+
   private linkSource(): PrLinkSource {
     if (!this.source.links) throw new Error('This list does not link PRs.')
     return this.source.links
@@ -339,12 +350,14 @@ class PrList extends EventEmitter {
     const links = this.source.links
     if (!links) return prs
     const handLinks = links.file.get()
-    const nodes = prs.map((pr) => linkNode(pr, links.markers()))
+    const markers = links.markers()
+    const nodes = prs.map((pr) => this.linkNodeOf(pr, markers))
+    for (const key of this.linkNodes.keys()) if (!nodes.some((node) => node.key === key)) this.linkNodes.delete(key)
     const units = linkUnits(nodes, handLinks)
     const unitOf = new Map(units.flatMap((unit) => unit.map((key) => [key, unit] as const)))
     const listedKeys = new Set(prs.filter((pr) => !pr.companion).map(keyOf))
     const kept = prs.filter((pr) => !pr.companion || unitOf.get(keyOf(pr))?.some((key) => listedKeys.has(key)))
-    const outside = [...this.linkTargets.values()].filter((target) => !unitOf.has(target.node.key) && !nodes.some((n) => n.key === target.node.key))
+    const outside = [...this.linkTargets.values()].filter((target) => !nodes.some((n) => n.key === target.node.key))
     const oneSided = oneSidedLinks([...nodes, ...outside.map((target) => target.node)], handLinks, units)
     const refs = new Map<string, PrRef>([...prs.map((pr) => [keyOf(pr), toPrRef(pr)] as const), ...outside.map((t) => [t.node.key, t.ref] as const)])
     const linked = kept.map((pr) => {

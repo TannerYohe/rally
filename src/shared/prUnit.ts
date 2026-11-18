@@ -101,6 +101,11 @@ export function unitPhase(members: Pick<Pr, 'phase'>[], phaseOrder: readonly Pha
   return members.reduce((first, member) => (rank(member.phase) < rank(first) ? member.phase : first), members[0].phase)
 }
 
+/** Returns the PR followed by the PRs its unit links it with, as found in byKey. */
+export function membersOf<T extends Pick<Pr, 'linkedPrs'>>(pr: T, byKey: Map<string, T>): T[] {
+  return [pr, ...(pr.linkedPrs ?? []).flatMap((key) => byKey.get(key) ?? [])]
+}
+
 export function toUnit(members: Pr[], phaseOrder: readonly Phase[]): PrUnit {
   return {
     key: keyOf(members[0]),
@@ -121,17 +126,14 @@ export function groupIntoUnits(prs: Pr[], phaseOrder: readonly Phase[]): PrUnit[
   for (const pr of prs) {
     const key = keyOf(pr)
     if (grouped.has(key)) continue
-    const members = [pr, ...(pr.linkedPrs ?? []).flatMap((linkedKey) => byKey.get(linkedKey) ?? [])].filter(
-      (member) => !grouped.has(keyOf(member)),
-    )
+    const members = membersOf(pr, byKey).filter((member) => !grouped.has(keyOf(member)))
     for (const member of members) grouped.add(keyOf(member))
     units.push(toUnit(members, phaseOrder))
   }
   return units
 }
 
-/** Returns the PR and the other members of its unit, in list order. */
+/** Returns the PR and the other members of its unit. */
 export function unitMembers(prs: Pr[], pr: Pr): Pr[] {
-  const linkedKeys = new Set(pr.linkedPrs ?? [])
-  return [pr, ...prs.filter((other) => linkedKeys.has(keyOf(other)))]
+  return membersOf(pr, new Map(prs.map((other) => [keyOf(other), other])))
 }

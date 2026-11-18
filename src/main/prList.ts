@@ -18,7 +18,7 @@ import {
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { parsePrRef } from '@shared/linkedPrs'
-import { areLinked, handLinkedKeys, hasPair, linkNode, linkUnits, oneSidedLinks, unitHide, type LinkNode } from '@shared/prUnit'
+import { areLinked, handLinkedKeys, hasPair, linkNode, linkUnits, membersOf, oneSidedLinks, unitHide, type LinkNode } from '@shared/prUnit'
 import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase } from './github/authorPhase'
 import { computePhase } from './github/phase'
@@ -96,7 +96,7 @@ function unreciprocatedTargets(prs: Pr[]): Map<string, LinkTarget> {
 /** Shows every member of a unit while any member shows, so a unit hides only while all its members do. */
 function withUnitHides(prs: Pr[]): Pr[] {
   const byKey = new Map(prs.map((pr) => [keyOf(pr), pr]))
-  return prs.map((pr) => (pr.linkedPrs ? { ...pr, hidden: unitHide([pr, ...pr.linkedPrs.flatMap((key) => byKey.get(key) ?? [])]) } : pr))
+  return prs.map((pr) => (pr.linkedPrs ? { ...pr, hidden: unitHide(membersOf(pr, byKey)) } : pr))
 }
 
 function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {

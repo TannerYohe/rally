@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { unitHide, unitPhase } from '@shared/prUnit'
+import { toUnit } from '@shared/prUnit'
 import { REVIEW_PHASE_ORDER, type Pr, type PrListKind } from '@shared/types'
 import { age } from '../lib/format'
 import { LIST_ROOTS } from '../lib/routes'
@@ -127,7 +127,7 @@ interface UnitHeaderProps {
 
 /** Heads the page of a PR reviewed together with its linked PRs, with a compact header per PR and Snooze and Hide for all of them. */
 export function UnitHeader({ members, memberActions }: UnitHeaderProps) {
-  const phase = unitPhase(members, REVIEW_PHASE_ORDER)
+  const unit = toUnit(members, REVIEW_PHASE_ORDER)
   return (
     <div>
       <Link to={LIST_ROOTS.reviewing} className="text-xs text-ink-500 hover:text-ink-300">
@@ -135,8 +135,8 @@ export function UnitHeader({ members, memberActions }: UnitHeaderProps) {
       </Link>
       <div className="mt-3 flex items-center gap-3">
         <h1 className="min-w-0 flex-1 text-xl font-semibold">{members.length} linked PRs</h1>
-        <HideControls list="reviewing" ids={members.map((pr) => pr.id)} hidden={unitHide(members)} phase={phase} />
-        <PhaseBadge phase={phase} />
+        <HideControls list="reviewing" ids={members.map((pr) => pr.id)} hidden={unit.hidden} phase={unit.phase} />
+        <PhaseBadge phase={unit.phase} />
       </div>
       <ul className="mt-3 space-y-2">
         {members.map((pr) => (

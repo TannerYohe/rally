@@ -491,15 +491,14 @@ describe('push', () => {
 
   it('refuses to commit while a turn runs', async () => {
     let release: () => void = () => {}
+    const released = new Promise<void>((resolve) => (release = resolve))
     mocks.query.mockImplementation(async function* () {
-      await new Promise<void>((resolve) => (release = resolve))
+      await released
       yield { type: 'result', subtype: 'success', is_error: false }
     })
     await authorSessions.feedback('author-49', 'still working')
     await expect(authorSessions.commitUncommitted('author-49', 'Tidy up')).rejects.toThrow('already working')
     expect(mocks.commitAll).not.toHaveBeenCalled()
-    await vi.waitFor(() => expect(mocks.query).toHaveBeenCalled())
-    await new Promise((resolve) => setTimeout(resolve, 0))
     release()
     await vi.waitFor(() => expect(session(49).status).toBe('awaiting_feedback'))
   })
@@ -881,8 +880,9 @@ describe('pruneUnlisted', () => {
     const dir40 = join(tmpdir(), 'rally', 'author-40')
     mkdirSync(dir40, { recursive: true })
     let release: () => void = () => {}
+    const released = new Promise<void>((resolve) => (release = resolve))
     mocks.query.mockImplementation(async function* () {
-      await new Promise<void>((resolve) => (release = resolve))
+      await released
       yield { type: 'result', subtype: 'success', is_error: false }
     })
     await authorSessions.feedback('author-45', 'still working')

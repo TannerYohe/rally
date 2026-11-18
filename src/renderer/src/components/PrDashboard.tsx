@@ -127,11 +127,12 @@ function SingleCardBody({ pr, unit, statusLabels }: { pr: Pr; unit: PrUnit; stat
 
 function UnitCardBody({ unit, statusLabels }: { unit: PrUnit; statusLabels: StatusLabels }) {
   const authors = [...new Set(unit.members.map((pr) => pr.author))]
+  const repoCount = new Set(unit.members.map((pr) => `${pr.owner}/${pr.repo}`.toLowerCase())).size
   return (
     <>
       <div className="flex items-start gap-3">
         <span className="rounded bg-secondary-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-secondary-200">
-          {unit.members.length} repos
+          {repoCount} {repoCount === 1 ? 'repo' : 'repos'}
         </span>
         <span className="min-w-0 flex-1" />
         <UnitStatus unit={unit} labels={statusLabels} />

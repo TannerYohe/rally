@@ -14,10 +14,12 @@ import {
   discardUncommitted,
   ForcePushConflictError,
   integrateRemote,
+  latestCommitTouching,
   localCommits,
   MergeConflictError,
   pushClone,
   syncClone,
+  syncWorktree,
   uncommittedDiff,
   uncommittedPaths,
   UncommittedChangesError,
@@ -290,6 +292,44 @@ describe('prClone', () => {
     await syncClone(clone)
     expect(git(clone.path, 'rev-parse', 'HEAD').trim()).toBe(local.oid)
     expect((await localCommits(clone)).map((c) => c.oid)).toEqual([local.oid])
+  })
+
+  it('fast-forwards a worktree that is behind GitHub and records the new head as synced', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt1'), source)
+    const other = await cloneBranch(join(root, 'session-wt2'), source)
+    writeFileSync(join(worktree.path, 'wip.txt'), 'wip\n')
+    commitFile(other.path, 'ahead.txt', 'ahead\n')
+    const { push } = await syncAndPush(other, AT)
+
+    const synced = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(push.oid)
+    expect(synced.syncedHead).toBe(push.oid)
+    expect(await uncommittedPaths(worktree)).toEqual(['wip.txt'])
+  })
+
+  it('leaves a diverged worktree alone and records where it left GitHub', async () => {
+    const worktree = await cloneBranch(join(root, 'session-wt3'), source)
+    const other = await cloneBranch(join(root, 'session-wt4'), source)
+    const forkPoint = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    commitFile(worktree.path, 'local.txt', 'local\n')
+    const localHead = git(worktree.path, 'rev-parse', 'HEAD').trim()
+    commitFile(other.path, 'remote.txt', 'remote\n')
+    await syncAndPush(other, AT)
+
+    const synced = await syncWorktree({ ...worktree, kind: 'local_worktree', syncedHead: undefined })
+    expect(git(worktree.path, 'rev-parse', 'HEAD').trim()).toBe(localHead)
+    expect(synced.syncedHead).toBe(forkPoint)
+    expect((await localCommits(synced)).map((c) => c.oid)).toEqual([localHead])
+  })
+
+  it('finds the newest unpushed commit that touches a file', async () => {
+    const clone = await cloneBranch(join(root, 'session-touch'), source)
+    expect(await latestCommitTouching(clone, ['x.txt'])).toBeNull()
+    commitFile(clone.path, 'x.txt', 'one\n')
+    commitFile(clone.path, 'y.txt', 'two\n')
+    const [, xCommit] = await localCommits(clone)
+    expect(await latestCommitTouching(clone, ['x.txt'])).toBe(xCommit.oid)
+    expect(await latestCommitTouching(clone, [])).toBeNull()
   })
 
   describe('after a force push', () => {

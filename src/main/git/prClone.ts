@@ -52,7 +52,7 @@ export async function cloneBranch(dir: string, source: CloneSource): Promise<Clo
   const baseRemote = source.baseUrl === source.headUrl ? 'origin' : 'upstream'
   if (baseRemote === 'upstream') await git(path, ['remote', 'add', 'upstream', source.baseUrl])
   await git(path, ['fetch', baseRemote, trackingRefspec(baseRemote, source.baseBranch)], NETWORK_TIMEOUT_MS)
-  return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}`, syncedHead: await revParse(path, 'HEAD') }
+  return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}`, syncedHead: await revParse(path, 'HEAD'), kind: 'temp_clone' }
 }
 
 async function revParse(cwd: string, ref: string): Promise<string> {
@@ -68,14 +68,34 @@ async function fetchBranch(clone: CloneInfo): Promise<void> {
   await git(clone.path, ['fetch', 'origin', trackingRefspec('origin', clone.branch)], NETWORK_TIMEOUT_MS)
 }
 
-/** Fetches the head and base branches, and moves the clone to GitHub's head, even after a force push, when it holds no commits or edits of its own. */
-export async function syncClone(clone: CloneInfo): Promise<CloneInfo> {
+async function fetchHeadAndBase(clone: CloneInfo): Promise<void> {
   await fetchBranch(clone)
   const [baseRemote, ...baseBranch] = clone.baseRef.split('/')
   await git(clone.path, ['fetch', baseRemote, trackingRefspec(baseRemote, baseBranch.join('/'))], NETWORK_TIMEOUT_MS)
+}
+
+/** Fetches the head and base branches, and moves the clone to GitHub's head, even after a force push, when it holds no commits or edits of its own. */
+export async function syncClone(clone: CloneInfo): Promise<CloneInfo> {
+  await fetchHeadAndBase(clone)
   if ((await localCommits(clone)).length > 0 || (await uncommittedPaths(clone)).length > 0) return clone
   await git(clone.path, ['reset', '--hard', remoteRef(clone)])
   return { ...clone, syncedHead: await revParse(clone.path, 'HEAD') }
+}
+
+/**
+ * Fetches the head and base branches and fast-forwards the worktree to GitHub's head when it is behind, leaving it alone when it has diverged
+ * or the fast-forward would touch uncommitted edits. Records GitHub's head as synced once the worktree contains it.
+ */
+export async function syncWorktree(clone: CloneInfo): Promise<CloneInfo> {
+  await fetchHeadAndBase(clone)
+  const remote = remoteRef(clone)
+  if (await isAncestor(clone, 'HEAD', remote)) {
+    await git(clone.path, ['merge', '--ff-only', remote]).catch((error: unknown) => {
+      console.warn('Fast-forwarding the worktree to GitHub failed', { path: clone.path, branch: clone.branch, error })
+    })
+  }
+  if (await isAncestor(clone, remote)) return { ...clone, syncedHead: await revParse(clone.path, remote) }
+  return { ...clone, syncedHead: clone.syncedHead ?? (await git(clone.path, ['merge-base', 'HEAD', remote])).trim() }
 }
 
 async function commitList(clone: CloneInfo, extra: string[]): Promise<LocalCommit[]> {
@@ -173,6 +193,13 @@ export async function commitFiles(clone: CloneInfo, files: string[], message: st
   if (!staged.trim()) return null
   await git(clone.path, ['commit', '-m', message, '--', ...files])
   return (await git(clone.path, ['rev-parse', 'HEAD'])).trim()
+}
+
+/** Returns the newest commit GitHub doesn't have yet that touches any of the files, or null when there is none. */
+export async function latestCommitTouching(clone: CloneInfo, files: string[]): Promise<string | null> {
+  if (files.length === 0) return null
+  const out = await git(clone.path, ['log', '-1', '--format=%H', 'HEAD', `^${remoteRef(clone)}`, `^${syncedRef(clone)}`, '--', ...files])
+  return out.trim() || null
 }
 
 /** Commits every edit in the clone, including new and deleted files, and returns the new commit's sha, or null when there are none. */

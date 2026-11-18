@@ -182,7 +182,8 @@ mocks.stored = [
     description: descriptionDraft(),
   }),
   stored(68, { description: descriptionDraft(), status: 'error', error: 'Rally couldn\'t update the PR description: timeout' }),
-  stored(69, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], description: descriptionDraft(), status: 'error', error: 'rejected' }),
+  stored(69, { description: descriptionDraft(), status: 'error', error: 'The Claude turn ended with an error.' }),
+  stored(72, { description: descriptionDraft(), status: 'error', error: "The commits are pushed. Rally couldn't update the PR description: Not Found" }),
   legacySession(70),
   stored(71),
   stored(63),
@@ -746,9 +747,14 @@ describe('description updates', () => {
     await expect(authorSessions.push('author-62')).rejects.toThrow('no commits or description update')
   })
 
-  it('keeps a failed push\'s error when discarding the description leaves commits to push', () => {
+  it('keeps an error the description update didn\'t cause when discarding it', () => {
     authorSessions.discardDescription('author-69')
-    expect(session(69)).toMatchObject({ description: null, status: 'error', error: 'rejected' })
+    expect(session(69)).toMatchObject({ description: null, status: 'error', error: 'The Claude turn ended with an error.' })
+  })
+
+  it('clears a failed description request\'s error, after commits, when discarding it', () => {
+    authorSessions.discardDescription('author-72')
+    expect(session(72)).toMatchObject({ description: null, status: 'awaiting_feedback', error: null })
   })
 })
 

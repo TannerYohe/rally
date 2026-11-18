@@ -72,6 +72,7 @@ const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on Gi
 const NOTHING_TO_PUSH_ERROR = 'There are no commits or description update to push.'
 const EMPTY_TITLE_ERROR = "The PR title can't be empty."
 const COMMITS_PUSHED_NOTE = 'The commits are pushed.'
+const DESCRIPTION_REQUEST_ERROR = "Rally couldn't update the PR description:"
 const DESCRIPTION_CHANGED_ERROR =
   'The PR title or description changed on GitHub since Claude proposed this update, so Rally left it alone. Ask Claude to update the description again, or discard this update.'
 
@@ -89,6 +90,12 @@ function withoutPendingCommits(responses: Record<string, ItemResponse>): Record<
   return Object.fromEntries(
     Object.entries(responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError: TURN_DID_NOT_FINISH_ERROR } : r]),
   )
+}
+
+/** Returns whether `error` is one failDescription records. */
+function isDescriptionError(error: string | null): boolean {
+  const message = error?.startsWith(COMMITS_PUSHED_NOTE) ? error.slice(COMMITS_PUSHED_NOTE.length + 1) : error
+  return message === DESCRIPTION_CHANGED_ERROR || Boolean(message?.startsWith(DESCRIPTION_REQUEST_ERROR))
 }
 
 function restoreAuthorSession(stored: AuthorSession): AuthorSession {
@@ -312,7 +319,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /** Logs a failed GitHub request for the description update, then records and throws it. */
   private descriptionRequestFailed(sessionId: string, error: unknown, afterCommits: boolean): never {
     console.error('Updating the PR description failed', { pr: this.byId(sessionId).pr.url, error })
-    this.failDescription(sessionId, `Rally couldn't update the PR description: ${errorMessage(error)}`, afterCommits)
+    this.failDescription(sessionId, `${DESCRIPTION_REQUEST_ERROR} ${errorMessage(error)}`, afterCommits)
   }
 
   /** Records and throws a failed description update, noting when the commits pushed just before it went through. */
@@ -341,10 +348,10 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     return 'Rally saved the proposed title and description. The user reviews them and updates GitHub when they push.'
   }
 
-  /** Drops the description update, and the error it left when no commits are still waiting to push. */
+  /** Drops the description update, and the session error when a failed push of it set that error. */
   discardDescription(sessionId: string): void {
     this.assertIdle(sessionId)
-    this.patch(sessionId, (s) => (s.status === 'error' && s.commits.length === 0 ? { description: null, status: 'awaiting_feedback', error: null } : { description: null }), true)
+    this.patch(sessionId, (s) => (s.status === 'error' && isDescriptionError(s.error) ? { description: null, status: 'awaiting_feedback', error: null } : { description: null }), true)
   }
 
   /** Returns whether the clone's folder is gone, forgetting the uncommitted edits that went with it and noting them in the log and the timeline. */

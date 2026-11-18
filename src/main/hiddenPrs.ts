@@ -24,12 +24,17 @@ export function refreshHide(hide: StoredHide, pr: HideTarget, now: string): Stor
   return { ...hide, reviewRequestedWhenLastListed: pr.reviewRequestedFromMe, lastListedAt: now }
 }
 
+/** Returns whether state for a PR last listed at lastListedAt is still inside the retention window. */
+export function withinUnlistedRetention(lastListedAt: string, now: string): boolean {
+  return Date.parse(now) - Date.parse(lastListedAt) < UNLISTED_HIDE_RETENTION_DAYS * 24 * 60 * 60_000
+}
+
 export function keepsUnlistedHide(hide: StoredHide, now: string): boolean {
   switch (hide.mode) {
     case 'snooze':
       return false
     case 'indefinite':
-      return Date.parse(now) - Date.parse(hide.lastListedAt) < UNLISTED_HIDE_RETENTION_DAYS * 24 * 60 * 60_000
+      return withinUnlistedRetention(hide.lastListedAt, now)
     default:
       return false
   }

@@ -103,6 +103,8 @@ export interface Pr {
 export interface PrLinks {
   linked: [string, string][]
   unlinked: [string, string][]
+  /** When each PR in a pair was last listed, keyed by PR key. */
+  lastListedAt?: Record<string, string>
 }
 
 export type ModelChoice = 'opus' | 'opus[1m]' | 'sonnet' | 'sonnet[1m]' | 'haiku'

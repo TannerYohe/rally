@@ -23,7 +23,7 @@ import { computePhase } from './github/phase'
 import { sameLogin } from './github/logins'
 import { fetchPrs, searchPrs, type GithubPr, type PrLookup } from './github/queries'
 import { AUTHORED_SEARCH_QUERIES, buildSearchQueries } from './github/search'
-import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
+import { isHideActive, keepsUnlistedHide, newHide, refreshHide, withinUnlistedRetention } from './hiddenPrs'
 import type { JsonFile } from './jsonFile'
 import {
   authoredHeadsSeenFile,
@@ -276,8 +276,10 @@ class PrList extends EventEmitter {
     if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
     if (isSamePr(pr, target)) throw new Error("A PR can't be linked with itself.")
     const targetKey = await this.linkableKey(target)
-    const { linked, unlinked } = links.file.get()
+    const stored = links.file.get()
+    const { linked, unlinked } = stored
     links.file.set({
+      ...stored,
       linked: [...linked.filter((pair) => !hasPair([pair], key, targetKey)), [key, targetKey]],
       unlinked: unlinked.filter((pair) => !hasPair([pair], key, targetKey)),
     })
@@ -289,9 +291,9 @@ class PrList extends EventEmitter {
   unlink(key: string, others: string[]): void {
     const links = this.linkSource()
     const pairs = others.filter((other) => other !== key).map((other): [string, string] => [key, other])
-    const { linked, unlinked } = links.file.get()
+    const stored = links.file.get()
     const outsidePairs = (pair: [string, string]) => !pairs.some(([x, y]) => hasPair([pair], x, y))
-    links.file.set({ linked: linked.filter(outsidePairs), unlinked: [...unlinked.filter(outsidePairs), ...pairs] })
+    links.file.set({ ...stored, linked: stored.linked.filter(outsidePairs), unlinked: [...stored.unlinked.filter(outsidePairs), ...pairs] })
     const prs = this.settle(this.state.prs)
     this.update({ prs })
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
@@ -485,10 +487,17 @@ class ReviewPrList extends PrList {
   }
 }
 
+/** Drops hand links and unlinks once neither PR has been listed for the unlisted retention window. */
 function prunePrLinks(listed: Set<string>): void {
-  const touchesListed = ([a, b]: [string, string]) => listed.has(a) || listed.has(b)
-  const { linked, unlinked } = prLinksFile.get()
-  prLinksFile.set({ linked: linked.filter(touchesListed), unlinked: unlinked.filter(touchesListed) })
+  const now = new Date().toISOString()
+  const stored = prLinksFile.get()
+  const listedAt = (key: string) => (listed.has(key) ? now : (stored.lastListedAt?.[key] ?? now))
+  const recent = ([a, b]: [string, string]) => withinUnlistedRetention(listedAt(a), now) || withinUnlistedRetention(listedAt(b), now)
+  const linked = stored.linked.filter(recent)
+  const unlinked = stored.unlinked.filter(recent)
+  const lastListedAt = Object.fromEntries([...linked, ...unlinked].flat().map((key) => [key, listedAt(key)]))
+  const next = { linked, unlinked, lastListedAt }
+  if (JSON.stringify(next) !== JSON.stringify(stored)) prLinksFile.set(next)
 }
 
 function pruneRallyReviews(listed: Set<string>): void {

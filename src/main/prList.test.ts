@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => {
       headsSeenFile: file<Record<string, string>>({}),
       hiddenPrsFile: file<Record<string, unknown>>({}),
       rallyReviewsFile: file<Record<string, number[]>>({}),
-      prLinksFile: file<{ linked: [string, string][]; unlinked: [string, string][] }>({ linked: [], unlinked: [] }),
+      prLinksFile: file<{ linked: [string, string][]; unlinked: [string, string][]; lastListedAt?: Record<string, string> }>({ linked: [], unlinked: [] }),
       authoredPrCacheFile: file({ viewer: null, refreshedAt: null, prs: [] }),
       authoredSummariesFile: file<Record<string, string>>({}),
       authoredHeadsSeenFile: file<Record<string, string>>({}),
@@ -508,7 +508,7 @@ describe('prList', () => {
 
         await prList.link('acme/api#1', { owner: 'acme', repo: 'WEB', number: 2 })
 
-        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [['acme/api#1', 'Acme/web#2']], unlinked: [] })
+        expect(mocks.store.prLinksFile.get()).toMatchObject({ linked: [['acme/api#1', 'Acme/web#2']], unlinked: [] })
         expect(prList.get().prs.map((pr) => pr.linkedPrs)).toEqual([['Acme/web#2'], ['acme/api#1']])
       })
 
@@ -534,7 +534,7 @@ describe('prList', () => {
         await expect(prList.link('acme/api#1', { owner: 'acme', repo: 'web', number: 2 })).rejects.toThrow('That PR is yours')
         mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'gone' }] })
         await expect(prList.link('acme/api#1', { owner: 'acme', repo: 'web', number: 2 })).rejects.toThrow('closed, merged, or not visible')
-        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [], unlinked: [] })
+        expect(mocks.store.prLinksFile.get()).toMatchObject({ linked: [], unlinked: [] })
       })
 
       it('unlinks a PR from the rest of its unit and drops a companion that no longer joins one', async () => {
@@ -544,16 +544,27 @@ describe('prList', () => {
 
         prList.unlink('acme/web#2', ['acme/api#1'])
 
-        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [], unlinked: [['acme/web#2', 'acme/api#1']] })
+        expect(mocks.store.prLinksFile.get()).toMatchObject({ linked: [], unlinked: [['acme/web#2', 'acme/api#1']] })
         expect(prList.get().prs.map((pr) => [pr.repo, pr.linkedPrs])).toEqual([['api', undefined]])
       })
 
-      it('forgets hand links whose PRs both left the list', async () => {
-        mocks.store.prLinksFile.set({ linked: [['acme/api#1', 'acme/gone#9']], unlinked: [['acme/old#1', 'acme/gone#9']] })
+      it('keeps hand links whose PRs both left the list until the retention window passes', async () => {
+        const recently = new Date().toISOString()
+        const longAgo = new Date(Date.now() - (UNLISTED_HIDE_RETENTION_DAYS + 1) * 24 * 60 * 60_000).toISOString()
+        mocks.store.prLinksFile.set({
+          linked: [['acme/api#1', 'acme/gone#9']],
+          unlinked: [['acme/old#1', 'acme/gone#9'], ['acme/stale#1', 'acme/stale#2']],
+          lastListedAt: { 'acme/gone#9': longAgo, 'acme/old#1': recently, 'acme/stale#1': longAgo, 'acme/stale#2': longAgo },
+        })
         mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' })] })
-        mocks.fetchPrs.mockResolvedValueOnce({ viewer: 'me', lookups: [{ status: 'gone' }] })
+        mocks.fetchPrs.mockResolvedValue({ viewer: 'me', lookups: [{ status: 'gone' }] })
         await prList.refresh()
-        expect(mocks.store.prLinksFile.get()).toEqual({ linked: [['acme/api#1', 'acme/gone#9']], unlinked: [] })
+        expect(mocks.store.prLinksFile.get()).toMatchObject({
+          linked: [['acme/api#1', 'acme/gone#9']],
+          unlinked: [['acme/old#1', 'acme/gone#9']],
+          lastListedAt: { 'acme/gone#9': longAgo, 'acme/old#1': recently },
+        })
+        expect(mocks.store.prLinksFile.get().lastListedAt?.['acme/api#1']).toBeDefined()
       })
 
       it('never fetches companions for the authored list', async () => {

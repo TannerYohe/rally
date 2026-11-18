@@ -123,11 +123,10 @@ interface UnitHeaderProps {
   members: Pr[]
   /** Controls shown on each member's row, such as Unlink. */
   memberActions?(pr: Pr): ReactNode
-  children?: ReactNode
 }
 
 /** Heads the page of a PR reviewed together with its linked PRs, with a compact header per PR and Snooze and Hide for all of them. */
-export function UnitHeader({ members, memberActions, children }: UnitHeaderProps) {
+export function UnitHeader({ members, memberActions }: UnitHeaderProps) {
   const phase = unitPhase(members, REVIEW_PHASE_ORDER)
   return (
     <div>
@@ -144,7 +143,6 @@ export function UnitHeader({ members, memberActions, children }: UnitHeaderProps
           <MemberHeader key={pr.id} pr={pr} actions={memberActions?.(pr)} />
         ))}
       </ul>
-      {children}
     </div>
   )
 }

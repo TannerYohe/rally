@@ -4,6 +4,7 @@ import { keyOf, toPrRef, unitMembers } from '@shared/prUnit'
 import { prKey, REVIEW_EVENT_LABELS, type MemberVerdict, type Pr, type PrRef, type ReviewSession, type SubmittedReview } from '@shared/types'
 import { draftsForPr, emptyReviewError, isUnitSession, sessionMembers } from '@shared/unitDrafts'
 import { DraftList } from '../components/DraftList'
+import { LinkPrForm, OneSidedLinks, UnlinkButton } from '../components/LinkedPrControls'
 import { PriorConcernList } from '../components/PriorConcernList'
 import { ReviewBodyEditor } from '../components/ReviewBodyEditor'
 import { BusyDot } from '../components/BusyDot'
@@ -70,7 +71,7 @@ export function PrDetail() {
 
   const header =
     unit.length > 1 ? (
-      <UnitHeader members={unit} />
+      <UnitHeader members={unit} memberActions={(member) => <UnlinkButton pr={member} unit={unit} />} />
     ) : (
       <PrHeader list="reviewing" pr={pr} title={key} repo={repo} number={number} url={url} />
     )
@@ -78,6 +79,13 @@ export function PrDetail() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       {header}
+
+      {pr && (
+        <div className="space-y-2">
+          <OneSidedLinks prs={unit} />
+          <LinkPrForm pr={pr} />
+        </div>
+      )}
 
       <ErrorBox message={startError} />
 

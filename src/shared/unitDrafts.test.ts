@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { finalReview } from './feedback'
 import type { DraftComment, Drafts, PrRef } from './types'
-import { changesForPr, distinctSessions, draftsForPr, isUnitSession, sessionCovers, sessionMembers, unitDraftProblems } from './unitDrafts'
+import { changesForPr, distinctSessions, draftsForPr, isUnitSession, sessionCovers, sessionMembers, unitDraftProblems, withPrTags } from './unitDrafts'
 
 const api: PrRef = { owner: 'acme', repo: 'api', number: 1, url: 'https://github.com/acme/api/pull/1' }
 const web: PrRef = { owner: 'acme', repo: 'web', number: 2, url: 'https://github.com/acme/web/pull/2' }
@@ -50,9 +50,12 @@ describe('draftsForPr', () => {
     })
   })
 
-  it('returns drafts for one PR unchanged', () => {
-    const solo = { ...unitDrafts, prReviews: undefined }
-    expect(draftsForPr(solo, API)).toBe(solo)
+  it('tags untagged drafts for one PR with that PR and leaves tagged drafts alone', () => {
+    const solo = withPrTags({ ...unitDrafts, comments: [comment('1')], priorConcerns: [], prReviews: undefined, verdict: 'Looks good', summaryBody: 'Body' }, API)
+    expect(solo.comments.map((c) => c.prKey)).toEqual([API])
+    expect(solo.prReviews).toEqual([{ prKey: API, verdict: 'Looks good', summaryBody: 'Body' }])
+    expect(draftsForPr(solo, API)).toMatchObject({ verdict: 'Looks good', summaryBody: 'Body', comments: solo.comments })
+    expect(withPrTags(unitDrafts, API)).toBe(unitDrafts)
   })
 
   it('feeds finalReview with the PR own body edit', () => {

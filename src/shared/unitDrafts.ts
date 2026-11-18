@@ -1,4 +1,4 @@
-import { EMPTY_COMMENT_REVIEW_ERROR, isEmptyCommentReview, type DraftChanges } from './feedback'
+import { EMPTY_COMMENT_REVIEW_ERROR, isEmptyCommentReview, type DraftChanges, type PrChanges } from './feedback'
 import { keyOf, type Drafts, type MemberVerdict, type PrRef, type ReviewSession, type SubmittedReview } from './types'
 
 /** Returns every PR a review session covers, its own PR first. */
@@ -34,10 +34,20 @@ export function isPartlyPosted(session: Pick<ReviewSession, 'members' | 'memberS
   return !session.submitted && unpostedMembers(session).length < sessionMembers(session).length
 }
 
-/** Returns one PR's share of a unit's drafts as single-PR drafts; drafts for one PR come back unchanged. */
+/** Tags untagged drafts for one PR with that PR, giving them its review in prReviews; tagged drafts come back unchanged. */
+export function withPrTags(drafts: Drafts, prKey: string): Drafts {
+  if (drafts.prReviews) return drafts
+  return {
+    ...drafts,
+    comments: drafts.comments.map((c) => ({ ...c, prKey })),
+    priorConcerns: drafts.priorConcerns.map((c) => ({ ...c, prKey })),
+    prReviews: [{ prKey, verdict: drafts.verdict, summaryBody: drafts.summaryBody }],
+  }
+}
+
+/** Returns one PR's share of a review's drafts. */
 export function draftsForPr(drafts: Drafts, prKey: string): Drafts {
-  if (!drafts.prReviews) return drafts
-  const review = drafts.prReviews.find((r) => r.prKey === prKey)
+  const review = drafts.prReviews?.find((r) => r.prKey === prKey)
   return {
     mode: drafts.mode,
     verdict: review?.verdict ?? drafts.verdict,
@@ -54,10 +64,9 @@ export function withMemberComments(drafts: Drafts, shares: Drafts[]): Drafts {
   return { ...drafts, comments: drafts.comments.map((c) => byId.get(c.id) ?? c) }
 }
 
-/** Returns the changes that apply to one PR, taking its review body edit from the per-PR edits of a unit. */
-export function changesForPr(changes: DraftChanges, prKey: string): DraftChanges {
-  if (!changes.summaryBodyEdits) return changes
-  return { ...changes, summaryBodyEdit: changes.summaryBodyEdits[prKey] }
+/** Returns the changes that apply to one PR, taking its review body edit from the per-PR edits. */
+export function changesForPr(changes: DraftChanges, prKey: string): PrChanges {
+  return { edits: changes.edits, summaryBodyEdit: changes.summaryBodyEdits[prKey] }
 }
 
 /** Returns each value that appears more than once, in order of its second appearance. */

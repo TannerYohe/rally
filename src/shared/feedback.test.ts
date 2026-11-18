@@ -12,8 +12,9 @@ import {
   replyContext,
   SUBMIT_WITH_INSTRUCTIONS_ERROR,
   submitBlockedReason,
-  type DraftChanges,
+  type PrChanges,
 } from './feedback'
+import { withPrTags } from './unitDrafts'
 
 const drafts: Drafts = {
   mode: 'full',
@@ -34,52 +35,55 @@ const drafts: Drafts = {
   })),
 }
 
+const API = 'acme/api#1'
+const single = withPrTags(drafts, API)
+
 describe('feedbackMessage', () => {
   it('lists rewrites and drops before free text', () => {
-    const message = feedbackMessage(drafts, { edits: { '1': { body: 'shorter' }, '3': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'make 2 a nitpick' })
+    const message = feedbackMessage(single, { edits: { '1': { body: 'shorter' }, '3': { dropped: true } }, summaryBodyEdits: {}, instructions: 'make 2 a nitpick' })
     expect(message).toBe(
       'Edits I made in Rally:\n- I rewrote #1; use this as final wording:\n  """shorter"""\n- Drop #3.\n\nmake 2 a nitpick',
     )
   })
 
   it('ignores edits that match the original body', () => {
-    expect(feedbackMessage(drafts, { edits: { '2': { body: 'original 2' } }, summaryBodyEdit: '', instructions: '' })).toBe('')
+    expect(feedbackMessage(single, { edits: { '2': { body: 'original 2' } }, summaryBodyEdits: { [API]: '' }, instructions: '' })).toBe('')
   })
 
   it('lists a review body rewrite first', () => {
-    expect(feedbackMessage(drafts, { edits: { '3': { dropped: true } }, summaryBodyEdit: 'Looks close.', instructions: '' })).toBe(
+    expect(feedbackMessage(single, { edits: { '3': { dropped: true } }, summaryBodyEdits: { [API]: 'Looks close.' }, instructions: '' })).toBe(
       'Edits I made in Rally:\n- I rewrote the review body; use this as final wording:\n  """Looks close."""\n- Drop #3.',
     )
   })
 
   it('ignores comment edits that only change surrounding whitespace', () => {
-    expect(feedbackMessage(drafts, { edits: { '2': { body: 'original 2\n' } }, summaryBodyEdit: undefined, instructions: '' })).toBe('')
+    expect(feedbackMessage(single, { edits: { '2': { body: 'original 2\n' } }, summaryBodyEdits: {}, instructions: '' })).toBe('')
   })
 
   it('ignores whitespace typed where no review body was drafted', () => {
-    expect(feedbackMessage(drafts, { edits: {}, summaryBodyEdit: ' \n ', instructions: '' })).toBe('')
+    expect(feedbackMessage(single, { edits: {}, summaryBodyEdits: { [API]: ' \n ' }, instructions: '' })).toBe('')
   })
 
   describe('with a drafted review body', () => {
-    const withBody = { ...drafts, summaryBody: 'Nice work.' }
+    const withBody = withPrTags({ ...drafts, summaryBody: 'Nice work.' }, API)
 
     it('sends nothing when the body is untouched', () => {
-      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdit: undefined, instructions: '' })).toBe('')
+      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdits: {}, instructions: '' })).toBe('')
     })
 
     it('ignores an edit that only adds a trailing newline', () => {
-      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdit: 'Nice work.\n', instructions: '' })).toBe('')
+      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdits: { [API]: 'Nice work.\n' }, instructions: '' })).toBe('')
     })
 
     it('passes a rewrite as final wording', () => {
-      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdit: 'Nice work, one blocker.', instructions: '' })).toBe(
+      expect(feedbackMessage(withBody, { edits: {}, summaryBodyEdits: { [API]: 'Nice work, one blocker.' }, instructions: '' })).toBe(
         'Edits I made in Rally:\n- I rewrote the review body; use this as final wording:\n  """Nice work, one blocker."""',
       )
     })
   })
 
   it('asks to remove a review body cleared to whitespace', () => {
-    expect(feedbackMessage({ ...drafts, summaryBody: 'Nice work.' }, { edits: {}, summaryBodyEdit: '  ', instructions: '' })).toBe('Edits I made in Rally:\n- Remove the review body.')
+    expect(feedbackMessage(withPrTags({ ...drafts, summaryBody: 'Nice work.' }, API), { edits: {}, summaryBodyEdits: { [API]: '  ' }, instructions: '' })).toBe('Edits I made in Rally:\n- Remove the review body.')
   })
 })
 
@@ -96,7 +100,6 @@ describe('feedbackMessage for several PRs', () => {
   it('names the PR of each rewritten body and edited comment', () => {
     const message = feedbackMessage(unitDrafts, {
       edits: { '1': { body: 'shorter' }, '3': { dropped: true } },
-      summaryBodyEdit: undefined,
       summaryBodyEdits: { 'acme/api#1': 'API body', 'acme/web#2': '' },
       instructions: '',
     })
@@ -111,7 +114,7 @@ describe('pullChangesMessage', () => {
   const instruction = pullChangesInstruction(since)
 
   it('sends only the pull instruction when nothing is pending', () => {
-    expect(pullChangesMessage(drafts, { edits: {}, summaryBodyEdit: undefined, instructions: '  ' }, since)).toBe(instruction)
+    expect(pullChangesMessage(single, { edits: {}, summaryBodyEdits: {}, instructions: '  ' }, since)).toBe(instruction)
   })
 
   it('anchors the instruction to the given time and asks for every kind of change and a checkout of the new head', () => {
@@ -122,13 +125,13 @@ describe('pullChangesMessage', () => {
   })
 
   it('keeps pending edits before the pull instruction and typed feedback after it', () => {
-    expect(pullChangesMessage(drafts, { edits: { '3': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'make 2 a nitpick' }, since)).toBe(
+    expect(pullChangesMessage(single, { edits: { '3': { dropped: true } }, summaryBodyEdits: {}, instructions: 'make 2 a nitpick' }, since)).toBe(
       `Edits I made in Rally:\n- Drop #3.\n\n${instruction}\n\nmake 2 a nitpick`,
     )
   })
 
   it('ignores edits but keeps typed feedback when there are no drafts', () => {
-    expect(pullChangesMessage(null, { edits: { '1': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'also check CI' }, since)).toBe(
+    expect(pullChangesMessage(null, { edits: { '1': { dropped: true } }, summaryBodyEdits: {}, instructions: 'also check CI' }, since)).toBe(
       `${instruction}\n\nalso check CI`,
     )
   })
@@ -142,8 +145,8 @@ describe('pullChangesInstruction', () => {
 })
 
 describe('isEmptyCommentReview', () => {
-  const unchanged: DraftChanges = { edits: {}, summaryBodyEdit: undefined, instructions: '' }
-  const dropAll: DraftChanges = { ...unchanged, edits: { '1': { dropped: true }, '2': { dropped: true }, '3': { dropped: true } } }
+  const unchanged: PrChanges = { edits: {}, summaryBodyEdit: undefined }
+  const dropAll: PrChanges = { ...unchanged, edits: { '1': { dropped: true }, '2': { dropped: true }, '3': { dropped: true } } }
 
   it('is true for a Comment with every draft dropped, no body, and no instructions', () => {
     expect(isEmptyCommentReview('COMMENT', drafts, dropAll)).toBe(true)

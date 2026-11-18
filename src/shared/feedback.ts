@@ -9,10 +9,15 @@ export type DraftEdits = Record<string, DraftEdit>
 
 export interface DraftChanges {
   edits: DraftEdits
-  summaryBodyEdit: string | undefined
-  /** Review body rewrites per PR key, in a review of several linked PRs. */
-  summaryBodyEdits?: Record<string, string>
+  /** Review body rewrites keyed by PR key. */
+  summaryBodyEdits: Record<string, string>
   instructions: string
+}
+
+/** The user's changes that apply to one PR's share of the drafts. */
+export interface PrChanges {
+  edits: DraftEdits
+  summaryBodyEdit: string | undefined
 }
 
 export const EMPTY_COMMENT_REVIEW_ERROR =
@@ -33,22 +38,19 @@ function bodyEditLine(original: string, edit: string | undefined, subject: strin
   return edit.trim() ? rewriteLine(subject, edit) : `- Remove ${subject}.`
 }
 
-function describeEdits(drafts: Drafts | null, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdit' | 'summaryBodyEdits'>): string {
+function describeEdits(drafts: Drafts | null, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdits'>): string {
   if (!drafts) return ''
+  const reviews = drafts.prReviews ?? []
+  const unit = reviews.length > 1
   const lines: string[] = []
-  if (drafts.prReviews) {
-    for (const review of drafts.prReviews) {
-      const line = bodyEditLine(review.summaryBody, changes.summaryBodyEdits?.[review.prKey], `the review body for ${review.prKey}`)
-      if (line) lines.push(line)
-    }
-  } else {
-    const line = bodyEditLine(drafts.summaryBody, changes.summaryBodyEdit, 'the review body')
+  for (const review of reviews) {
+    const line = bodyEditLine(review.summaryBody, changes.summaryBodyEdits[review.prKey], unit ? `the review body for ${review.prKey}` : 'the review body')
     if (line) lines.push(line)
   }
   for (const comment of drafts.comments) {
     const edit = changes.edits[comment.id]
     if (!edit) continue
-    const subject = comment.prKey ? `#${comment.id} on ${comment.prKey}` : `#${comment.id}`
+    const subject = unit && comment.prKey ? `#${comment.id} on ${comment.prKey}` : `#${comment.id}`
     if (edit.dropped) lines.push(`- Drop ${subject}.`)
     else if (edit.body !== undefined && bodyEdited(comment.body, edit.body)) {
       lines.push(rewriteLine(subject, edit.body))
@@ -97,7 +99,7 @@ export function keptCommentCount(drafts: Drafts | null, edits: DraftEdits): numb
   return drafts ? keptComments(drafts, edits).length : 0
 }
 
-export function isEmptyCommentReview(event: ReviewEvent, drafts: Drafts, changes: DraftChanges): boolean {
+export function isEmptyCommentReview(event: ReviewEvent, drafts: Drafts, changes: PrChanges): boolean {
   const summaryBody = changes.summaryBodyEdit ?? drafts.summaryBody
   return event === 'COMMENT' && !summaryBody.trim() && keptCommentCount(drafts, changes.edits) === 0
 }
@@ -158,7 +160,7 @@ export type PostableReply = DraftComment & { kind: 'reply'; replyToCommentId: nu
 
 export const canPostReply = (comment: DraftComment): comment is PostableReply => comment.kind === 'reply' && comment.replyToCommentId !== null
 
-export function finalReview(drafts: Drafts, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdit'>): FinalReview {
+export function finalReview(drafts: Drafts, changes: PrChanges): FinalReview {
   const kept = keptComments(drafts, changes.edits)
   return {
     body: (changes.summaryBodyEdit ?? drafts.summaryBody).trim(),

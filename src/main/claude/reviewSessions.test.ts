@@ -5,10 +5,11 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_COMMENT_REVIEW_ERROR, SUBMIT_WITH_INSTRUCTIONS_ERROR, type DraftChanges } from '@shared/feedback'
 import type { DraftComment, Drafts, MemberVerdict, ReviewEvent, ReviewSession, SubmitEvent, SubmittedReview } from '@shared/types'
 import type { SubmitOptions } from '../github/submitReview'
+import { draftsForPr, withPrTags } from '@shared/unitDrafts'
 
 const SUBMITTED: SubmittedReview = { reviewId: 1, url: 'https://github.com/acme/api/pull/1#review-1', event: 'COMMENT' }
 
-const NO_CHANGES: DraftChanges = { edits: {}, summaryBodyEdit: undefined, instructions: '' }
+const NO_CHANGES: DraftChanges = { edits: {}, summaryBodyEdits: {}, instructions: '' }
 
 const THREAD_REPLY: DraftComment = {
   id: '1',
@@ -284,19 +285,19 @@ describe('submit', () => {
   })
 
   it('rejects a Comment review once the user drops every draft and clears the body', async () => {
-    const dropAll: DraftChanges = { edits: { '1': { dropped: true } }, summaryBodyEdit: '', instructions: '' }
+    const dropAll: DraftChanges = { edits: { '1': { dropped: true } }, summaryBodyEdits: { 'acme/api#12': '' }, instructions: '' }
     await expect(reviewSessions.submit('test-session-12', verdict(12, 'COMMENT'), dropAll, [])).rejects.toThrow(EMPTY_COMMENT_REVIEW_ERROR)
     expect(mocks.submitReview).not.toHaveBeenCalled()
   })
 
   it('posts the drafts with the user edits applied', async () => {
     mocks.submitReview.mockResolvedValue(SUBMITTED)
-    const changes: DraftChanges = { edits: { '1': { body: 'Rewritten.' } }, summaryBodyEdit: 'New body', instructions: '' }
+    const changes: DraftChanges = { edits: { '1': { body: 'Rewritten.' } }, summaryBodyEdits: { 'acme/api#12': 'New body' }, instructions: '' }
     await reviewSessions.submit('test-session-12', verdict(12, 'REQUEST_CHANGES'), changes, [])
     expect(mocks.submitReview).toHaveBeenCalledWith(
       expect.objectContaining({ owner: 'acme', repo: 'api', number: 12 }),
       'REQUEST_CHANGES',
-      { body: 'New body', inline: [], replies: [{ ...THREAD_REPLY, body: 'Rewritten.' }], folded: [] },
+      { body: 'New body', inline: [], replies: [{ ...THREAD_REPLY, body: 'Rewritten.', prKey: 'acme/api#12' }], folded: [] },
       expect.objectContaining({ attemptReviewId: null }),
     )
   })
@@ -379,6 +380,8 @@ describe('restoring sessions', () => {
     expect(session(56)).toMatchObject({ members: [storedSession(56).pr], memberSubmits: { 'acme/api#56': { submitted: SUBMITTED } } })
     expect(session(55).memberSubmits).toEqual({ 'acme/api#55': { submitted: null, attemptReviewId: 88 } })
     expect(session(55).submitAttemptReviewId).toBeUndefined()
+    expect(session(56).drafts?.prReviews).toEqual([{ prKey: 'acme/api#56', verdict: 'Looks good', summaryBody: 'Thanks for the fixes.' }])
+    expect(session(56).drafts?.priorConcerns.map((c) => c.prKey)).toEqual(['acme/api#56'])
   })
 
   it('reports the selection of a session saved mid-resolve after submit and clears the thread flags', () => {
@@ -420,7 +423,7 @@ describe('publishing drafts', () => {
     publishOnTurn(published)
     await reviewSessions.feedback('test-session-17', 'go')
     await vi.waitFor(() => expect(session(17).drafts?.comments[0].replyTarget).toEqual(TARGET))
-    expect(mocks.describeReplies).toHaveBeenCalledWith(expect.objectContaining({ number: 17 }), published)
+    expect(mocks.describeReplies).toHaveBeenCalledWith(expect.objectContaining({ number: 17 }), draftsForPr(withPrTags(published, 'acme/api#17'), 'acme/api#17'))
   })
 
   it('runs review turns sandboxed in the session folder, with only the user settings and no push URL rewrite', async () => {
@@ -445,7 +448,7 @@ describe('publishing drafts', () => {
     await vi.waitFor(() => expect(session(18).status).toBe('awaiting_feedback'))
     await vi.waitFor(() => expect(console.warn).toHaveBeenCalled())
     expect(console.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ sessionId: 'test-session-18', error: expect.any(Error) }))
-    expect(session(18).drafts).toEqual(published)
+    expect(session(18).drafts).toEqual(withPrTags(published, 'acme/api#18'))
   })
 
   it('drops a lookup that finishes after Claude published newer drafts', async () => {
@@ -455,10 +458,10 @@ describe('publishing drafts', () => {
     mocks.describeReplies.mockImplementationOnce(async (_pr, d: Drafts) => withTargets(d))
     publishOnTurn(first, second)
     await reviewSessions.feedback('test-session-20', 'go')
-    await vi.waitFor(() => expect(session(20).drafts).toEqual(withTargets(second)))
+    await vi.waitFor(() => expect(session(20).drafts).toEqual(withTargets(withPrTags(second, 'acme/api#20'))))
     finishFirst(withTargets(first))
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(session(20).drafts).toEqual(withTargets(second))
+    expect(session(20).drafts).toEqual(withTargets(withPrTags(second, 'acme/api#20')))
   })
 
   it('drops a late lookup when the newer drafts have no replies to look up', async () => {
@@ -470,7 +473,7 @@ describe('publishing drafts', () => {
     await vi.waitFor(() => expect(session(21).status).toBe('awaiting_feedback'))
     finishFirst(withTargets(first))
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(session(21).drafts).toEqual(second)
+    expect(session(21).drafts).toEqual(withPrTags(second, 'acme/api#21'))
     expect(mocks.describeReplies).toHaveBeenCalledTimes(1)
   })
 
@@ -632,7 +635,7 @@ describe('submitting a review of several PRs', () => {
   })
 
   it('checks every PR before anything posts', async () => {
-    const emptyWeb: DraftChanges = { edits: { '2': { dropped: true } }, summaryBodyEdit: undefined, summaryBodyEdits: { 'acme/web#2': '' }, instructions: '' }
+    const emptyWeb: DraftChanges = { edits: { '2': { dropped: true } }, summaryBodyEdits: { 'acme/web#2': '' }, instructions: '' }
     await expect(reviewSessions.submit('test-session-36', unitVerdicts(36, 'APPROVE', 'COMMENT'), emptyWeb, [])).rejects.toThrow(
       `acme/web#2: ${EMPTY_COMMENT_REVIEW_ERROR}`,
     )

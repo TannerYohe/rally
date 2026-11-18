@@ -33,6 +33,7 @@ import {
   unitDraftProblems,
   unpostedMembers,
   withMemberComments,
+  withPrTags,
 } from '@shared/unitDrafts'
 import { describeReplies, needsReplyTargets } from '../github/reviewComments'
 import { submitReview } from '../github/submitReview'
@@ -99,14 +100,14 @@ const INTERRUPTED_SUBMIT_ERROR =
 
 type StoredReviewSession = Omit<ReviewSession, 'members' | 'memberSubmits'> & Partial<Pick<ReviewSession, 'members' | 'memberSubmits'>>
 
-/** Gives a session saved by an older version its members and per-PR submit state, as a unit of one. */
+/** Gives a session saved by an older version its members, per-PR submit state, and PR-tagged drafts, as a unit of one. */
 function withUnitShape(stored: StoredReviewSession): ReviewSession {
   const { submitAttemptReviewId, ...session } = stored
   const memberSubmits = { ...(stored.memberSubmits ?? (stored.submitted ? { [stored.prKey]: { submitted: stored.submitted } } : {})) }
   if (submitAttemptReviewId !== undefined && !memberSubmits[stored.prKey]) {
     memberSubmits[stored.prKey] = { submitted: null, attemptReviewId: submitAttemptReviewId }
   }
-  return { ...session, members: stored.members ?? [stored.pr], memberSubmits }
+  return { ...session, members: stored.members ?? [stored.pr], memberSubmits, drafts: stored.drafts && withPrTags(stored.drafts, stored.prKey) }
 }
 
 function restoreSession(stored: ReviewSession): ReviewSession {
@@ -256,7 +257,10 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const members = sessionMembers(this.byId(sessionId))
     const mcpServer = createRallyServer(
       {
-        onDrafts: (drafts) => {
+        onDrafts: (published) => {
+          const session = this.find(sessionId)
+          if (!session) return
+          const drafts = withPrTags(published, session.prKey)
           this.patch(sessionId, () => ({ drafts }), true)
           void this.lookUpReplyTargets(sessionId, drafts)
         },

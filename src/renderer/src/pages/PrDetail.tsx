@@ -193,9 +193,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
   const prOf = (member: PrRef) => memberPrs.find((pr) => keyOf(pr) === keyOf(member))
   const postedOf = (member: PrRef) => memberPosted(session, keyOf(member))
   const partlyPosted = isPartlyPosted(session)
-  const changes: DraftChanges = unit
-    ? { edits, summaryBodyEdit: undefined, summaryBodyEdits: summaryEdits, instructions: feedback }
-    : { edits, summaryBodyEdit: summaryEdits[session.prKey], instructions: feedback }
+  const changes: DraftChanges = { edits, summaryBodyEdits: summaryEdits, instructions: feedback }
   const message = feedbackMessage(drafts, changes)
   const keptComments = keptCommentCount(drafts, edits)
   const lastSuccessfulTurnAt = lastSuccessfulTurnStartedAt(session)
@@ -341,7 +339,7 @@ function ReviewPanel({ session, memberPrs, needsRereview, prUpdatedAt, onDiscard
         ) : (
           drafts && (
             <div className="space-y-3">
-              {drafts.prReviews && (
+              {unit && drafts.prReviews && (
                 <ul className="space-y-1 text-sm">
                   {members.map((member) => (
                     <li key={keyOf(member)} className="flex items-center gap-2">

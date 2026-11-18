@@ -5,7 +5,7 @@ import type { AuthorSession, FeedbackItem } from '@shared/types'
 const item = (id: string, kind: FeedbackItem['kind'] = 'thread') => feedbackItem(id, { kind, line: 1, url: null, comments: [], reactionSubjectId: null })
 const response = (itemId: string, reply: string) => itemResponse(itemId, reply)
 const session = (overrides: Partial<AuthorSession> = {}) => authorSession(1, overrides)
-import { feedbackRows, replyPosts, splitWaitingRows } from './authorView'
+import { actionRequests, feedbackRows, replyPosts, splitWaitingRows } from './authorView'
 
 describe('feedbackRows', () => {
   it('keeps closed items only while they have an unposted reply, and lists findings last', () => {
@@ -28,6 +28,18 @@ describe('feedbackRows with findings', () => {
     const finding = item('self-1', 'finding')
     const s = session({ items: [finding], responses: { 'self-1': response('self-1', 'Fixed') }, selfReview: { verdict: '', reportMarkdown: '', findings: [finding] } })
     expect(feedbackRows([], s).map((r) => [r.item.id, r.closedOnGithub])).toEqual([['self-1', false]])
+  })
+})
+
+describe('actionRequests', () => {
+  it('sends picks only for listed comments that are still open on GitHub', () => {
+    const s = session({
+      items: [item('open'), item('closedPending')],
+      responses: { closedPending: response('closedPending', 'b') },
+    })
+    const rows = feedbackRows([item('open')], s)
+    const picks = { open: { action: 'fix' as const, note: 'n' }, closedPending: { action: 'fix' as const, note: '' }, 'self-dismissed': { action: 'fix' as const, note: '' } }
+    expect(actionRequests(picks, rows)).toEqual([{ itemId: 'open', action: 'fix', note: 'n' }])
   })
 })
 

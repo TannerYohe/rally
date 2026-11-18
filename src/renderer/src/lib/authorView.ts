@@ -1,5 +1,5 @@
 import { canReplyTo, isReplyPending, pendingReplies } from '@shared/authorSession'
-import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, SessionStatus } from '@shared/types'
+import type { ActionRequest, AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, SessionStatus } from '@shared/types'
 
 export interface FeedbackRow {
   item: FeedbackItem
@@ -25,6 +25,14 @@ export function feedbackRows(open: FeedbackItem[], session: SessionView | null):
   const pendingIds = new Set(pendingReplies(session).map((r) => r.itemId))
   const closed = session.items.filter((item) => canReplyTo(item) && !openIds.has(item.id) && pendingIds.has(item.id))
   return [...open.map((item) => row(item, false)), ...closed.map((item) => row(item, true)), ...(session.selfReview?.findings ?? []).map((item) => row(item, false))]
+}
+
+/** Returns the picked actions Run sends, skipping picks on comments that are gone from the list or closed on GitHub. */
+export function actionRequests(picks: Record<string, Omit<ActionRequest, 'itemId'>>, rows: FeedbackRow[]): ActionRequest[] {
+  const actionable = new Set(rows.filter((row) => !row.closedOnGithub).map((row) => row.item.id))
+  return Object.entries(picks)
+    .filter(([itemId]) => actionable.has(itemId))
+    .map(([itemId, pick]) => ({ itemId, action: pick.action, note: pick.note }))
 }
 
 export interface SplitRows {

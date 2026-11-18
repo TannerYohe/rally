@@ -138,12 +138,12 @@ Reviewers resolve their own threads, so a comment counts as answered once you ac
 
 - A review thread is acknowledged while its latest comment is yours or carries your reaction. It stays listed until it's resolved.
 - A PR comment or review body is acknowledged once you react to it or a comment of yours links to it. Rally's replies always link to it.
-- Empty review bodies, hidden comments, and PR comments and review bodies from bots don't need a response. Review threads from bots, such as code scanning alerts, do.
+- Approval review bodies, empty review bodies, hidden comments, and PR comments and review bodies from bots don't need a response. Review threads from bots, such as code scanning alerts, do.
 
 | Phase | Rule |
 |---|---|
 | In progress | Your Rally session for the PR has a running turn, an error, unpushed commits, unposted replies, or a description update to push. |
-| Needs response | A review thread, PR comment, or review body isn't acknowledged, or a self-review finding is still open. This outranks Approved. |
+| Needs response | A review thread, PR comment, or non-approval review body isn't acknowledged, or a self-review finding is still open. This outranks Approved. |
 | Awaiting reviews | Anything else that isn't approved, including a change request whose comments you've all acknowledged. |
 | Approved | GitHub's review decision is Approved, or, in a repo that requires no reviews, a reviewer approved. |
 

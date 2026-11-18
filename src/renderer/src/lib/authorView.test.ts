@@ -32,14 +32,22 @@ describe('feedbackRows with findings', () => {
 })
 
 describe('actionRequests', () => {
-  it('sends picks only for listed comments that are still open on GitHub', () => {
+  it('sends picks on open comments and listed findings, and skips closed comments and dismissed findings', () => {
     const s = session({
       items: [item('open'), item('closedPending')],
       responses: { closedPending: response('closedPending', 'b') },
+      selfReview: { verdict: '', reportMarkdown: '', findings: [item('self-1', 'finding')] },
     })
-    const rows = feedbackRows([item('open')], s)
-    const picks = { open: { action: 'fix' as const, note: 'n' }, closedPending: { action: 'fix' as const, note: '' }, 'self-dismissed': { action: 'fix' as const, note: '' } }
-    expect(actionRequests(picks, rows)).toEqual([{ itemId: 'open', action: 'fix', note: 'n' }])
+    const picks = {
+      open: { action: 'fix' as const, note: 'n' },
+      closedPending: { action: 'fix' as const, note: '' },
+      'self-1': { action: 'investigate' as const, note: '' },
+      'self-2': { action: 'fix' as const, note: '' },
+    }
+    expect(actionRequests(picks, [item('open')], s)).toEqual([
+      { itemId: 'open', action: 'fix', note: 'n' },
+      { itemId: 'self-1', action: 'investigate', note: '' },
+    ])
   })
 })
 

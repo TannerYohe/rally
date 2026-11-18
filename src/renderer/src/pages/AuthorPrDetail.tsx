@@ -59,7 +59,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
 
   const rows = feedbackRows(feedback.items, session)
   const { open: openRows, waiting: waitingRows } = splitWaitingRows(rows)
-  const requests = actionRequests(picks, rows)
+  const requests = actionRequests(picks, feedback.items, session)
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
   const unpushed = session?.commits.length ?? 0
   const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null

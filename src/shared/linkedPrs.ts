@@ -105,8 +105,8 @@ function nextNonBlank(lines: string[], index: number): number {
   return index
 }
 
-/** Returns the PR references on a marker's line and in the block below it, and the index of the first line after the block; the block runs to the next heading or blank line, and a heading's block runs past a blank line until it has a reference and the next line doesn't continue a list. */
-function markedBlock(lines: string[], start: number, marker: MarkerLine): { refs: PrCoords[]; end: number } {
+/** Returns the PR references on a marker's line and in the block below it, and the index of the first line after the block; the block runs to the next heading or blank line, runs past the blank lines after an empty Label: marker inside it, and under a heading runs past a blank line until it has a reference and the next line doesn't continue a list. */
+function markedBlock(lines: string[], start: number, marker: MarkerLine, markers: string[]): { refs: PrCoords[]; end: number } {
   const refs = prRefsIn(lines[start])
   let index = marker.hasText ? start + 1 : nextNonBlank(lines, start + 1)
   while (index < lines.length) {
@@ -120,7 +120,8 @@ function markedBlock(lines: string[], start: number, marker: MarkerLine): { refs
       continue
     }
     refs.push(...prRefsIn(line))
-    index++
+    const nested = markerLine(line, markers)
+    index = nested?.kind === 'label' && !nested.hasText ? nextNonBlank(lines, index + 1) : index + 1
   }
   return { refs, end: index }
 }
@@ -136,7 +137,7 @@ export function parseLinkedPrs(body: string, self: PrCoords, markers: string[]):
       index++
       continue
     }
-    const block = markedBlock(lines, index, marker)
+    const block = markedBlock(lines, index, marker, markers)
     for (const ref of block.refs) {
       if (isSameRepo(ref, self) || targets.some((t) => isSamePr(t, ref))) continue
       targets.push(ref)

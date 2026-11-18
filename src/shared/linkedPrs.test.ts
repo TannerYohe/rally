@@ -63,6 +63,12 @@ describe('parseLinkedPrs', () => {
     expect(Date.now() - started).toBeLessThan(500)
   })
 
+  it('reads past the blank line after an empty Label: marker inside another marker block', () => {
+    expect(parse('Related PRs: acme/web#3\nDepends on:\n\nacme/worker#4').map((r) => r.repo)).toEqual(['web', 'worker'])
+    expect(parse('## Related PRs\n- acme/web#3\nDepends on:\n\nacme/worker#4').map((r) => r.repo)).toEqual(['web', 'worker'])
+    expect(parse('## Related PRs\n- acme/web#3\n\n- Depends on:\n\n  acme/worker#4').map((r) => r.repo)).toEqual(['web', 'worker'])
+  })
+
   it('parses a long run of marker lines in linear time', () => {
     const started = Date.now()
     parse('related PR: acme/web#3\n'.repeat(3000) + 'Related PR:\n'.repeat(3000))

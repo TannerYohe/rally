@@ -83,6 +83,29 @@ describe('feedbackMessage', () => {
   })
 })
 
+describe('feedbackMessage for several PRs', () => {
+  const unitDrafts: Drafts = {
+    ...drafts,
+    comments: drafts.comments.map((c, i) => ({ ...c, prKey: i === 0 ? 'acme/api#1' : 'acme/web#2' })),
+    prReviews: [
+      { prKey: 'acme/api#1', verdict: 'Looks good', summaryBody: 'API body' },
+      { prKey: 'acme/web#2', verdict: 'Needs changes', summaryBody: 'Web body' },
+    ],
+  }
+
+  it('names the PR of each rewritten body and edited comment', () => {
+    const message = feedbackMessage(unitDrafts, {
+      edits: { '1': { body: 'shorter' }, '3': { dropped: true } },
+      summaryBodyEdit: undefined,
+      summaryBodyEdits: { 'acme/api#1': 'API body', 'acme/web#2': '' },
+      instructions: '',
+    })
+    expect(message).toBe(
+      'Edits I made in Rally:\n- Remove the review body for acme/web#2.\n- I rewrote #1 on acme/api#1; use this as final wording:\n  """shorter"""\n- Drop #3 on acme/web#2.',
+    )
+  })
+})
+
 describe('pullChangesMessage', () => {
   const since = '2026-11-04T19:00:00.000Z'
   const instruction = pullChangesInstruction(since)
@@ -108,6 +131,13 @@ describe('pullChangesMessage', () => {
     expect(pullChangesMessage(null, { edits: { '1': { dropped: true } }, summaryBodyEdit: undefined, instructions: 'also check CI' }, since)).toBe(
       `${instruction}\n\nalso check CI`,
     )
+  })
+})
+
+describe('pullChangesInstruction', () => {
+  it('asks about each PR when the review covers several', () => {
+    expect(pullChangesInstruction('2026-11-01T00:00:00Z', 2)).toMatch(/^Pull in everything that changed on each of the 2 PRs since 2026-11-01T00:00:00Z/)
+    expect(pullChangesInstruction('2026-11-01T00:00:00Z', 2)).toContain('what changed on each PR')
   })
 })
 

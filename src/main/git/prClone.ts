@@ -44,13 +44,16 @@ export interface CloneSource {
   baseBranch: string
 }
 
+/** Returns whether the PR's head branch lives in a different repo from its base. */
+export const isForkSource = (source: CloneSource) => source.headUrl !== source.baseUrl
+
 /** Clones the PR's head branch into `<dir>/repo` and fetches its base branch. Rally passes gh's credentials on each network command. */
 export async function cloneBranch(dir: string, source: CloneSource): Promise<CloneInfo> {
   const path = join(dir, CLONE_DIR_NAME)
   await mkdir(dir, { recursive: true })
   await rm(path, { recursive: true, force: true })
   await git(dir, ['clone', '--filter=blob:none', '--single-branch', '--branch', source.branch, source.headUrl, path], CLONE_TIMEOUT_MS)
-  const baseRemote = source.baseUrl === source.headUrl ? 'origin' : 'upstream'
+  const baseRemote = isForkSource(source) ? 'upstream' : 'origin'
   if (baseRemote === 'upstream') await git(path, ['remote', 'add', 'upstream', source.baseUrl])
   await git(path, ['fetch', baseRemote, trackingRefspec(baseRemote, source.baseBranch)], NETWORK_TIMEOUT_MS)
   return { path, branch: source.branch, baseRef: `${baseRemote}/${source.baseBranch}`, syncedHead: await revParse(path, 'HEAD'), kind: 'temp_clone' }

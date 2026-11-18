@@ -32,6 +32,7 @@ import {
   localCommits,
   MergeConflictError,
   integrateRemote,
+  isForkSource,
   pushClone,
   syncClone,
   syncWorktree,
@@ -653,7 +654,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const tempClone = held && !isWorktree(held) ? held : null
     const source = await fetchCloneSource(pr)
     const repo = `${pr.owner}/${pr.repo}`
-    const fork = source.headUrl !== source.baseUrl
+    const fork = isForkSource(source)
     const worktree = fork
       ? null
       : await checkoutWorktree(configFile.get().localRepoFolders, { repo, branch: source.branch, baseBranch: source.baseBranch }, clone?.path).catch((error: unknown) => {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
-import { authorSession as stored, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
+import { authorSession as stored, descriptionDraft, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
 import type { AuthorSession, Drafts, FeedbackItem } from '@shared/types'
 import type { AuthorToolHandlers } from './authorTools'
 import { UncommittedChangesError } from '../git/prClone'
@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   fetchCloneSource: vi.fn(),
   postAuthorReply: vi.fn(),
   resolveFeedbackThread: vi.fn(),
+  fetchDescription: vi.fn(),
+  updateDescription: vi.fn(),
   cloneBranch: vi.fn(),
   syncClone: vi.fn(),
   localCommits: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock('../github/authorReplies', () => ({
   postAuthorReply: mocks.postAuthorReply,
   resolveFeedbackThread: mocks.resolveFeedbackThread,
 }))
+vi.mock('../github/prDescription', () => ({ fetchDescription: mocks.fetchDescription, updateDescription: mocks.updateDescription }))
 vi.mock('../git/prClone', async (importOriginal) => ({
   MergeConflictError: (await importOriginal<typeof import('../git/prClone')>()).MergeConflictError,
   UncommittedChangesError: (await importOriginal<typeof import('../git/prClone')>()).UncommittedChangesError,
@@ -79,11 +82,18 @@ vi.mock('./modelOptions', () => ({ reviewModelOptions: () => ({}) }))
 vi.mock('./timeline', () => ({ reduceTimeline: (timeline: unknown) => timeline, closeOpenEntries: (timeline: unknown) => timeline }))
 vi.mock('./authorTools', () => ({
   PUBLISH_RESPONSES_TOOL: 'mcp__rally__publish_responses',
+  PUBLISH_DESCRIPTION_TOOL: 'mcp__rally__publish_description',
   createAuthorServer: (handlers: AuthorToolHandlers) => {
     mocks.handlers = handlers
     return {}
   },
 }))
+
+/** Returns a stored session saved before sessions had description fields. */
+function legacySession(number: number): AuthorSession {
+  const { description: _description, descriptionUpdatedAt: _updatedAt, ...rest } = stored(number)
+  return rest as AuthorSession
+}
 
 mocks.stored = [
   stored(1, { status: 'running' }),
@@ -149,6 +159,36 @@ mocks.stored = [
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
     selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }] },
   }),
+  stored(32, {
+    items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }],
+    responses: { T1: response('T1', 'Done'), 'self-1': response('self-1', '', { action: 'push_back', summary: 'Intended' }) },
+    selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }] },
+  }),
+  stored(60, { description: descriptionDraft() }),
+  stored(61, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: descriptionDraft(),
+  }),
+  stored(62, { description: descriptionDraft() }),
+  stored(66, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: descriptionDraft(),
+  }),
+  stored(67, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: descriptionDraft(),
+  }),
+  stored(68, { description: descriptionDraft(), status: 'error', error: 'Rally couldn\'t update the PR description: timeout' }),
+  stored(69, { description: descriptionDraft(), status: 'error', error: 'The Claude turn ended with an error.' }),
+  stored(72, { description: descriptionDraft(), status: 'error', error: "The commits are pushed. Rally couldn't update the PR description: Not Found" }),
+  legacySession(70),
+  stored(71),
+  stored(63),
+  stored(64),
+  stored(65),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
   stored(54, {
     selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-r-1'), kind: 'finding' }, { ...thread('self-r-2'), kind: 'finding' }] },
@@ -183,6 +223,8 @@ beforeEach(() => {
     mocks.discardUncommitted,
     mocks.requestReview,
     mocks.acknowledgeFeedbackItem,
+    mocks.fetchDescription,
+    mocks.updateDescription,
   ])
     mock.mockReset()
   mocks.fetchApprovers.mockResolvedValue([])
@@ -236,7 +278,7 @@ describe('runActions', () => {
     expect(mocks.commitFiles).toHaveBeenCalledWith(CLONE, ['a.ts'], 'Rename the helper')
     expect(session(20).responses.T1).toMatchObject({ pendingCommit: false, commits: ['def4567890'], reply: 'Renamed in def4567.', commitError: null })
     expect(session(20).commits).toEqual([{ oid: 'def4567890', subject: 'Rename the helper' }])
-    expect(authorSessions.sessionState('acme/api#20')).toEqual({ status: 'awaiting_feedback', active: true })
+    expect(authorSessions.sessionState('acme/api#20')).toEqual({ status: 'awaiting_feedback', active: true, openFindings: 0 })
   })
 
   it('refuses items that are no longer open on GitHub without starting a turn', async () => {
@@ -248,7 +290,7 @@ describe('runActions', () => {
 
   it('accepts listed findings and refuses dismissed ones', async () => {
     mocks.fetchFeedbackItems.mockResolvedValue([thread('T1')])
-    authorSessions.dismissFinding(session(54).id, 'self-r-2')
+    authorSessions.clearFindings(session(54).id, ['self-r-2'])
     await expect(authorSessions.runActions(pr(54), [{ itemId: 'self-r-2', action: 'fix', note: '' }], '')).rejects.toThrow('resolved or removed')
     expect(mocks.query).not.toHaveBeenCalled()
 
@@ -578,7 +620,7 @@ describe('self-review', () => {
     comments: [{ id: '1', kind: 'inline', path: 'a.ts', line: 4, startLine: null, side: 'RIGHT', severity: 'high', body: 'Null check', replyToCommentId: null }],
   }
 
-  it('turns published drafts into private findings that can be dismissed', async () => {
+  it('turns published drafts into private findings that can be cleared', async () => {
     finishTurn(() => mocks.handlers!.onSelfReview(drafts))
     await authorSessions.selfReview(pr(30))
     await vi.waitFor(() => expect(session(30).status).toBe('awaiting_feedback'))
@@ -587,8 +629,18 @@ describe('self-review', () => {
     const findingId = session(30).selfReview!.findings[0].id
     expect(findingId).toMatch(/^self-.+-1$/)
 
-    authorSessions.dismissFinding(session(30).id, findingId)
+    expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ active: false, openFindings: 1 })
+
+    authorSessions.clearFindings(session(30).id, [findingId])
     expect(session(30).selfReview?.findings).toEqual([])
+    expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ openFindings: 0 })
+  })
+
+  it('resolves handled findings with their responses, leaving reviewer comments alone', () => {
+    authorSessions.clearFindings(session(32).id, ['self-1', 'T1'])
+    expect(session(32).items.map((i) => i.id)).toEqual(['T1', 'self-2'])
+    expect(Object.keys(session(32).responses)).toEqual(['T1'])
+    expect(session(32).selfReview?.findings.map((f) => f.id)).toEqual(['self-2'])
   })
 
   it('drops the earlier self-review findings and their responses, and gives the new findings new ids, when a new one publishes', async () => {
@@ -609,6 +661,123 @@ describe('self-review', () => {
 
   it('maps draft comments to findings with ids scoped to the review', () => {
     expect(findingsFromDrafts(drafts, 'r1', 'now')[0]).toMatchObject({ id: 'self-r1-1', path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
+  })
+})
+
+describe('description updates', () => {
+  it('saves a proposed description with GitHub\'s current one as its base', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body\r\n' })
+    finishTurn()
+    await authorSessions.feedback(session(63).id, 'update the description')
+    await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
+
+    expect(await mocks.handlers!.onDescription({ title: ' Fix the bug ', body: 'New body\n' })).toContain('saved')
+    expect(session(63).description).toMatchObject({ title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body\r\n' } })
+    expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: true })
+    expect(await mocks.handlers!.onDescription({ title: 'Fix', body: 'Old body\n' })).toContain('nothing to update')
+    expect(session(63).description).toBeNull()
+    expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: false })
+  })
+
+  it('logs and reports a proposal Rally couldn\'t compare with GitHub', async () => {
+    mocks.fetchDescription.mockRejectedValue(new Error('Not Found'))
+    finishTurn()
+    await authorSessions.feedback(session(71).id, 'update the description')
+    await vi.waitFor(() => expect(session(71).status).toBe('awaiting_feedback'))
+    await expect(mocks.handlers!.onDescription({ title: 'Fix the bug', body: 'New body' })).rejects.toThrow('Not Found')
+    expect(console.error).toHaveBeenCalledWith('Reading the PR description for a proposed update failed', expect.objectContaining({ pr: pr(71).url }))
+    expect(session(71).description).toBeNull()
+  })
+
+  it('asks Claude to update the description from the clone, quoting the current one', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body\nSecond line' })
+    finishTurn()
+    await authorSessions.draftDescription(pr(64))
+    await vi.waitFor(() => expect(session(64).status).toBe('awaiting_feedback'))
+    const prompt = mocks.query.mock.calls[0][0].prompt as string
+    expect(prompt).toContain('Current title: Fix')
+    expect(prompt).toContain('> Old body\n> Second line')
+    expect(prompt).toContain(`checked out at ${CLONE.path}`)
+  })
+
+  it("doesn't start a turn when reading the current description fails", async () => {
+    mocks.fetchDescription.mockRejectedValue(new Error('Not Found'))
+    await expect(authorSessions.draftDescription(pr(65))).rejects.toThrow('Not Found')
+    expect(mocks.query).not.toHaveBeenCalled()
+  })
+
+  it('updates GitHub with the author\'s edit and clears the draft', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    await authorSessions.push('author-60', { title: 'Fix the bug ', body: 'Edited body' })
+    expect(mocks.updateDescription).toHaveBeenCalledWith(pr(60), { title: 'Fix the bug', body: 'Edited body' })
+    expect(session(60)).toMatchObject({ status: 'awaiting_feedback', description: null, descriptionUpdatedAt: expect.any(String) })
+    expect(mocks.pushClone).not.toHaveBeenCalled()
+    expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 60)
+  })
+
+  it('pushes commits before updating the description', async () => {
+    const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: CLONE })
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    mocks.updateDescription.mockImplementation(async () => expect(mocks.pushClone).toHaveBeenCalled())
+    await authorSessions.push('author-61')
+    expect(mocks.updateDescription).toHaveBeenCalledWith(pr(61), { title: 'Fix the bug', body: 'New body' })
+    expect(session(61)).toMatchObject({ status: 'awaiting_feedback', commits: [], description: null })
+  })
+
+  it('keeps pushed commits and the draft when the description update fails after them', async () => {
+    const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: CLONE })
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    mocks.updateDescription.mockRejectedValue(new Error('Not Found'))
+    await expect(authorSessions.push('author-66')).rejects.toThrow("The commits are pushed. Rally couldn't update the PR description: Not Found")
+    expect(session(66)).toMatchObject({ status: 'error', commits: [], lastPush, description: { title: 'Fix the bug' } })
+    expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 66)
+  })
+
+  it('leaves the description update for later when the merge conflicts', async () => {
+    mocks.integrateRemote.mockRejectedValue(new MergeConflictError('feature', ['a.ts']))
+    mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
+    finishTurn()
+    await authorSessions.push('author-67')
+    expect(session(67)).toMatchObject({ mergeConflicts: ['a.ts'], description: { title: 'Fix the bug' } })
+    expect(mocks.fetchDescription).not.toHaveBeenCalled()
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(mocks.refreshOne).not.toHaveBeenCalled()
+  })
+
+  it('restores a session saved before description updates with none pending', () => {
+    expect(session(70)).toMatchObject({ description: null, descriptionUpdatedAt: null })
+    expect(authorSessions.sessionState('acme/api#70')).toMatchObject({ active: false })
+  })
+
+  it('clears a draft GitHub already has without updating it again', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix the bug', body: 'New body\r\n' })
+    await authorSessions.push('author-68')
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(session(68)).toMatchObject({ status: 'awaiting_feedback', error: null, description: null, descriptionUpdatedAt: expect.any(String) })
+  })
+
+  it('refuses to overwrite a description that changed on GitHub, keeping the draft', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Someone edited this' })
+    await expect(authorSessions.push('author-62')).rejects.toThrow('changed on GitHub')
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(session(62)).toMatchObject({ status: 'error', description: { title: 'Fix the bug' } })
+
+    await expect(authorSessions.push('author-62', { title: ' ', body: 'x' })).rejects.toThrow("title can't be empty")
+    authorSessions.discardDescription('author-62')
+    expect(session(62)).toMatchObject({ description: null, status: 'awaiting_feedback', error: null })
+    await expect(authorSessions.push('author-62')).rejects.toThrow('no commits or description update')
+  })
+
+  it('keeps an error the description update didn\'t cause when discarding it', () => {
+    authorSessions.discardDescription('author-69')
+    expect(session(69)).toMatchObject({ description: null, status: 'error', error: 'The Claude turn ended with an error.' })
+  })
+
+  it('clears a failed description request\'s error, after commits, when discarding it', () => {
+    authorSessions.discardDescription('author-72')
+    expect(session(72)).toMatchObject({ description: null, status: 'awaiting_feedback', error: null })
   })
 })
 

@@ -88,6 +88,8 @@ export interface Pr {
   feedback: PrFeedback | null
   phase: Phase
   reviewStatus: SessionStatus | null
+  /** Self-review findings not yet resolved or dismissed; always 0 for PRs you review. */
+  openFindings: number
   summary: string | null
   summaryError: string | null
   hidden: PrHide | null
@@ -277,7 +279,7 @@ export interface Drafts {
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
 
-export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review' | 'resolve_merge'
+export type TurnMode = 'review' | 'refine' | 'respond' | 'self_review' | 'resolve_merge' | 'describe'
 
 export type TimelineEntry =
   | { kind: 'user'; id: string; text: string; at: string; turn?: TurnMode }
@@ -457,6 +459,17 @@ export interface ReviewReRequest {
   error: string | null
 }
 
+export interface PrDescription {
+  title: string
+  body: string
+}
+
+/** A title and description Claude proposed for the PR, and what GitHub had when it proposed them. */
+export interface DescriptionDraft extends PrDescription {
+  base: PrDescription
+  at: string
+}
+
 export interface SelfReview {
   verdict: string
   reportMarkdown: string
@@ -477,6 +490,9 @@ export interface AuthorSession extends SessionCore {
   /** Reviewers I replied to whose review Rally re-requests once none of their comments are left unanswered. */
   reviewersToReRequest: string[]
   lastReRequest: ReviewReRequest | null
+  /** A description update waiting for the author to push it to GitHub. */
+  description: DescriptionDraft | null
+  descriptionUpdatedAt: string | null
 }
 
 export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {

@@ -13,7 +13,7 @@ export interface FeedbackRow {
   closedOnGithub: boolean
 }
 
-export const NO_CHANGES_MESSAGE = 'Nothing to commit or push. Pick Fix on a comment, or message Claude, to change the code.'
+export const NO_CHANGES_MESSAGE = 'Nothing to commit or push. Pick Fix on a comment, or message Claude, to change the code. Update description has Claude bring the PR description up to date.'
 
 type SessionView = Pick<AuthorSession, 'items' | 'responses' | 'posted' | 'selfReview'>
 

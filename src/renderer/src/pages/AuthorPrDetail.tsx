@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { canPush, cloneChangeCount, committableFiles, PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
-import { prKey, type AuthorSession, type PrRef } from '@shared/types'
+import { canPush, committableFiles, handledFindingIds, pendingChangeCount, PUSH_BEFORE_POSTING_ERROR, sameDescription } from '@shared/authorSession'
+import { prKey, type AuthorSession, type PrDescription, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
 import { FeedbackCard } from '../components/FeedbackCard'
@@ -50,11 +50,13 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const [resolve, setResolve] = useState<Record<string, boolean>>({})
   const [message, setMessage] = useState('')
   const [reRequestReviews, setReRequestReviews] = useState(true)
+  const [descriptionEdit, setDescriptionEdit] = useState<PrDescription | null>(null)
   const { error: actionError, run } = useActionRunner()
   const [chosenTab, setChosenTab] = useState<AuthorTab | null>(null)
 
   const busy = session !== null && BUSY_STATUSES.includes(session.status)
   useEffect(() => setChosenTab(null), [busy])
+  useEffect(() => setDescriptionEdit(null), [session?.description?.at])
   const tab = chosenTab ?? (busy ? 'activity' : 'feedback')
 
   const rows = feedbackRows(feedback.items, session)
@@ -63,9 +65,10 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const posts = session ? replyPosts(session, replyEdits, resolve) : []
   const unpushed = session?.commits.length ?? 0
   const postBlocked = unpushed > 0 ? PUSH_BEFORE_POSTING_ERROR : null
-  const changeCount = session ? cloneChangeCount(session) : 0
+  const changeCount = session ? pendingChangeCount(session) : 0
   const leftBehind = session ? committableFiles(session).length : 0
   const repliesLabel = plural(posts.length, 'reply', 'replies')
+  const handledFindings = session ? handledFindingIds(session) : []
 
   const runActions = () =>
     run(async () => {
@@ -82,7 +85,12 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const primary = () => (requests.length > 0 ? runActions() : sendMessage(message))
   const canRunPrimary = !busy && (requests.length > 0 || (session !== null && Boolean(message.trim())))
   const selfReview = () => run(async () => onSession(await window.rally.startSelfReview(prRef)))
-  const push = () => session && run(() => window.rally.pushAuthorCommits(session.id))
+  const draftDescription = () => run(async () => onSession(await window.rally.draftDescription(prRef)))
+  const editDescription = (edit: PrDescription | null) =>
+    setDescriptionEdit(edit && session?.description && sameDescription(edit, session.description) ? null : edit)
+  const push = () => session && run(() => window.rally.pushAuthorChanges(session.id, session.description ? descriptionEdit : null))
+  const pushFromFeedback = () =>
+    (!session?.description || window.confirm(`Push ${plural(unpushed, 'commit')} and update the PR title and description on GitHub as you? The Changes tab shows the update.`)) && push()
   const postReplies = () => {
     if (!session || !window.confirm(`Post ${repliesLabel} to GitHub as you?`)) return
     void run(async () => {
@@ -92,26 +100,25 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
       feedback.reload()
     })
   }
+  const dropPicks = (itemIds: string[]) => setPicks((current) => Object.fromEntries(Object.entries(current).filter(([itemId]) => !itemIds.includes(itemId))))
+  const clearFindings = (itemIds: string[]) =>
+    session &&
+    run(async () => {
+      await window.rally.clearFindings(session.id, itemIds)
+      dropPicks(itemIds)
+    })
   const acknowledge = (itemId: string) =>
     run(async () => {
       await window.rally.acknowledgeFeedback(prRef, itemId)
       feedback.reload()
     })
   const startOver = () => {
-    if (!session || !window.confirm('Discard this session, its clone, unpushed commits, and unposted replies?')) return
+    if (!session || !window.confirm('Discard this session, its clone, unpushed commits, unposted replies, and description update?')) return
     void run(async () => {
       await window.rally.discardAuthorSession(session.id)
       onSession(null)
     })
   }
-
-  const dropPick = (id: string) => setPicks(({ [id]: _removed, ...rest }) => rest)
-  const dismiss = (id: string) =>
-    session &&
-    run(async () => {
-      await window.rally.dismissFinding(session.id, id)
-      dropPick(id)
-    })
 
   const card = (row: FeedbackRow) => {
     const id = row.item.id
@@ -123,11 +130,11 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
         replyEdit={replyEdits[id]}
         resolve={resolve[id] ?? false}
         disabled={busy}
-        onPick={(pick) => (pick ? setPicks((current) => ({ ...current, [id]: pick })) : dropPick(id))}
+        onPick={(pick) => (pick ? setPicks((current) => ({ ...current, [id]: pick })) : dropPicks([id]))}
         onReplyEdit={(body) => setReplyEdits(({ [id]: _removed, ...rest }) => (body === undefined ? rest : { ...rest, [id]: body }))}
         onResolve={(value) => setResolve((current) => ({ ...current, [id]: value }))}
         onDropReply={() => session && run(() => window.rally.discardAuthorReply(session.id, id))}
-        onDismiss={() => dismiss(id)}
+        onClearFinding={() => clearFindings([id])}
         onAcknowledge={() => acknowledge(id)}
       />
     )
@@ -146,7 +153,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
   const empty: Record<AuthorTab, boolean> = {
     feedback: rows.length === 0,
     activity: !session || session.timeline.length === 0,
-    changes: !session || (changeCount === 0 && !session.lastPush),
+    changes: !session || (changeCount === 0 && !session.lastPush && !session.descriptionUpdatedAt),
     report: !session?.selfReview,
   }
 
@@ -168,6 +175,14 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
               onClick={selfReview}
             >
               Self-review
+            </button>
+            <button
+              className={SECONDARY_BUTTON_CLASS}
+              disabled={busy}
+              title="Have Claude update the PR title and description to match the code, including unpushed commits. You review the change in the Changes tab before Rally updates GitHub."
+              onClick={draftDescription}
+            >
+              Update description
             </button>
             {session?.status === 'running' && (
               <button className={SECONDARY_BUTTON_CLASS} onClick={() => window.rally.cancelAuthorTurn(session.id)}>
@@ -218,6 +233,9 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
           <ChangesPanel
             session={session}
             disabled={busy}
+            descriptionEdit={descriptionEdit}
+            onDescriptionEdit={editDescription}
+            onDiscardDescription={() => window.confirm('Discard the proposed description update?') && run(() => window.rally.discardDescription(session.id))}
             onPush={push}
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
@@ -271,8 +289,9 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
                 {session && canPush(session) && (
                   <>
                     {leftBehind > 0 && <span className="text-xs text-amber-300">Push leaves out {plural(leftBehind, 'uncommitted file')}, and stops if GitHub has new commits.</span>}
-                    <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={push}>
+                    <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={pushFromFeedback}>
                       Push {plural(unpushed, 'commit')}
+                      {session.description && ' and update description'}
                     </button>
                   </>
                 )}
@@ -280,6 +299,14 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             )}
             <button className={`${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`} disabled={busy || postBlocked !== null} onClick={postReplies}>
               Post {repliesLabel}
+            </button>
+          </div>
+        )}
+        {handledFindings.length > 0 && (
+          <div className="flex items-center justify-end gap-3 rounded-xl bg-ink-900/60 px-4 py-3 ring-1 ring-white/5">
+            <span className="mr-auto text-xs text-ink-400">Claude handled {plural(handledFindings.length, 'self-review finding')}. Resolve them once you've checked the results.</span>
+            <button className={SECONDARY_BUTTON_CLASS} disabled={busy} onClick={() => clearFindings(handledFindings)}>
+              Resolve {plural(handledFindings.length, 'finding')}
             </button>
           </div>
         )}

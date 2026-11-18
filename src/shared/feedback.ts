@@ -9,8 +9,15 @@ export type DraftEdits = Record<string, DraftEdit>
 
 export interface DraftChanges {
   edits: DraftEdits
-  summaryBodyEdit: string | undefined
+  /** Review body rewrites keyed by PR key. */
+  summaryBodyEdits: Record<string, string>
   instructions: string
+}
+
+/** The user's changes that apply to one PR's share of the drafts. */
+export interface PrChanges {
+  edits: DraftEdits
+  summaryBodyEdit: string | undefined
 }
 
 export const EMPTY_COMMENT_REVIEW_ERROR =
@@ -26,29 +33,46 @@ function rewriteLine(subject: string, body: string): string {
   return `- I rewrote ${subject}; use this as final wording:\n  """${body}"""`
 }
 
-function describeEdits(drafts: Drafts | null, edits: DraftEdits, summaryBodyEdit: string | undefined): string {
+function bodyEditLine(original: string, edit: string | undefined, subject: string): string | null {
+  if (edit === undefined || !bodyEdited(original, edit)) return null
+  return edit.trim() ? rewriteLine(subject, edit) : `- Remove ${subject}.`
+}
+
+function describeEdits(drafts: Drafts | null, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdits'>): string {
   if (!drafts) return ''
+  const reviews = drafts.prReviews ?? []
+  const unit = reviews.length > 1
   const lines: string[] = []
-  if (summaryBodyEdit !== undefined && bodyEdited(drafts.summaryBody, summaryBodyEdit)) {
-    lines.push(summaryBodyEdit.trim() ? rewriteLine('the review body', summaryBodyEdit) : '- Remove the review body.')
+  for (const review of reviews) {
+    const line = bodyEditLine(review.summaryBody, changes.summaryBodyEdits[review.prKey], unit ? `the review body for ${review.prKey}` : 'the review body')
+    if (line) lines.push(line)
   }
   for (const comment of drafts.comments) {
-    const edit = edits[comment.id]
+    const edit = changes.edits[comment.id]
     if (!edit) continue
-    if (edit.dropped) lines.push(`- Drop #${comment.id}.`)
+    const subject = unit && comment.prKey ? `#${comment.id} on ${comment.prKey}` : `#${comment.id}`
+    if (edit.dropped) lines.push(`- Drop ${subject}.`)
     else if (edit.body !== undefined && bodyEdited(comment.body, edit.body)) {
-      lines.push(rewriteLine(`#${comment.id}`, edit.body))
+      lines.push(rewriteLine(subject, edit.body))
     }
   }
   return lines.length ? `Edits I made in Rally:\n${lines.join('\n')}` : ''
 }
 
 export function feedbackMessage(drafts: Drafts | null, changes: DraftChanges): string {
-  return [describeEdits(drafts, changes.edits, changes.summaryBodyEdit), changes.instructions.trim()].filter(Boolean).join('\n\n')
+  return [describeEdits(drafts, changes), changes.instructions.trim()].filter(Boolean).join('\n\n')
 }
 
-/** Returns the instruction that asks Claude to pull in everything that changed on the PR since the given ISO time. */
-export function pullChangesInstruction(since: string): string {
+/** Returns the instruction that asks Claude to pull in everything that changed on the PR, or on each of several PRs, since the given ISO time. */
+export function pullChangesInstruction(since: string, prCount = 1): string {
+  if (prCount > 1) {
+    return (
+      `Pull in everything that changed on each of the ${prCount} PRs since ${since}, when your last successful turn started: ` +
+      'new commits, comments, replies, reviews, and edits to the title or description. ' +
+      "If a head moved, check out the new head in that PR's clone and refresh any diff you saved before reading code. " +
+      'Start your reply with a short list of what changed on each PR, or say that nothing did, then update the review to match.'
+    )
+  }
   return (
     `Pull in everything that changed on the PR since ${since}, when your last successful turn started: ` +
     'new commits, comments, replies, reviews, and edits to the title or description. ' +
@@ -57,9 +81,9 @@ export function pullChangesInstruction(since: string): string {
   )
 }
 
-/** Returns a feedback message that asks Claude to pull in the PR's changes since the given ISO time, keeping any pending edits and typed feedback. */
-export function pullChangesMessage(drafts: Drafts | null, changes: DraftChanges, since: string): string {
-  const instructions = [pullChangesInstruction(since), changes.instructions.trim()].filter(Boolean).join('\n\n')
+/** Returns a feedback message that asks Claude to pull in the PRs' changes since the given ISO time, keeping any pending edits and typed feedback. */
+export function pullChangesMessage(drafts: Drafts | null, changes: DraftChanges, since: string, prCount = 1): string {
+  const instructions = [pullChangesInstruction(since, prCount), changes.instructions.trim()].filter(Boolean).join('\n\n')
   return feedbackMessage(drafts, { ...changes, instructions })
 }
 
@@ -75,7 +99,7 @@ export function keptCommentCount(drafts: Drafts | null, edits: DraftEdits): numb
   return drafts ? keptComments(drafts, edits).length : 0
 }
 
-export function isEmptyCommentReview(event: ReviewEvent, drafts: Drafts, changes: DraftChanges): boolean {
+export function isEmptyCommentReview(event: ReviewEvent, drafts: Drafts, changes: PrChanges): boolean {
   const summaryBody = changes.summaryBodyEdit ?? drafts.summaryBody
   return event === 'COMMENT' && !summaryBody.trim() && keptCommentCount(drafts, changes.edits) === 0
 }
@@ -136,7 +160,7 @@ export type PostableReply = DraftComment & { kind: 'reply'; replyToCommentId: nu
 
 export const canPostReply = (comment: DraftComment): comment is PostableReply => comment.kind === 'reply' && comment.replyToCommentId !== null
 
-export function finalReview(drafts: Drafts, changes: Pick<DraftChanges, 'edits' | 'summaryBodyEdit'>): FinalReview {
+export function finalReview(drafts: Drafts, changes: PrChanges): FinalReview {
   const kept = keptComments(drafts, changes.edits)
   return {
     body: (changes.summaryBodyEdit ?? drafts.summaryBody).trim(),

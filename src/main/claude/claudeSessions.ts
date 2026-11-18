@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { query, type CanUseTool, type HookCallback, type McpSdkServerConfigWithInstance, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
-import { prKey, type PrRef, type SessionCore, type SessionStatus, type TimelineEntry, type TurnMode } from '@shared/types'
+import { keyOf, type PrRef, type SessionCore, type SessionStatus, type TimelineEntry, type TurnMode } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import type { JsonDir } from '../jsonFile'
 import { configFile } from '../store'
@@ -99,7 +99,7 @@ export abstract class ClaudeSessions<S extends SessionCore> extends EventEmitter
 
   protected newSessionCore(pr: PrRef, status: SessionStatus): SessionCore {
     const at = now()
-    return { id: randomUUID(), pr, prKey: prKey(pr.owner, pr.repo, pr.number), sdkSessionId: null, status, error: null, timeline: [], createdAt: at, updatedAt: at }
+    return { id: randomUUID(), pr, prKey: keyOf(pr), sdkSessionId: null, status, error: null, timeline: [], createdAt: at, updatedAt: at }
   }
 
   protected isTurnRunning(sessionId: string): boolean {

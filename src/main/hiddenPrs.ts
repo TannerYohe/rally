@@ -1,6 +1,6 @@
 import type { HideMode, Pr, StoredHide } from '@shared/types'
 
-export const UNLISTED_HIDE_RETENTION_DAYS = 30
+export const UNLISTED_RETENTION_DAYS = 30
 
 type HideTarget = Pick<Pr, 'headRefOid' | 'reviewRequestedFromMe'>
 
@@ -24,12 +24,17 @@ export function refreshHide(hide: StoredHide, pr: HideTarget, now: string): Stor
   return { ...hide, reviewRequestedWhenLastListed: pr.reviewRequestedFromMe, lastListedAt: now }
 }
 
+/** Returns whether state kept for a PR last listed at lastListedAt, such as a hide or a hand link, is inside the retention window. */
+export function withinUnlistedRetention(lastListedAt: string, now: string): boolean {
+  return Date.parse(now) - Date.parse(lastListedAt) < UNLISTED_RETENTION_DAYS * 24 * 60 * 60_000
+}
+
 export function keepsUnlistedHide(hide: StoredHide, now: string): boolean {
   switch (hide.mode) {
     case 'snooze':
       return false
     case 'indefinite':
-      return Date.parse(now) - Date.parse(hide.lastListedAt) < UNLISTED_HIDE_RETENTION_DAYS * 24 * 60 * 60_000
+      return withinUnlistedRetention(hide.lastListedAt, now)
     default:
       return false
   }

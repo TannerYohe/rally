@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
+import type { PrUnit } from '@shared/prUnit'
 import { PHASE_LABELS, type Phase, type Pr, type PrFeedback, type PrListKind, type SessionStatus } from '@shared/types'
 import { Avatar } from './Avatar'
 import { BusyDot } from './BusyDot'
@@ -10,6 +11,7 @@ import { HideControls } from './HideControls'
 import { PhaseBadge } from './PhaseBadge'
 import { RepoChip } from './RepoChip'
 import { SortControl } from './SortControl'
+import { PrSummary } from './PrSummary'
 import { age, plural } from '../lib/format'
 import { usePersistentState, usePrs } from '../lib/hooks'
 import { activeFilterCount, dashboardView, DEFAULT_FILTERS, DEFAULT_SORT, type PrFilters, type PrSort } from '../lib/prFilters'
@@ -84,61 +86,111 @@ interface CardListProps {
   statusLabels: StatusLabels
 }
 
-function PrCard({ list, statusLabels, pr, onOpen }: CardListProps & { pr: Pr; onOpen(): void }) {
-  const theme = PHASE_THEME[pr.phase]
+function DraftTag() {
   return (
-    <li className={`group relative ${pr.hidden ? 'opacity-60 hover:opacity-100' : ''}`}>
+    <span className="mr-2 rounded bg-ink-700/60 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-ink-300">
+      Draft
+    </span>
+  )
+}
+
+function UnitStatus({ unit, labels }: { unit: PrUnit; labels: StatusLabels }) {
+  const status = unit.phase === 'in_progress' ? unit.members.find((pr) => pr.reviewStatus)?.reviewStatus : null
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <PhaseBadge phase={unit.phase} />
+      {status && <SessionStatusNote status={status} labels={labels} />}
+    </div>
+  )
+}
+
+function SingleCardBody({ pr, unit, statusLabels }: { pr: Pr; unit: PrUnit; statusLabels: StatusLabels }) {
+  return (
+    <>
+      <div className="flex items-start gap-3">
+        <h3 className="min-w-0 flex-1 truncate font-medium text-ink-100 group-hover:text-white">
+          {pr.isDraft && <DraftTag />}
+          {pr.title}
+        </h3>
+        <UnitStatus unit={unit} labels={statusLabels} />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
+        <RepoChip repo={pr.repo} number={pr.number} />
+        {pr.feedback ? (
+          <FeedbackNote feedback={pr.feedback} openFindings={pr.openFindings} />
+        ) : (
+          <span>
+            by <span className="text-ink-200">{pr.author}</span>
+          </span>
+        )}
+        <span title={pr.createdAt}>opened {age(pr.createdAt)} ago</span>
+        <span title={pr.updatedAt}>updated {age(pr.updatedAt)} ago</span>
+        <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
+      </div>
+      <PrSummary pr={pr} className="line-clamp-2" />
+    </>
+  )
+}
+
+function UnitCardBody({ unit, statusLabels }: { unit: PrUnit; statusLabels: StatusLabels }) {
+  const authors = [...new Set(unit.members.map((pr) => pr.author))]
+  const repoCount = new Set(unit.members.map((pr) => `${pr.owner}/${pr.repo}`.toLowerCase())).size
+  return (
+    <>
+      <div className="flex items-start gap-3">
+        <span className="rounded bg-secondary-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-secondary-200">
+          {repoCount} {repoCount === 1 ? 'repo' : 'repos'}
+        </span>
+        <span className="min-w-0 flex-1" />
+        <UnitStatus unit={unit} labels={statusLabels} />
+      </div>
+      <ul className="space-y-1.5">
+        {unit.members.map((pr) => (
+          <li key={pr.id} className="space-y-0.5">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-ink-400">
+              <RepoChip repo={pr.repo} number={pr.number} />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-100 group-hover:text-white">
+                {pr.isDraft && <DraftTag />}
+                {pr.title}
+              </span>
+              <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
+            </div>
+            <PrSummary pr={pr} className="line-clamp-1 pl-1" />
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
+        <span>
+          by <span className="text-ink-200">{authors.join(', ')}</span>
+        </span>
+        <span title={unit.createdAt}>opened {age(unit.createdAt)} ago</span>
+        <span title={unit.updatedAt}>updated {age(unit.updatedAt)} ago</span>
+      </div>
+    </>
+  )
+}
+
+function UnitCard({ list, statusLabels, unit, onOpen }: CardListProps & { unit: PrUnit; onOpen(): void }) {
+  const [lead] = unit.members
+  const theme = PHASE_THEME[unit.phase]
+  return (
+    <li className={`group relative ${unit.hidden ? 'opacity-60 hover:opacity-100' : ''}`}>
       <button
         onClick={onOpen}
-        className={`relative flex w-full gap-4 overflow-hidden rounded-xl border border-white/5 bg-ink-900/60 p-4 pl-5 text-left transition hover:border-white/10 hover:bg-ink-900 ${pr.hidden ? 'pb-11' : ''}`}
+        className={`relative flex w-full gap-4 overflow-hidden rounded-xl border border-white/5 bg-ink-900/60 p-4 pl-5 text-left transition hover:border-white/10 hover:bg-ink-900 ${unit.hidden ? 'pb-11' : ''}`}
       >
         <span className={`absolute inset-y-0 left-0 w-1 ${theme.accent}`} />
-        <Avatar login={pr.author} url={pr.authorAvatarUrl} ringClass={theme.ring} />
+        <Avatar login={lead.author} url={lead.authorAvatarUrl} ringClass={theme.ring} />
         <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex items-start gap-3">
-            <h3 className="min-w-0 flex-1 truncate font-medium text-ink-100 group-hover:text-white">
-              {pr.isDraft && (
-                <span className="mr-2 rounded bg-ink-700/60 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-ink-300">
-                  Draft
-                </span>
-              )}
-              {pr.title}
-            </h3>
-            <div className="flex flex-col items-end gap-1">
-              <PhaseBadge phase={pr.phase} />
-              {pr.phase === 'in_progress' && pr.reviewStatus && <SessionStatusNote status={pr.reviewStatus} labels={statusLabels} />}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
-            <RepoChip repo={pr.repo} number={pr.number} />
-            {pr.feedback ? (
-              <FeedbackNote feedback={pr.feedback} openFindings={pr.openFindings} />
-            ) : (
-              <span>
-                by <span className="text-ink-200">{pr.author}</span>
-              </span>
-            )}
-            <span title={pr.createdAt}>opened {age(pr.createdAt)} ago</span>
-            <span title={pr.updatedAt}>updated {age(pr.updatedAt)} ago</span>
-            <DiffStat additions={pr.additions} deletions={pr.deletions} files={pr.changedFiles} />
-          </div>
-          <p className="line-clamp-2 text-sm text-ink-400">
-            <span className="mr-1.5 text-secondary-400">✦</span>
-            {pr.summary ??
-              (pr.summaryError ? (
-                <span className="italic text-ink-600" title={pr.summaryError}>
-                  Summary unavailable
-                </span>
-              ) : (
-                <span className="italic text-ink-600">Summarizing…</span>
-              ))}
-          </p>
+          {unit.members.length > 1 ? <UnitCardBody unit={unit} statusLabels={statusLabels} /> : <SingleCardBody pr={lead} unit={unit} statusLabels={statusLabels} />}
         </div>
       </button>
       <HideControls
         list={list}
-        pr={pr}
-        className={`absolute bottom-3 right-3 p-1 ${pr.hidden ? '' : 'rounded-lg bg-ink-900 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100'}`}
+        ids={unit.members.map((pr) => pr.id)}
+        hidden={unit.hidden}
+        phase={unit.phase}
+        className={`absolute bottom-3 right-3 p-1 ${unit.hidden ? '' : 'rounded-lg bg-ink-900 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100'}`}
       />
     </li>
   )
@@ -149,39 +201,39 @@ function EmptyState({ children }: { children: ReactNode }) {
 }
 
 interface PrListProps extends CardListProps {
-  prs: Pr[]
-  visible: Pr[]
+  total: number
+  visible: PrUnit[]
   allMatchingHidden: boolean
   refreshing: boolean
   emptyState: ReactNode
   onOpen(pr: Pr): void
 }
 
-function PrList({ list, statusLabels, prs, visible, allMatchingHidden, refreshing, emptyState, onOpen }: PrListProps) {
-  if (prs.length === 0 && !refreshing) return <EmptyState>{emptyState}</EmptyState>
+function PrList({ list, statusLabels, total, visible, allMatchingHidden, refreshing, emptyState, onOpen }: PrListProps) {
+  if (total === 0 && !refreshing) return <EmptyState>{emptyState}</EmptyState>
   if (visible.length === 0) return <EmptyState>{allMatchingHidden ? 'All matching PRs are hidden.' : 'No PRs match these filters.'}</EmptyState>
-  return <PrCards list={list} statusLabels={statusLabels} prs={visible} onOpen={onOpen} />
+  return <UnitCards list={list} statusLabels={statusLabels} units={visible} onOpen={onOpen} />
 }
 
-function PrCards({ list, statusLabels, prs, onOpen }: CardListProps & { prs: Pr[]; onOpen(pr: Pr): void }) {
+function UnitCards({ list, statusLabels, units, onOpen }: CardListProps & { units: PrUnit[]; onOpen(pr: Pr): void }) {
   return (
     <ul className="space-y-2.5">
-      {prs.map((pr) => (
-        <PrCard key={pr.id} list={list} statusLabels={statusLabels} pr={pr} onOpen={() => onOpen(pr)} />
+      {units.map((unit) => (
+        <UnitCard key={unit.key} list={list} statusLabels={statusLabels} unit={unit} onOpen={() => onOpen(unit.members[0])} />
       ))}
     </ul>
   )
 }
 
-function HiddenPrs({ list, statusLabels, prs, onOpen }: CardListProps & { prs: Pr[]; onOpen(pr: Pr): void }) {
+function HiddenUnits({ list, statusLabels, units, onOpen }: CardListProps & { units: PrUnit[]; onOpen(pr: Pr): void }) {
   const [open, setOpen] = useState(false)
-  if (prs.length === 0) return null
+  if (units.length === 0) return null
   return (
     <section className="space-y-2.5 pt-2">
       <button className="text-xs text-ink-500 hover:text-ink-300" onClick={() => setOpen(!open)}>
-        {open ? '▾' : '▸'} {prs.length} hidden
+        {open ? '▾' : '▸'} {units.length} hidden
       </button>
-      {open && <PrCards list={list} statusLabels={statusLabels} prs={prs} onOpen={onOpen} />}
+      {open && <UnitCards list={list} statusLabels={statusLabels} units={units} onOpen={onOpen} />}
     </section>
   )
 }
@@ -202,7 +254,7 @@ export function PrDashboard({ config }: { config: DashboardConfig }) {
   const [showFilters, setShowFilters] = useState(false)
   const navigate = useNavigate()
 
-  const { visible, hiddenPrs, phaseCounts, allMatchingHidden } = useMemo(
+  const { visible, hiddenUnits, phaseCounts, allMatchingHidden, units } = useMemo(
     () => dashboardView(prs, filters, sort, phaseOrder),
     [prs, filters, sort, phaseOrder],
   )
@@ -222,7 +274,7 @@ export function PrDashboard({ config }: { config: DashboardConfig }) {
         <h1 className="text-lg font-semibold">
           {config.title}{' '}
           <span className="text-ink-500">
-            {visible.length === prs.length ? prs.length : `${visible.length} of ${prs.length}`}
+            {visible.length === units.length ? units.length : `${visible.length} of ${units.length}`}
           </span>
         </h1>
         <div className="ml-auto flex items-center gap-3 text-xs text-ink-500">
@@ -271,7 +323,7 @@ export function PrDashboard({ config }: { config: DashboardConfig }) {
         </div>
       </div>
 
-      {showFilters && <FilterPanel prs={prs} filters={filters} showAuthors={list === 'reviewing'} onChange={setFilters} />}
+      {showFilters && <FilterPanel units={units} filters={filters} showAuthors={list === 'reviewing'} onChange={setFilters} />}
 
       <FailedInstallBanner />
 
@@ -280,14 +332,14 @@ export function PrDashboard({ config }: { config: DashboardConfig }) {
       <PrList
         list={list}
         statusLabels={config.statusLabels}
-        prs={prs}
+        total={units.length}
         visible={visible}
         allMatchingHidden={allMatchingHidden}
         refreshing={refreshing}
         emptyState={config.emptyState}
         onOpen={openPr}
       />
-      <HiddenPrs list={list} statusLabels={config.statusLabels} prs={hiddenPrs} onOpen={openPr} />
+      <HiddenUnits list={list} statusLabels={config.statusLabels} units={hiddenUnits} onOpen={openPr} />
     </div>
   )
 }

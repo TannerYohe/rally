@@ -1,23 +1,32 @@
 import { EventEmitter } from 'node:events'
 import {
   headKey,
-  prKey,
+  isSamePr,
+  keyOf,
+  toPrRef,
+  uniquePrs,
   type HideMode,
   type MyReview,
   type Phase,
   type Pr,
+  type PrCoords,
   type PrListKind,
+  type PrLinks,
   type PrListState,
+  type PrRef,
   type SessionStatus,
   type StoredHide,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
+import { parsePrRef } from '@shared/linkedPrs'
+import { areLinked, handLinkedKeys, hasPair, linkNode, linkUnits, membersOf, oneSidedLinks, unitHide, type LinkNode } from '@shared/prUnit'
 import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase, type AuthorSessionPhaseInput } from './github/authorPhase'
 import { computePhase } from './github/phase'
-import { fetchPr, searchPrs, type GithubPr } from './github/queries'
+import { sameLogin } from './github/logins'
+import { fetchPrs, searchPrs, type GithubPr, type PrLookup } from './github/queries'
 import { AUTHORED_SEARCH_QUERIES, buildSearchQueries } from './github/search'
-import { isHideActive, keepsUnlistedHide, newHide, refreshHide } from './hiddenPrs'
+import { isHideActive, keepsUnlistedHide, newHide, refreshHide, withinUnlistedRetention } from './hiddenPrs'
 import type { JsonFile } from './jsonFile'
 import {
   authoredHeadsSeenFile,
@@ -28,12 +37,15 @@ import {
   headsSeenFile,
   hiddenPrsFile,
   prCacheFile,
+  prLinksFile,
   rallyReviewsFile,
   summariesFile,
   type PrCache,
 } from './store'
 
 const SUMMARY_CONCURRENCY = 3
+const MAX_LINK_ROUNDS = 3
+const LISTED_STAMP_REFRESH_MS = 24 * 60 * 60_000
 
 export interface SessionState extends AuthorSessionPhaseInput {
   status: SessionStatus
@@ -53,11 +65,35 @@ interface PrListFiles {
   hidden: JsonFile<Record<string, StoredHide>>
 }
 
+interface PrLinkSource {
+  file: JsonFile<PrLinks>
+  markers(): string[]
+}
+
 interface PrListSource {
   kind: PrListKind
   files: PrListFiles
+  /** Present for a list that groups linked PRs into units. */
+  links?: PrLinkSource
   searchQueries(): string[]
   phase(pr: PhaseInput, session: SessionState | null): Phase
+}
+
+/** A PR outside the list that a listed PR links one-sidedly. */
+interface LinkTarget {
+  node: LinkNode
+  ref: PrRef
+}
+
+function unreciprocatedTargets(prs: Pr[]): Map<string, LinkTarget> {
+  const refs = prs.flatMap((pr) => pr.unreciprocatedLinks ?? [])
+  return new Map(refs.map((ref) => [keyOf(ref), { node: { key: keyOf(ref), coords: ref, targets: [] }, ref }]))
+}
+
+/** Shows every member of a unit while any member shows. */
+function withUnitHides(prs: Pr[]): Pr[] {
+  const byKey = new Map(prs.map((pr) => [keyOf(pr), pr]))
+  return prs.map((pr) => (pr.linkedPrs ? { ...pr, hidden: unitHide(membersOf(pr, byKey)) } : pr))
 }
 
 function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
@@ -73,13 +109,17 @@ class PrList extends EventEmitter {
   private refreshGeneration = 0
   private fetchedDuringRefresh = new Map<string, GithubPr>()
   private pruners: Pruner[] = []
+  private linkTargets = new Map<string, LinkTarget>()
+  private linkNodes = new Map<string, { body: string; markers: string[]; node: LinkNode }>()
+  private refreshAgain = false
   private readonly files: PrListFiles
 
   constructor(private readonly source: PrListSource) {
     super()
     this.files = source.files
     const cache = this.files.cache.get()
-    this.state = { prs: this.withHidden(cache.prs), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
+    this.linkTargets = unreciprocatedTargets(cache.prs)
+    this.state = { prs: this.settle(this.withHidden(cache.prs)), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
   }
 
   get kind(): PrListKind {
@@ -111,14 +151,19 @@ class PrList extends EventEmitter {
   }
 
   reapplyPhases(): void {
-    const prs = this.withHidden(this.withPhases(this.state.prs))
-    const changed = prs.some(
-      (pr, i) =>
-        pr.phase !== this.state.prs[i].phase ||
-        pr.reviewStatus !== this.state.prs[i].reviewStatus ||
-        pr.openFindings !== this.state.prs[i].openFindings ||
-        pr.hidden?.mode !== this.state.prs[i].hidden?.mode,
-    )
+    const prs = this.settle(this.withHidden(this.withPhases(this.state.prs)))
+    const changed =
+      prs.length !== this.state.prs.length ||
+      prs.some(
+        (pr, i) =>
+          pr.id !== this.state.prs[i].id ||
+          pr.phase !== this.state.prs[i].phase ||
+          pr.reviewStatus !== this.state.prs[i].reviewStatus ||
+          pr.openFindings !== this.state.prs[i].openFindings ||
+          pr.hidden?.mode !== this.state.prs[i].hidden?.mode ||
+          JSON.stringify(pr.linkedPrs) !== JSON.stringify(this.state.prs[i].linkedPrs) ||
+          JSON.stringify(pr.unreciprocatedLinks) !== JSON.stringify(this.state.prs[i].unreciprocatedLinks),
+      )
     if (changed) this.update({ prs })
   }
 
@@ -129,51 +174,221 @@ class PrList extends EventEmitter {
     this.update({ refreshing: true, error: null })
     try {
       const { viewer, prs: searched } = await searchPrs(this.source.searchQueries(), this.kind)
-      const prs = searched.map((pr) => this.fetchedDuringRefresh.get(pr.id) ?? pr)
+      const fromSearch = searched.map((pr) => this.fetchedDuringRefresh.get(pr.id) ?? pr)
+      const { companions, outside } = this.source.links
+        ? await this.fetchCompanions(fromSearch, viewer, this.source.links)
+        : { companions: [], outside: this.linkTargets }
+      this.linkTargets = outside
+      const prs = [...fromSearch, ...companions.map((pr) => ({ ...(this.fetchedDuringRefresh.get(pr.id) ?? pr), companion: true }))]
       const refreshedAt = new Date().toISOString()
-      const listed = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
+      const listed = new Set(prs.map(keyOf))
       for (const prune of this.pruners) prune(listed)
-      this.update({ prs: this.decorate(prs, true), viewer, refreshedAt, refreshing: false })
+      this.update({ prs: this.settle(this.decorate(prs, true)), viewer, refreshedAt, refreshing: false })
       this.files.cache.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
     } catch (error) {
       this.update({ refreshing: false, error: errorMessage(error) })
     }
+    if (this.refreshAgain) {
+      this.refreshAgain = false
+      await this.refresh()
+    }
   }
 
-  /** Fetches one PR; a full refresh already in flight keeps this newer copy instead of its own. */
+  /**
+   * Fetches the open PRs in other repos that listed PRs link, following mutual and hand links for a few rounds,
+   * and returns those that join a unit with a listed PR and the rest as outside link targets. An unknown lookup reuses the PR's previous copy.
+   */
+  private async fetchCompanions(
+    listed: GithubPr[],
+    viewer: string,
+    links: PrLinkSource,
+  ): Promise<{ companions: GithubPr[]; outside: Map<string, LinkTarget> }> {
+    const markers = links.markers()
+    const handLinks = links.file.get()
+    const known: LinkNode[] = listed.map((pr) => this.linkNodeOf(pr, markers))
+    const fetched = new Map<string, GithubPr>()
+    let frontier = known
+    for (let round = 0; round < MAX_LINK_ROUNDS && frontier.length > 0; round++) {
+      const handTargets = frontier.flatMap((node) => handLinkedKeys(node.key, handLinks).flatMap((key) => parsePrRef(key) ?? []))
+      const wanted = uniquePrs([...frontier.flatMap((node) => node.targets), ...handTargets]).filter(
+        (coords) => !known.some((node) => isSamePr(node.coords, coords)),
+      )
+      if (wanted.length === 0) break
+      const lookups = await this.lookupCompanions(wanted)
+      const found = lookups.flatMap((lookup, i): GithubPr[] => {
+        switch (lookup.status) {
+          case 'found':
+            return sameLogin(lookup.pr.author, viewer) ? [] : [lookup.pr]
+          case 'unknown':
+            return this.state.prs.filter((pr) => isSamePr(pr, wanted[i]))
+          case 'gone':
+            return []
+        }
+      })
+      const nodes = found.map((pr) => this.linkNodeOf(pr, markers))
+      for (const pr of found) fetched.set(keyOf(pr), pr)
+      frontier = nodes.filter((node) => known.some((other) => areLinked(node, other, handLinks)))
+      known.push(...nodes)
+    }
+    const listedKeys = new Set(listed.map(keyOf))
+    const memberKeys = new Set(linkUnits(known, handLinks).filter((unit) => unit.some((key) => listedKeys.has(key))).flat())
+    const outside = [...fetched.values()].filter((pr) => !memberKeys.has(keyOf(pr)))
+    return {
+      companions: [...fetched.values()].filter((pr) => memberKeys.has(keyOf(pr))),
+      outside: new Map(outside.map((pr) => [keyOf(pr), { node: this.linkNodeOf(pr, markers), ref: toPrRef(pr) }])),
+    }
+  }
+
+  /** Looks up linked PRs, treating every one as unknown when the whole request fails. */
+  private async lookupCompanions(wanted: PrCoords[]): Promise<PrLookup[]> {
+    try {
+      return (await fetchPrs(wanted, this.kind)).lookups
+    } catch (error) {
+      console.warn('Fetching linked PRs failed', { prs: wanted.map(keyOf), error })
+      return wanted.map(() => ({ status: 'unknown' }))
+    }
+  }
+
   async refreshOne(owner: string, repo: string, number: number): Promise<void> {
+    await this.refreshMany([{ owner, repo, number }])
+  }
+
+  /** Fetches PRs together and updates the list once, keeping a PR the list didn't already list only while a listed PR links it. */
+  async refreshMany(refs: PrCoords[]): Promise<void> {
     const startedDuringRefresh = this.state.refreshing ? this.refreshGeneration : null
-    const fetched = await fetchPr(owner, repo, number, this.kind)
-    if (this.state.refreshing && this.refreshGeneration === startedDuringRefresh) this.fetchedDuringRefresh.set(fetched.id, fetched)
-    const [fresh] = this.decorate([fetched], false)
-    const prs = this.state.prs.some((p) => p.id === fresh.id)
-      ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p))
-      : [...this.state.prs, fresh]
+    const { lookups } = await fetchPrs(refs, this.kind)
+    const fetched = lookups.flatMap((lookup) => (lookup.status === 'found' ? [lookup.pr] : []))
+    const gone = refs.filter((_, i) => lookups[i].status === 'gone')
+    const unknown = refs.filter((_, i) => lookups[i].status === 'unknown')
+    if (unknown.length > 0) console.warn('Refreshing PRs left some unchanged after lookup errors', { prs: unknown.map(keyOf) })
+    if (this.state.refreshing && this.refreshGeneration === startedDuringRefresh) for (const pr of fetched) this.fetchedDuringRefresh.set(pr.id, pr)
+    const listedIds = new Set(this.state.prs.filter((pr) => !pr.companion).map((pr) => pr.id))
+    const fresh = this.decorate(
+      fetched.map((pr) => (this.source.links && !listedIds.has(pr.id) ? { ...pr, companion: true } : pr)),
+      false,
+    )
+    const freshIds = new Set(fresh.map((pr) => pr.id))
+    const kept = this.state.prs.filter((pr) => !gone.some((ref) => isSamePr(ref, pr)))
+    const prs = this.settle(this.withHidden([
+      ...kept.map((pr) => (freshIds.has(pr.id) ? fresh.find((f) => f.id === pr.id)! : pr)),
+      ...fresh.filter((pr) => !kept.some((k) => k.id === pr.id)),
+    ]))
     this.update({ prs })
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
-  hide(id: string, mode: HideMode): void {
-    const pr = this.state.prs.find((p) => p.id === id)
+  /** Links a listed PR with another PR by hand, then refreshes the list. */
+  async link(key: string, target: PrCoords): Promise<void> {
+    const links = this.linkSource()
+    const pr = this.state.prs.find((p) => keyOf(p) === key)
     if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
-    this.files.hidden.set({ ...this.files.hidden.get(), [id]: newHide(pr, mode, new Date().toISOString()) })
+    if (isSamePr(pr, target)) throw new Error("A PR can't be linked with itself.")
+    const targetKey = await this.linkableKey(target)
+    const stored = links.file.get()
+    const { linked, unlinked } = stored
+    links.file.set({
+      ...stored,
+      linked: [...linked.filter((pair) => !hasPair([pair], key, targetKey)), [key, targetKey]],
+      unlinked: unlinked.filter((pair) => !hasPair([pair], key, targetKey)),
+    })
+    if (this.state.refreshing) this.refreshAgain = true
+    else await this.refresh()
+  }
+
+  /** Unlinks a PR from each of the given PRs by hand, which outranks links in either description. */
+  unlink(key: string, others: string[]): void {
+    const links = this.linkSource()
+    const pairs = others.filter((other) => other !== key).map((other): [string, string] => [key, other])
+    const stored = links.file.get()
+    const outsidePairs = (pair: [string, string]) => !pairs.some(([x, y]) => hasPair([pair], x, y))
+    links.file.set({ ...stored, linked: stored.linked.filter(outsidePairs), unlinked: [...stored.unlinked.filter(outsidePairs), ...pairs] })
+    const prs = this.settle(this.withHidden(this.state.prs))
+    this.update({ prs })
+    this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
+  }
+
+  /** Returns the PR's link node, parsing its description again only when the description or markers changed. */
+  private linkNodeOf(pr: PrCoords & Pick<Pr, 'body'>, markers: string[]): LinkNode {
+    const key = keyOf(pr)
+    const cached = this.linkNodes.get(key)
+    if (cached && cached.body === pr.body && cached.markers === markers) return cached.node
+    const node = linkNode(pr, markers)
+    this.linkNodes.set(key, { body: pr.body, markers, node })
+    return node
+  }
+
+  private linkSource(): PrLinkSource {
+    if (!this.source.links) throw new Error('This list does not link PRs.')
+    return this.source.links
+  }
+
+  /** Returns the key of an open PR by someone else, with GitHub's casing, from the list or GitHub. */
+  private async linkableKey(target: PrCoords): Promise<string> {
+    const known = [...this.state.prs, ...[...this.linkTargets.values()].map((t) => t.ref)].find((pr) => isSamePr(pr, target))
+    if (known) return keyOf(known)
+    const { viewer, lookups } = await fetchPrs([target], this.kind)
+    const [lookup] = lookups
+    switch (lookup.status) {
+      case 'found':
+        if (sameLogin(lookup.pr.author, viewer)) throw new Error('That PR is yours. Rally only groups PRs you review.')
+        return keyOf(lookup.pr)
+      case 'gone':
+        throw new Error(`${keyOf(target)} is closed, merged, or not visible to you.`)
+      case 'unknown':
+        throw new Error(`Rally couldn't look up ${keyOf(target)}. Try again.`)
+    }
+  }
+
+  /** Hides every PR in a unit together. */
+  hide(ids: string[], mode: HideMode): void {
+    const at = new Date().toISOString()
+    const hides = ids.map((id) => {
+      const pr = this.state.prs.find((p) => p.id === id)
+      if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
+      return [id, newHide(pr, mode, at)] as const
+    })
+    this.files.hidden.set({ ...this.files.hidden.get(), ...Object.fromEntries(hides) })
     this.reapplyHidden()
   }
 
-  unhide(id: string): void {
-    const { [id]: _removed, ...rest } = this.files.hidden.get()
-    this.files.hidden.set(rest)
+  unhide(ids: string[]): void {
+    this.files.hidden.set(Object.fromEntries(Object.entries(this.files.hidden.get()).filter(([id]) => !ids.includes(id))))
     this.reapplyHidden()
   }
 
   private reapplyHidden(): void {
-    this.update({ prs: this.withHidden(this.state.prs) })
+    this.update({ prs: this.settle(this.withHidden(this.state.prs)) })
   }
 
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
     this.syncHides(prs, prune)
     return this.withHidden(this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune)))
+  }
+
+  /** Relinks the list from PR descriptions and hand links, drops companions no listed PR links with, and lines up unit hides. */
+  private settle(prs: Pr[]): Pr[] {
+    const links = this.source.links
+    if (!links) return prs
+    const handLinks = links.file.get()
+    const markers = links.markers()
+    const nodes = prs.map((pr) => this.linkNodeOf(pr, markers))
+    for (const key of this.linkNodes.keys()) if (!nodes.some((node) => node.key === key)) this.linkNodes.delete(key)
+    const units = linkUnits(nodes, handLinks)
+    const unitOf = new Map(units.flatMap((unit) => unit.map((key) => [key, unit] as const)))
+    const listedKeys = new Set(prs.filter((pr) => !pr.companion).map(keyOf))
+    const kept = prs.filter((pr) => !pr.companion || unitOf.get(keyOf(pr))?.some((key) => listedKeys.has(key)))
+    const outside = [...this.linkTargets.values()].filter((target) => !nodes.some((n) => n.key === target.node.key))
+    const oneSided = oneSidedLinks([...nodes, ...outside.map((target) => target.node)], handLinks, units)
+    const refs = new Map<string, PrRef>([...prs.map((pr) => [keyOf(pr), toPrRef(pr)] as const), ...outside.map((t) => [t.node.key, t.ref] as const)])
+    const linked = kept.map((pr) => {
+      const key = keyOf(pr)
+      const { linkedPrs: _linked, unreciprocatedLinks: _unreciprocated, ...rest } = pr
+      const others = unitOf.get(key)?.filter((member) => member !== key)
+      const unreciprocated = oneSided.get(key)?.map((target) => refs.get(target)!)
+      return { ...rest, ...(others && { linkedPrs: others }), ...(unreciprocated && { unreciprocatedLinks: unreciprocated }) }
+    })
+    return withUnitHides(linked)
   }
 
   private syncHides(prs: GithubPr[], prune: boolean): void {
@@ -216,7 +431,7 @@ class PrList extends EventEmitter {
 
   private withPhases(prs: PhaseInput[]): Omit<Pr, 'hidden'>[] {
     return prs.map((pr) => {
-      const session = this.sessionOf(prKey(pr.owner, pr.repo, pr.number))
+      const session = this.sessionOf(keyOf(pr))
       return { ...pr, reviewStatus: session?.status ?? null, openFindings: session?.openFindings ?? 0, phase: this.source.phase(pr, session) }
     })
   }
@@ -281,12 +496,29 @@ class ReviewPrList extends PrList {
   }
 }
 
+/** Drops hand links and unlinks once neither PR has been listed for the unlisted retention window. */
+function prunePrLinks(listed: Set<string>): void {
+  const now = new Date().toISOString()
+  const stored = prLinksFile.get()
+  const listedAt = (key: string) => {
+    const previous = stored.lastListedAt?.[key]
+    if (!listed.has(key)) return previous ?? now
+    return previous && Date.parse(now) - Date.parse(previous) < LISTED_STAMP_REFRESH_MS ? previous : now
+  }
+  const recent = ([a, b]: [string, string]) => withinUnlistedRetention(listedAt(a), now) || withinUnlistedRetention(listedAt(b), now)
+  const linked = stored.linked.filter(recent)
+  const unlinked = stored.unlinked.filter(recent)
+  const lastListedAt = Object.fromEntries([...linked, ...unlinked].flat().map((key) => [key, listedAt(key)]))
+  const next = { linked, unlinked, lastListedAt }
+  if (JSON.stringify(next) !== JSON.stringify(stored)) prLinksFile.set(next)
+}
+
 function pruneRallyReviews(listed: Set<string>): void {
   rallyReviewsFile.set(Object.fromEntries(Object.entries(rallyReviewsFile.get()).filter(([key]) => listed.has(key))))
 }
 
 function reviewPhase(pr: PhaseInput, session: SessionState | null): Phase {
-  const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviewsFile.get()[prKey(pr.owner, pr.repo, pr.number)] ?? [])
+  const myReviews = withRallyRepliesCounted(pr.myReviews, rallyReviewsFile.get()[keyOf(pr)] ?? [])
   return computePhase({ ...pr, myReviews, reviewInProgress: session?.active ?? false })
 }
 
@@ -297,11 +529,13 @@ function authorPhase(pr: PhaseInput, session: SessionState | null): Phase {
 export const prList = new ReviewPrList({
   kind: 'reviewing',
   files: { cache: prCacheFile, summaries: summariesFile, headsSeen: headsSeenFile, hidden: hiddenPrsFile },
+  links: { file: prLinksFile, markers: () => configFile.get().linkMarkers },
   searchQueries: () => buildSearchQueries(configFile.get()),
   phase: reviewPhase,
 })
 
 prList.addPruner(pruneRallyReviews)
+prList.addPruner(prunePrLinks)
 
 export const authoredPrList = new PrList({
   kind: 'authored',

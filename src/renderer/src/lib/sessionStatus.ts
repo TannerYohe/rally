@@ -38,6 +38,11 @@ export function isSubmitted(session: Pick<ReviewSession, 'status' | 'submitted'>
   return session.submitted !== null || session.status === 'submitted'
 }
 
+/** Returns the latest update time among the PRs a review covers, or null when none of them is listed. */
+export function latestUpdatedAt(prs: { updatedAt: string }[]): string | null {
+  return prs.reduce<string | null>((latest, pr) => (latest === null || Date.parse(pr.updatedAt) > Date.parse(latest) ? pr.updatedAt : latest), null)
+}
+
 export function prUpdatedSinceLastSuccessfulTurn(
   session: TurnTiming & Pick<ReviewSession, 'status' | 'submitted'>,
   prUpdatedAt: string | null,

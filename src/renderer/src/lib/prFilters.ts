@@ -1,3 +1,4 @@
+import { groupIntoUnits, type PrUnit } from '@shared/prUnit'
 import type { Phase, Pr } from '@shared/types'
 
 export type DraftFilter = 'all' | 'ready' | 'draft'
@@ -36,38 +37,43 @@ export function activeFilterCount(filters: PrFilters): number {
   return filters.authors.length + filters.repos.length + (filters.draft === 'all' ? 0 : 1)
 }
 
-export function applySecondaryFilters(prs: Pr[], filters: PrFilters): Pr[] {
-  return prs.filter(
-    (pr) =>
-      (filters.authors.length === 0 || filters.authors.includes(pr.author)) &&
-      (filters.repos.length === 0 || filters.repos.includes(repoName(pr))) &&
-      (filters.draft === 'all' || (filters.draft === 'draft') === pr.isDraft),
+/** Keeps units where, for each filter, some member matches it. */
+export function applySecondaryFilters(units: PrUnit[], filters: PrFilters): PrUnit[] {
+  return units.filter(
+    (unit) =>
+      (filters.authors.length === 0 || unit.members.some((pr) => filters.authors.includes(pr.author))) &&
+      (filters.repos.length === 0 || unit.members.some((pr) => filters.repos.includes(repoName(pr)))) &&
+      (filters.draft === 'all' || unit.members.some((pr) => (filters.draft === 'draft') === pr.isDraft)),
   )
 }
 
 export interface DashboardView<P extends Phase> {
-  visible: Pr[]
-  hiddenPrs: Pr[]
+  visible: PrUnit[]
+  hiddenUnits: PrUnit[]
   phaseCounts: Record<P, number>
   allMatchingHidden: boolean
+  /** Every unit, before filtering. */
+  units: PrUnit[]
 }
 
 export function dashboardView<P extends Phase>(prs: Pr[], filters: PrFilters, sort: PrSort, phaseOrder: readonly P[]): DashboardView<P> {
-  const filtered = applySecondaryFilters(prs, filters)
-  const shown = filtered.filter((pr) => !pr.hidden)
+  const units = groupIntoUnits(prs, phaseOrder)
+  const filtered = applySecondaryFilters(units, filters)
+  const shown = filtered.filter((unit) => !unit.hidden)
   const phaseCounts = Object.fromEntries(phaseOrder.map((phase) => [phase, 0])) as Record<P, number>
-  for (const pr of shown) {
-    if (pr.phase in phaseCounts) phaseCounts[pr.phase as P]++
+  for (const unit of shown) {
+    if (unit.phase in phaseCounts) phaseCounts[unit.phase as P]++
   }
   return {
-    visible: sortPrs(shown.filter((pr) => !filters.hiddenPhases.includes(pr.phase)), sort, phaseOrder),
-    hiddenPrs: sortPrs(filtered.filter((pr) => pr.hidden), sort, phaseOrder),
+    visible: sortUnits(shown.filter((unit) => !filters.hiddenPhases.includes(unit.phase)), sort, phaseOrder),
+    hiddenUnits: sortUnits(filtered.filter((unit) => unit.hidden), sort, phaseOrder),
     phaseCounts,
     allMatchingHidden: shown.length === 0 && filtered.length > 0,
+    units,
   }
 }
 
-function compareField(a: Pr, b: Pr, field: SortField, phaseOrder: readonly Phase[]): number {
+function compareField(a: PrUnit, b: PrUnit, field: SortField, phaseOrder: readonly Phase[]): number {
   switch (field) {
     case 'phase':
       return phaseOrder.indexOf(a.phase) - phaseOrder.indexOf(b.phase)
@@ -76,17 +82,17 @@ function compareField(a: Pr, b: Pr, field: SortField, phaseOrder: readonly Phase
     case 'updated':
       return a.updatedAt.localeCompare(b.updatedAt)
     case 'size':
-      return a.additions + a.deletions - (b.additions + b.deletions)
+      return a.size - b.size
     case 'author':
-      return a.author.localeCompare(b.author, undefined, { sensitivity: 'base' })
+      return a.members[0].author.localeCompare(b.members[0].author, undefined, { sensitivity: 'base' })
     case 'repo':
-      return repoName(a).localeCompare(repoName(b))
+      return repoName(a.members[0]).localeCompare(repoName(b.members[0]))
   }
 }
 
-export function sortPrs(prs: Pr[], sort: PrSort, phaseOrder: readonly Phase[]): Pr[] {
+export function sortUnits(units: PrUnit[], sort: PrSort, phaseOrder: readonly Phase[]): PrUnit[] {
   const sign = sort.direction === 'asc' ? 1 : -1
-  return [...prs].sort((a, b) => sign * compareField(a, b, sort.field, phaseOrder) || a.createdAt.localeCompare(b.createdAt))
+  return [...units].sort((a, b) => sign * compareField(a, b, sort.field, phaseOrder) || a.createdAt.localeCompare(b.createdAt))
 }
 
 export interface FilterOption {
@@ -94,9 +100,12 @@ export interface FilterOption {
   count: number
 }
 
-export function filterOptions(prs: Pr[], key: (pr: Pr) => string, selected: string[]): FilterOption[] {
+/** Counts the units with a member having each value, keeping selected values that no unit has. */
+export function filterOptions(units: PrUnit[], key: (pr: Pr) => string, selected: string[]): FilterOption[] {
   const counts = new Map<string, number>(selected.map((value) => [value, 0]))
-  for (const pr of prs) counts.set(key(pr), (counts.get(key(pr)) ?? 0) + 1)
+  for (const unit of units) {
+    for (const value of new Set(unit.members.map(key))) counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
   return [...counts]
     .map(([value, count]) => ({ value, count }))
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))

@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { DraftChanges } from '@shared/feedback'
 import { IPC } from '@shared/ipc'
-import type { ActionRequest, Config, Health, HideMode, PrDescription, PrListKind, PrRef, ReplyPost, ReviewEvent } from '@shared/types'
+import type { ActionRequest, Config, Health, HideMode, MemberVerdict, PrCoords, PrDescription, PrListKind, PrRef, ReplyPost } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { authorSessions } from './claude/authorSessions'
@@ -39,13 +39,15 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.getHealth, () => health())
   ipcMain.handle(IPC.getPrs, (_event, list: PrListKind) => prLists[list].get())
   ipcMain.handle(IPC.refreshPrs, (_event, list: PrListKind) => prLists[list].refresh())
-  ipcMain.handle(IPC.hidePr, (_event, list: PrListKind, id: string, mode: HideMode) => prLists[list].hide(id, mode))
-  ipcMain.handle(IPC.unhidePr, (_event, list: PrListKind, id: string) => prLists[list].unhide(id))
+  ipcMain.handle(IPC.hidePr, (_event, list: PrListKind, ids: string[], mode: HideMode) => prLists[list].hide(ids, mode))
+  ipcMain.handle(IPC.unhidePr, (_event, list: PrListKind, ids: string[]) => prLists[list].unhide(ids))
+  ipcMain.handle(IPC.linkPrs, (_event, key: string, target: PrCoords) => prList.link(key, target))
+  ipcMain.handle(IPC.unlinkPr, (_event, key: string, others: string[]) => prList.unlink(key, others))
   ipcMain.handle(IPC.getSession, (_event, key: string) => reviewSessions.open(key))
-  ipcMain.handle(IPC.startReview, (_event, pr: PrRef) => reviewSessions.start(pr))
+  ipcMain.handle(IPC.startReview, (_event, pr: PrRef, linked: PrRef[]) => reviewSessions.start(pr, linked))
   ipcMain.handle(IPC.sendFeedback, (_event, id: string, message: string) => reviewSessions.feedback(id, message))
-  ipcMain.handle(IPC.submitReview, (_event, id: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]) =>
-    reviewSessions.submit(id, event, changes, resolveThreadIds),
+  ipcMain.handle(IPC.submitReview, (_event, id: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]) =>
+    reviewSessions.submit(id, verdicts, changes, resolveThreadIds),
   )
   ipcMain.handle(IPC.getReviewThreads, (_event, id: string) => reviewSessions.threads(id))
   ipcMain.handle(IPC.resolveThreads, (_event, id: string, threadIds: string[]) => reviewSessions.resolveThreads(id, threadIds))

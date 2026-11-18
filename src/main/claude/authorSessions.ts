@@ -18,7 +18,7 @@ import {
 } from '@shared/authorSession'
 import { EMPTY_DIFF } from '@shared/diff'
 import {
-  prKey,
+  keyOf,
   type ActionRequest,
   type AuthorSession,
   type CloneInfo,
@@ -240,7 +240,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   async selfReview(pr: PrRef): Promise<AuthorSession> {
     const session = this.ensure(pr)
-    await this.startCloneTurn(session.id, 'self_review', async () => () => reviewPrompt(pr, configFile.get().reviewSkill))
+    await this.startCloneTurn(session.id, 'self_review', async () => () => reviewPrompt([pr], configFile.get().reviewSkill))
     return this.byId(session.id)
   }
 
@@ -498,7 +498,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /** Reacts 👍 to a comment, then re-requests any queued reviewer that leaves with nothing unanswered. */
   async acknowledge(pr: PrRef, itemId: string): Promise<void> {
     await acknowledgeFeedbackItem(pr, itemId)
-    const session = this.getByPr(prKey(pr.owner, pr.repo, pr.number))
+    const session = this.getByPr(keyOf(pr))
     if (session && !this.isTurnRunning(session.id) && !this.busy.has(session.id)) await this.settleReRequests(session.id)
     this.refreshPr(pr)
   }
@@ -666,7 +666,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   private ensure(pr: PrRef): AuthorSession {
-    return this.getByPr(prKey(pr.owner, pr.repo, pr.number)) ?? this.add(newAuthorSession(this.newSessionCore(pr, 'awaiting_feedback')))
+    return this.getByPr(keyOf(pr)) ?? this.add(newAuthorSession(this.newSessionCore(pr, 'awaiting_feedback')))
   }
 
   /** Allows a new turn only while no merge is open; the merge's own resolution turn starts through resolveConflicts. */

@@ -9,12 +9,13 @@ import type {
   Health,
   HideMode,
   InstallAttempt,
+  PrCoords,
   PrListKind,
   PrDescription,
   PrListState,
   PrRef,
   ReplyPost,
-  ReviewEvent,
+  MemberVerdict,
   ReviewSession,
   ReviewThread,
   SoundPlayback,
@@ -34,12 +35,14 @@ export interface RallyApi {
   getPrs(list: PrListKind): Promise<PrListState>
   refreshPrs(list: PrListKind): Promise<void>
   onPrsChanged(listener: (change: PrListChange) => void): () => void
-  hidePr(list: PrListKind, id: string, mode: HideMode): Promise<void>
-  unhidePr(list: PrListKind, id: string): Promise<void>
+  hidePr(list: PrListKind, ids: string[], mode: HideMode): Promise<void>
+  unhidePr(list: PrListKind, ids: string[]): Promise<void>
+  linkPrs(prKey: string, target: PrCoords): Promise<void>
+  unlinkPr(prKey: string, others: string[]): Promise<void>
   getSession(prKey: string): Promise<ReviewSession | null>
-  startReview(pr: PrRef): Promise<ReviewSession>
+  startReview(pr: PrRef, linked: PrRef[]): Promise<ReviewSession>
   sendFeedback(sessionId: string, message: string): Promise<void>
-  submitReview(sessionId: string, event: ReviewEvent, changes: DraftChanges, resolveThreadIds: string[]): Promise<void>
+  submitReview(sessionId: string, verdicts: MemberVerdict[], changes: DraftChanges, resolveThreadIds: string[]): Promise<void>
   getReviewThreads(sessionId: string): Promise<ReviewThread[]>
   resolveThreads(sessionId: string, threadIds: string[]): Promise<ThreadResolution>
   cancelReview(sessionId: string): Promise<void>
@@ -85,6 +88,8 @@ export const IPC = {
   prsChanged: 'prs:changed',
   hidePr: 'prs:hide',
   unhidePr: 'prs:unhide',
+  linkPrs: 'prs:link',
+  unlinkPr: 'prs:unlink',
   getSession: 'session:get',
   startReview: 'session:start',
   sendFeedback: 'session:feedback',

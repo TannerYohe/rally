@@ -43,6 +43,22 @@ interface ToolResultBlock {
   type: 'tool_result'
   tool_use_id: string
   is_error?: boolean
+  content?: string | { type: string; text?: string }[]
+}
+
+const DRAFTS_REJECTED_LABEL = 'Rally rejected the drafts; Claude has to publish them again'
+
+function resultText(result: ToolResultBlock): string {
+  if (typeof result.content === 'string') return result.content
+  return (result.content ?? []).flatMap((block) => (block.type === 'text' && block.text ? [block.text] : [])).join('\n')
+}
+
+/** Returns a warning for each failed publish_drafts call among the results. */
+function rejectedPublishes(timeline: TimelineEntry[], results: ToolResultBlock[], at: string): TimelineEntry[] {
+  const publishIds = new Set(timeline.flatMap((entry) => (entry.kind === 'step' && entry.label === TOOL_LABELS[PUBLISH_DRAFTS_TOOL] ? [entry.id] : [])))
+  return results
+    .filter((result) => result.is_error && publishIds.has(result.tool_use_id))
+    .map((result) => ({ kind: 'warning', id: `${result.tool_use_id}:rejected`, label: DRAFTS_REJECTED_LABEL, detail: resultText(result), at }))
 }
 
 export function bashStepLabel(command: string, description: unknown): string {
@@ -134,7 +150,10 @@ export function reduceTimeline(timeline: TimelineEntry[], message: SDKMessage, a
       const results = (message.message.content as { type: string }[]).filter(
         (b): b is ToolResultBlock => b.type === 'tool_result',
       )
-      return results.length ? markDone(timeline, new Set(results.map((r) => r.tool_use_id))) : timeline
+      if (results.length === 0) return timeline
+      const rejected = rejectedPublishes(timeline, results, at)
+      const done = markDone(timeline, new Set(results.map((r) => r.tool_use_id)))
+      return rejected.length ? [...done, ...rejected] : done
     }
     case 'system': {
       switch (message.subtype) {

@@ -9,12 +9,12 @@ function assistant(content: unknown[], parent: string | null = null, uuid = 'a1'
   return { type: 'assistant', uuid, session_id: 's', parent_tool_use_id: parent, message: { content } } as unknown as SDKMessage
 }
 
-function toolResult(toolUseId: string, parent: string | null = null): SDKMessage {
+function toolResult(toolUseId: string, parent: string | null = null, fields: Record<string, unknown> = {}): SDKMessage {
   return {
     type: 'user',
     session_id: 's',
     parent_tool_use_id: parent,
-    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId }] },
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, ...fields }] },
   } as unknown as SDKMessage
 }
 
@@ -39,6 +39,20 @@ describe('reduceTimeline', () => {
     expect(timeline).toEqual([
       { kind: 'step', id: 't1', label: 'Fetching PR metadata', detail: 'gh pr view 1 -R a/b --json title', done: true, at: AT },
     ])
+  })
+
+  it('warns when Rally rejects published drafts', () => {
+    const timeline = run([
+      assistant([{ type: 'tool_use', id: 't1', name: 'mcp__rally__publish_drafts', input: {} }]),
+      toolResult('t1', null, { is_error: true, content: [{ type: 'text', text: 'Rally did not accept these drafts.' }] }),
+    ])
+    expect(timeline.at(-1)).toEqual({
+      kind: 'warning',
+      id: 't1:rejected',
+      label: 'Rally rejected the drafts; Claude has to publish them again',
+      detail: 'Rally did not accept these drafts.',
+      at: AT,
+    })
   })
 
   it('labels graphql calls as GitHub queries', () => {

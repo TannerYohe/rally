@@ -59,7 +59,7 @@ PRs are squash-merged, so the PR title becomes the commit semantic-release reads
 
 ### Dashboard
 
-The **Reviewing** tab lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand. After you submit a review, Rally fetches that PR again, and a full refresh already in flight keeps that newer copy.
+The **Reviewing** tab lists open PRs that match **(author in your list AND repo in your list)**, plus any PR where your review is requested directly or that you have already reviewed, excluding your own PRs. A repo entry can be `owner/name` or `owner/*` for every repo in an org. An empty author or repo list means "any". Configure the lists in Settings → Pull requests. Rally refreshes on an interval and on demand. After you submit a review, Rally fetches that PR again, or every PR of a unit together, and a full refresh already in flight keeps those newer copies.
 
 Each row shows author, title, repo, age, phase, and a one-line summary. Claude Haiku writes the summary, and it is cached per head SHA. If summarizing fails, the row shows **Summary unavailable** with the error on hover, and Rally retries on the next refresh.
 
@@ -70,7 +70,15 @@ Hovering a row shows **Snooze** and **Hide**, which are also on the PR page:
 - **Snooze** hides the PR until its head commit changes or the author requests your review again. A request that was already open when you snoozed doesn't count; a new one after it clears does. Use it for a PR you know needs more work before your next round.
 - **Hide** keeps the PR hidden until you unhide it. Use it for a PR you'll never review.
 
-Hidden PRs leave the main list and the phase counts and collect in a collapsed **hidden** section at the bottom, which respects the author, repo, and draft filters. Each shows how it was hidden and an **Unhide** button. A PR with a review in progress always shows in the main list and hides again once the review is submitted or discarded. Hides are stored in `hidden-prs.json`. A snooze is dropped when its PR no longer appears in the list; a hide is kept for 30 days after its PR was last listed, so narrowing the repo or author lists doesn't lose it.
+Snooze and Hide on a unit apply to every PR in it, and the unit shows again as soon as any of its PRs does. Hidden PRs leave the main list and the phase counts and collect in a collapsed **hidden** section at the bottom, which respects the author, repo, and draft filters. Each shows how it was hidden and an **Unhide** button. A PR with a review in progress always shows in the main list and hides again once the review is submitted or discarded. Hides are stored in `hidden-prs.json`. A snooze is dropped when its PR no longer appears in the list; a hide is kept for 30 days after its PR was last listed, so narrowing the repo or author lists doesn't lose it.
+
+#### Linked PRs
+
+A change that spans repos usually ships as one PR per repo, each linking the others. Rally groups such PRs into a **unit**, shown as one card and reviewed in one session; see [Reviewing a unit](#reviewing-a-unit). Two PRs are linked when each one's description lists the other under a marker: a heading or a `Label:` line whose text includes one of the markers in Settings → Pull requests, such as `## Related PRs` or `Depends on:`. Markers match case-insensitively, and "PRs" and "pull requests" match "PR". PR URLs and `owner/repo#N` references on the marker's line, or in the block below it up to the next heading or blank line, count. Under a heading, the block also runs past blank lines until it has a reference and the next line doesn't continue a list, so an intro sentence or a list with blank lines between items is read too. HTML comments and code don't count, so template placeholders are ignored, and neither do references to the PR's own repo. Rally reads at most five references per description. The default markers include both halves of directional pairs, such as **Depends on** and **Required by**, so those links are mutual.
+
+Links join transitively, so A↔B and B↔C make one unit, up to five PRs. When a listed PR links a PR outside your queue, Rally fetches that PR, following links for up to three rounds, and lists it as a full member of the unit. A linked PR that is closed, merged, yours, or not found isn't grouped. If a lookup fails, Rally keeps the copy it had. A link only one side makes doesn't group the PRs; the PR page says so and offers **Link anyway**, which links them by hand, and **Dismiss**, which unlinks them by hand. **Link PR…** on the PR page links it with a PR URL or `owner/repo#N`, and **Unlink** on a PR in a unit takes it out of the unit; a hand unlink outranks links in either description. A PR you link by hand must be open and not yours. Hand links and unlinks are stored in `pr-links.json` and dropped 30 days after neither PR was last listed, so narrowing the repo or author lists doesn't lose them. My PRs doesn't group PRs.
+
+A unit's card shows a line per PR with its repo, title, size, and summary, the unit's phase, and how many repos it spans. Phase counts, filters, and the header count units. A unit matches a filter when any of its PRs does, and it sorts by its earliest opened date, its latest update, and its total size.
 
 ### Phases
 
@@ -84,6 +92,8 @@ In progress comes from Rally's own review sessions and takes precedence. The oth
 | Approved | Your latest approval or change request is an approval, and nothing changed since. Comment-only reviews don't change it. |
 | Pending changes | Anything else: you reviewed and nothing new has happened. |
 
+A unit of linked PRs takes the most urgent phase among its PRs, in the order In progress, Awaiting re-review, Unreviewed, Pending changes, Approved, so a unit is Approved only when every PR in it is.
+
 Phase rules live in `src/main/github/phase.ts`, and which of your reviews Rally fetches lives in `src/main/github/queries.ts`.
 
 ### Review skill
@@ -93,6 +103,8 @@ Rally doesn't include a review skill; bring your own. Install it where Claude Co
 - Take a PR URL as its argument and review that PR.
 - Produce a report and draft comments: inline comments on diff lines, an optional summary body, and optional replies to existing threads. Rally's system prompt tells Claude to send these to the app with `mcp__rally__publish_drafts`, so the skill doesn't need to know about Rally.
 - Leave posting to Rally. Claude can't write to GitHub; when you click **Post and submit**, Rally posts the published drafts itself without relying on the skill.
+
+For a unit of linked PRs, Rally passes every PR's URL, `/<skill> <URL> <URL>`, and its system prompt asks Claude to review them as one change and check the seams between them (contracts, payloads, flags, and deploy order), to write one report with a verdict and review body per PR, to tag every draft comment and earlier comment with its PR, and to clone each PR into its own folder under one `$WORK`. A skill written for one PR usually follows along, since the system prompt carries those steps.
 
 ### Reviews
 
@@ -111,6 +123,12 @@ A submitted session stays on the PR page with a link to the review on GitHub. **
 Each session runs in its own temp directory, with `TMPDIR` pointed at it, so the skill's work directory lands inside it. Rally deletes the directory after the review is submitted or discarded.
 
 Settings → Reviews picks the review skill, and the model and effort for the review session and, separately, for its reviewer subagents. Each defaults to **System default**, which uses your Claude Code settings (`~/.claude/settings.json`); subagents otherwise inherit the review model. Subagent choices are passed as `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT`.
+
+#### Reviewing a unit
+
+On the page of a PR in a unit, the header shows each PR in it, and **Start review** opens one session for all of them. Each PR belongs to one session at a time: starting a unit review replaces a session a member PR already had, asking first when that session has unsubmitted drafts, and it refuses while that session is running a turn, posting, or resolving threads. Every PR in the unit shows In progress until the session is submitted or discarded. The session covers the PRs that were linked when it started; if the unit changes later, the page says which PRs joined or left and offers **Start over**. A session started before a PR was linked says it covers only its own PR.
+
+The review header flags when any PR in the unit was updated after Claude's last successful turn started, and **Pull in changes** asks Claude what changed on each PR. Claude's drafts are grouped by PR on the **Drafts** tab, each group with its own review body, and the **Report** tab lists each PR's verdict. If Claude publishes a draft or earlier comment without its PR, repeats a draft id across PRs, or leaves a PR without a verdict, the tool call fails and Claude publishes again. **Post and submit** has a choice per PR: Comment, Approve, Request changes, or **Skip**, which posts nothing to that PR. Each PR gets its own GitHub review on its own head commit, with its own body, inline comments, and thread replies. Rally checks every PR before posting anything, then posts Request changes reviews first, then Comment, then Approve, and stops at the first failure, so an approval never lands without the change request it depends on. What posted stays posted: the page lists it, and submitting again posts only the PRs still missing. Until every PR is posted or skipped, Claude turns are blocked so posted drafts can't change underneath. Earlier threads resolve on the PR that owns them, once, after the whole unit has posted, and every PR in the unit is fetched again.
 
 ### My PRs
 
@@ -213,7 +231,7 @@ Settings → Appearance switches the skin: **Classic**, **Centre Court** (tennis
 
 ## Data
 
-Rally stores config, the PR caches, and summaries as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS), each review session as its own file under `sessions/` there, and each My PRs session under `author-sessions/`. The My PRs list keeps its own `authored-*.json` cache, summaries, seen heads, and hides. Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.
+Rally stores config, the PR caches, and summaries as JSON in Electron's `userData` directory (`~/Library/Application Support/rally` on macOS), each review session as its own file under `sessions/` there, and each My PRs session under `author-sessions/`. The My PRs list keeps its own `authored-*.json` cache, summaries, seen heads, and hides. PRs you linked or unlinked by hand are in `pr-links.json`. Review sessions of a unit are stored under the PR the review started from. Set `RALLY_USER_DATA_DIR` to use a different directory, for example for a test instance. Only one Rally instance can run per data directory. Claude session transcripts live where Claude Code keeps them.
 
 ## License
 

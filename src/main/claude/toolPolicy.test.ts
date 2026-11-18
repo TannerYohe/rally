@@ -29,6 +29,17 @@ git -C "$WORK/repo" diff origin/main...HEAD > "$WORK/pr.diff"`
     expect(bash(`rm -rf "${WORK}"`)).toBe(true)
   })
 
+  it('allows a clone per PR under one $WORK for a review of several PRs', () => {
+    const setup = `WORK=$(mktemp -d "\${TMPDIR:-/tmp}/review-pr-unit-XXXX")
+gh repo clone acme/api "$WORK/acme-api" -- --filter=blob:none --quiet
+gh repo clone acme/web "$WORK/acme-web" -- --filter=blob:none --quiet
+(cd "$WORK/acme-api" && gh pr checkout 12 -R acme/api --force)
+(cd "$WORK/acme-web" && gh pr checkout 3 -R acme/web --force)`
+    expect(bash(setup)).toBe(true)
+    expect(bash('gh pr view 3 -R acme/web --json title,body')).toBe(true)
+    expect(bash('gh pr review 3 -R acme/web --approve')).toBe(false)
+  })
+
   it('allows the multi-line review threads graphql query', () => {
     const command = `gh api graphql -f owner=acme -f repo=api -F number=12 -f query='
   query($owner:String!,$repo:String!,$number:Int!){

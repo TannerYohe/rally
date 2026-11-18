@@ -93,6 +93,20 @@ export interface Pr {
   summary: string | null
   summaryError: string | null
   hidden: PrHide | null
+  /** Keys of the other PRs reviewed together with this one, absent when it is reviewed on its own. */
+  linkedPrs?: string[]
+  /** PRs in other repos this PR's description links that don't link back. */
+  unreciprocatedLinks?: PrRef[]
+  /** True for a PR listed only because a PR in the list is linked with it. */
+  companion?: boolean
+}
+
+/** PR pairs linked or unlinked by hand, as prKeys. */
+export interface PrLinks {
+  linked: [string, string][]
+  unlinked: [string, string][]
+  /** When each PR in a pair was last listed, keyed by PR key. */
+  lastListedAt?: Record<string, string>
 }
 
 export type ModelChoice = 'opus' | 'opus[1m]' | 'sonnet' | 'sonnet[1m]' | 'haiku'
@@ -161,7 +175,22 @@ export interface Config {
   reviewDoneSound: ReviewDoneSound
   attentionSound: boolean
   approvedSound: boolean
+  /** Headings or labels in a PR description under which PR links in other repos name companion PRs. */
+  linkMarkers: string[]
 }
+
+export const DEFAULT_LINK_MARKERS = [
+  'linked PR',
+  'related PR',
+  'companion PR',
+  'sibling PR',
+  'paired PR',
+  'dependent PR',
+  'depends on',
+  'required by',
+  'requires',
+  'goes with',
+]
 
 export const DEFAULT_CONFIG: Config = {
   authors: [],
@@ -181,6 +210,7 @@ export const DEFAULT_CONFIG: Config = {
   reviewDoneSound: 'each',
   attentionSound: true,
   approvedSound: true,
+  linkMarkers: DEFAULT_LINK_MARKERS,
 }
 
 export function soundPlayback(cue: SoundCue, config: Pick<Config, 'skin' | 'soundPack' | 'soundVolume'>): SoundPlayback {
@@ -217,6 +247,16 @@ export const REVIEW_EVENT_LABELS: Record<ReviewEvent, string> = {
   REQUEST_CHANGES: 'Request changes',
 }
 
+/** A review event, or Skip to post nothing to that PR of a review of several PRs. */
+export type SubmitEvent = ReviewEvent | 'SKIP'
+
+export const SUBMIT_EVENT_LABELS: Record<SubmitEvent, string> = { ...REVIEW_EVENT_LABELS, SKIP: 'Skip' }
+
+export interface MemberVerdict {
+  prKey: string
+  event: SubmitEvent
+}
+
 export type Severity = 'blocker' | 'high' | 'medium' | 'nit'
 
 export interface RepliedComment {
@@ -241,6 +281,8 @@ export interface DraftComment {
   replyToCommentId: number | null
   /** Absent until Rally looks up the review comment this reply answers. */
   replyTarget?: ReplyTarget
+  /** The PR the comment is on, in a review of several linked PRs. */
+  prKey?: string
 }
 
 export const CONCERN_STATUSES = ['addressed', 'partly', 'not_addressed', 'pushed_back_accept', 'pushed_back_hold', 'moot'] as const
@@ -265,10 +307,19 @@ export interface PriorConcern {
   verdict: string
   status?: ConcernStatus
   threadId?: string | null
+  /** The PR the earlier comment is on, in a review of several linked PRs. */
+  prKey?: string
 }
 
 export function priorConcernThreadIds(drafts: Pick<Drafts, 'priorConcerns'> | null): string[] {
   return drafts?.priorConcerns.flatMap((c) => (c.threadId ? [c.threadId] : [])) ?? []
+}
+
+/** The verdict and review body for one PR in a review of several linked PRs. */
+export interface PrReviewDraft {
+  prKey: string
+  verdict: string
+  summaryBody: string
 }
 
 export interface Drafts {
@@ -278,6 +329,8 @@ export interface Drafts {
   summaryBody: string
   comments: DraftComment[]
   priorConcerns: PriorConcern[]
+  /** One per PR in a review of several linked PRs, which replaces verdict and summaryBody for each. */
+  prReviews?: PrReviewDraft[]
 }
 
 export type SessionStatus = 'running' | 'awaiting_feedback' | 'submitting' | 'submitted' | 'error' | 'cancelled'
@@ -364,12 +417,25 @@ export interface SessionCore {
   updatedAt: string
 }
 
-export interface ReviewSession extends SessionCore {
-  drafts: Drafts | null
+/** How submitting one PR of a review went: its posted review, the pending review an attempt left, or the error that stopped it. */
+export interface MemberSubmit {
   submitted: SubmittedReview | null
+  attemptReviewId?: number
+  error?: string
+}
+
+export interface ReviewSession extends SessionCore {
+  /** Every PR the session reviews, starting with pr; a single-PR review has one member. */
+  members: PrRef[]
+  drafts: Drafts | null
+  /** The session PR's posted review, or the first posted one when it was skipped, set once every PR posted or was skipped. */
+  submitted: SubmittedReview | null
+  /** How submitting each member went, keyed by PR key. */
+  memberSubmits: Record<string, MemberSubmit>
   threadResolution?: ThreadResolution | null
   resolvingThreads?: boolean
   threadsToResolveOnSubmit?: string[]
+  /** A pending review id saved by older versions, which loading moves into memberSubmits. */
   submitAttemptReviewId?: number
 }
 
@@ -509,12 +575,32 @@ export interface AuthorSession extends SessionCore {
   descriptionUpdatedAt: string | null
 }
 
-export function isSamePr(a: Pick<PrRef, 'owner' | 'repo' | 'number'>, b: Pick<PrRef, 'owner' | 'repo' | 'number'>): boolean {
-  return a.number === b.number && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+export type PrCoords = Pick<PrRef, 'owner' | 'repo' | 'number'>
+
+export function isSameRepo(a: Pick<PrRef, 'owner' | 'repo'>, b: Pick<PrRef, 'owner' | 'repo'>): boolean {
+  return a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+}
+
+export function isSamePr(a: PrCoords, b: PrCoords): boolean {
+  return a.number === b.number && isSameRepo(a, b)
+}
+
+/** Returns each PR once, in order, comparing owner and repo case-insensitively. */
+export function uniquePrs<T extends PrCoords>(prs: T[]): T[] {
+  return prs.filter((pr, index) => prs.findIndex((other) => isSamePr(other, pr)) === index)
 }
 
 export function prKey(owner: string, repo: string, number: number): string {
   return `${owner}/${repo}#${number}`
+}
+
+/** Returns a PR's key, owner/repo#N. */
+export function keyOf(pr: PrCoords): string {
+  return prKey(pr.owner, pr.repo, pr.number)
+}
+
+export function toPrRef(pr: PrRef): PrRef {
+  return { owner: pr.owner, repo: pr.repo, number: pr.number, url: pr.url }
 }
 
 export function headKey(pr: { id: string; headRefOid: string }): string {

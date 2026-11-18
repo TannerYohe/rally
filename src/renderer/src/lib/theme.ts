@@ -5,6 +5,10 @@ export const PRIMARY_BUTTON_CLASS =
 
 export const SECONDARY_BUTTON_CLASS = 'rounded-md bg-ink-800 px-3 py-1.5 text-sm hover:bg-ink-700 disabled:opacity-40'
 
+export const SMALL_BUTTON_CLASS = 'rounded-md px-2 py-0.5 text-xs text-ink-400 ring-1 ring-ink-800 hover:bg-ink-800 hover:text-ink-100 disabled:opacity-40'
+
+export const FIELD_CLASS = 'rounded-md bg-ink-950/60 px-2.5 py-1.5 text-sm text-ink-100 outline-none ring-1 ring-ink-800 focus:ring-secondary-400/50'
+
 interface PhaseTheme {
   accent: string
   badge: string

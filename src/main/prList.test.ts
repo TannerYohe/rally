@@ -478,6 +478,18 @@ describe('prList', () => {
         ])
       })
 
+      it('does not list a PR that left the unit when refreshing members', async () => {
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api()] })
+        mocks.fetchPrs.mockResolvedValueOnce(fetched(web()))
+        await prList.refresh()
+        prList.unlink('acme/web#2', ['acme/api#1'])
+
+        mocks.fetchPrs.mockResolvedValueOnce(fetched(api(), web()))
+        await prList.refreshMany([{ owner: 'acme', repo: 'api', number: 1 }, { owner: 'acme', repo: 'web', number: 2 }])
+
+        expect(prList.get().prs.map((pr) => pr.repo)).toEqual(['api'])
+      })
+
       it('drops a PR that closed and keeps one whose lookup failed when refreshing members', async () => {
         vi.spyOn(console, 'warn').mockImplementation(() => {})
         mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' }), web({ body: '' })] })

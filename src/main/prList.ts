@@ -245,7 +245,7 @@ class PrList extends EventEmitter {
     await this.refreshMany([{ owner, repo, number }])
   }
 
-  /** Fetches PRs together and updates the list once; a full refresh already in flight keeps these newer copies instead of its own. */
+  /** Fetches PRs together and updates the list once, keeping a PR the list didn't already list only while a listed PR links it. */
   async refreshMany(refs: PrCoords[]): Promise<void> {
     const startedDuringRefresh = this.state.refreshing ? this.refreshGeneration : null
     const { lookups } = await fetchPrs(refs, this.kind)
@@ -254,9 +254,9 @@ class PrList extends EventEmitter {
     const unknown = refs.filter((_, i) => lookups[i].status === 'unknown')
     if (unknown.length > 0) console.warn('Refreshing PRs left some unchanged after lookup errors', { prs: unknown.map(keyOf) })
     if (this.state.refreshing && this.refreshGeneration === startedDuringRefresh) for (const pr of fetched) this.fetchedDuringRefresh.set(pr.id, pr)
-    const companionIds = new Set(this.state.prs.filter((pr) => pr.companion).map((pr) => pr.id))
+    const listedIds = new Set(this.state.prs.filter((pr) => !pr.companion).map((pr) => pr.id))
     const fresh = this.decorate(
-      fetched.map((pr) => (companionIds.has(pr.id) ? { ...pr, companion: true } : pr)),
+      fetched.map((pr) => (this.source.links && !listedIds.has(pr.id) ? { ...pr, companion: true } : pr)),
       false,
     )
     const freshIds = new Set(fresh.map((pr) => pr.id))

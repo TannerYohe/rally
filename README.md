@@ -158,7 +158,9 @@ The **Changes** tab shows the checkout's uncommitted files and their diff, then 
 - A worktree Rally added is removed with its uncommitted edits, and so is its local branch with its unpushed commits if Rally created that branch.
 - Your own worktree, and every commit and edit in it, is left as is.
 
-Once a PR leaves My PRs, Rally removes its session the same way, unless it still has work: a running turn, unpushed commits, unposted replies, an open merge, or queued re-requests. A worktree Rally added is removed then only if it has no uncommitted edits. A last turn that failed or was cancelled doesn't keep it. The logic lives in `src/main/claude/authorSessions.ts`, and the git steps in `src/main/git/prClone.ts` and `src/main/git/localWorktree.ts`.
+If Rally can't remove a worktree it added, **Start over** keeps the session and names the folder to remove by hand.
+
+Once a PR leaves My PRs, Rally removes its session the same way, unless it still has work: a running turn, unpushed commits, unposted replies, an open merge, or queued re-requests. For a worktree, Rally reads its commits and edits again first, so work made there since Rally last looked keeps the session too. A worktree Rally added is removed then only if it has no uncommitted edits and its branch has no commits GitHub doesn't; otherwise the session stays. A last turn that failed or was cancelled doesn't keep it. The logic lives in `src/main/claude/authorSessions.ts`, and the git steps in `src/main/git/prClone.ts` and `src/main/git/localWorktree.ts`.
 
 ### Sounds
 

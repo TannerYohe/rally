@@ -88,9 +88,25 @@ describe('checkoutWorktree', () => {
 
     expect(await checkoutWorktree(['~/src'], target)).toEqual({ path, branch: 'feature/new', baseRef: 'origin/main', kind: 'rally_worktree' })
 
-    await removeRallyWorktree(added!, false)
+    await removeRallyWorktree(added!, { dropWork: false })
     expect(existsSync(path)).toBe(false)
     expect(git(clonePath, 'branch', '--list', 'feature/new').trim()).toBe('')
+  })
+
+  it('keeps a branch Rally created, and its worktree, when the branch has unpushed commits and work may not be dropped', async () => {
+    const seed = join(root, 'seed')
+    git(seed, 'checkout', '-b', 'unpushed', 'main')
+    git(seed, 'push', 'origin', 'unpushed')
+    const clone = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'unpushed', baseBranch: 'main' })
+    writeFileSync(join(clone!.path, 'local.txt'), 'local\n')
+    git(clone!.path, 'add', 'local.txt')
+    git(clone!.path, 'commit', '-m', 'local')
+
+    await expect(removeRallyWorktree(clone!, { dropWork: false })).rejects.toThrow("has commits GitHub doesn't")
+    expect(existsSync(clone!.path)).toBe(true)
+    await removeRallyWorktree(clone!, { dropWork: true })
+    expect(existsSync(clone!.path)).toBe(false)
+    expect(git(clonePath, 'branch', '--list', 'unpushed').trim()).toBe('')
   })
 
   it('adds a worktree on an existing local branch and keeps the branch when removing it', async () => {
@@ -98,15 +114,15 @@ describe('checkoutWorktree', () => {
     expect(added).toMatchObject({ kind: 'rally_worktree', createdBranch: false })
     writeFileSync(join(added!.path, 'scratch.txt'), 'edit\n')
 
-    await expect(removeRallyWorktree(added!, false)).rejects.toThrow()
-    await removeRallyWorktree(added!, true)
+    await expect(removeRallyWorktree(added!, { dropWork: false })).rejects.toThrow()
+    await removeRallyWorktree(added!, { dropWork: true })
     expect(existsSync(added!.path)).toBe(false)
     expect(git(clonePath, 'branch', '--list', 'local-only').trim()).toContain('local-only')
   })
 
   it('never removes a worktree Rally did not add', async () => {
     const found = await checkoutWorktree(['~/src'], { repo: 'acme/api', branch: 'mine', baseBranch: 'main' })
-    await removeRallyWorktree(found!, true)
+    await removeRallyWorktree(found!, { dropWork: true })
     expect(existsSync(found!.path)).toBe(true)
   })
 })

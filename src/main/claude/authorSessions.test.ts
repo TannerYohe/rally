@@ -140,6 +140,9 @@ mocks.stored = [
   stored(63, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
   stored(64, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, path: join(tmpdir(), 'rally-author-test-rally-worktree') } }),
   stored(65),
+  stored(66, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
+  stored(67, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
+  stored(68, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
   stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
     clone: { ...CLONE, syncedHead: 'old-head' },
@@ -677,6 +680,27 @@ describe('pruneUnlisted', () => {
     release()
     await vi.waitFor(() => expect(session(45).status).toBe('awaiting_feedback'))
   })
+
+  it('re-reads a worktree before pruning, removes the worktree without dropping work, and keeps the session when that fails', async () => {
+    const listed = new Set(mocks.stored.map((st) => st.prKey).filter((key) => key !== 'acme/api#66' && key !== 'acme/api#67'))
+    mocks.removeRallyWorktree.mockImplementation(async () => {
+      if (mocks.removeRallyWorktree.mock.calls.length > 1) throw new Error("The branch feature has commits GitHub doesn't.")
+    })
+    authorSessions.pruneUnlisted(listed)
+
+    await vi.waitFor(() => expect(mocks.removeRallyWorktree).toHaveBeenCalledTimes(2))
+    expect(mocks.removeRallyWorktree).toHaveBeenCalledWith(expect.objectContaining({ kind: 'rally_worktree' }), { dropWork: false })
+    expect(mocks.uncommittedPaths).toHaveBeenCalledWith(expect.objectContaining({ path: WORKTREE.path }))
+    await vi.waitFor(() => expect([authorSessions.getByPr('acme/api#66'), authorSessions.getByPr('acme/api#67')].filter(Boolean)).toHaveLength(1))
+  })
+
+  it('keeps a worktree session whose worktree has commits Rally hasn\'t seen yet', async () => {
+    mocks.localCommits.mockResolvedValue([{ oid: 'new', subject: 'made by hand' }])
+    const listed = new Set(mocks.stored.map((st) => st.prKey).filter((key) => key !== 'acme/api#68'))
+    authorSessions.pruneUnlisted(listed)
+    await vi.waitFor(() => expect(session(68).commits).toEqual([{ oid: 'new', subject: 'made by hand' }]))
+    expect(mocks.removeRallyWorktree).not.toHaveBeenCalled()
+  })
 })
 
 describe('checking out the PR branch', () => {
@@ -731,9 +755,16 @@ describe('checking out the PR branch', () => {
     expect(mocks.cloneBranch).toHaveBeenCalledWith(join(tmpdir(), 'rally', 'author-65'), expect.objectContaining({ headUrl: 'fork' }))
   })
 
-  it('removes the worktree Rally added, with its edits, on start over', () => {
+  it('removes the worktree Rally added, with its edits, on start over', async () => {
     const { clone } = session(64)
-    authorSessions.discard('author-64')
-    expect(mocks.removeRallyWorktree).toHaveBeenCalledWith(clone, true)
+    await authorSessions.discard('author-64')
+    expect(mocks.removeRallyWorktree).toHaveBeenCalledWith(clone, { dropWork: true })
+    expect(authorSessions.getByPr('acme/api#64')).toBeNull()
+  })
+
+  it('keeps the session and names the folder when start over cannot remove the worktree', async () => {
+    mocks.removeRallyWorktree.mockRejectedValue(new Error('git worktree remove failed: locked'))
+    await expect(authorSessions.discard('author-68')).rejects.toThrow(`Rally couldn't remove the worktree at ${WORKTREE.path}`)
+    expect(authorSessions.getByPr('acme/api#68')).not.toBeNull()
   })
 })

@@ -109,11 +109,18 @@ export async function checkoutWorktree(folders: string[], target: WorktreeTarget
   return { ...base, path: rallyPath, kind: 'rally_worktree', createdBranch }
 }
 
-/** Removes a worktree Rally added, and its local branch when Rally created that too; force also drops uncommitted edits. */
-export async function removeRallyWorktree(clone: CloneInfo, force: boolean): Promise<void> {
+/**
+ * Removes a worktree Rally added, and its local branch when Rally created that too. With dropWork, the worktree's uncommitted edits and the
+ * branch's unpushed commits go with them; without it, Rally refuses when either exists.
+ */
+export async function removeRallyWorktree(clone: CloneInfo, { dropWork }: { dropWork: boolean }): Promise<void> {
   if (checkoutKind(clone) !== 'rally_worktree' || !existsSync(clone.path)) return
   const root = await mainWorktree(clone.path)
   if (!root) return
-  await git(root, ['worktree', 'remove', ...(force ? ['--force'] : []), clone.path])
+  if (!dropWork && clone.createdBranch) {
+    const unpushed = (await git(root, ['rev-list', '--count', `refs/heads/${clone.branch}`, '--not', '--remotes=origin'])).trim()
+    if (unpushed !== '0') throw new Error(`The branch ${clone.branch} has commits GitHub doesn't.`)
+  }
+  await git(root, ['worktree', 'remove', ...(dropWork ? ['--force'] : []), clone.path])
   if (clone.createdBranch) await git(root, ['branch', '-D', clone.branch])
 }

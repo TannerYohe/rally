@@ -77,6 +77,8 @@ async function offBranchError(clone: CloneInfo): Promise<string | null> {
   return `The ${checkoutNoun(clone)} at ${clone.path} has ${current} checked out, not the PR branch \`${clone.branch}\`. Switch it back, or send a message so Rally checks the PR branch out again.`
 }
 
+const hasWorkToKeep = (session: AuthorSession) => hasUnsharedWork(session) || session.mergeConflicts.length > 0 || session.reviewersToReRequest.length > 0
+
 const sameFiles = (a: string[], b: string[]) => a.length === b.length && new Set([...a, ...b]).size === a.length
 
 async function assertOnPrBranch(clone: CloneInfo): Promise<void> {
@@ -408,31 +410,51 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /**
    * Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a running turn,
    * uncommitted edits, unpushed commits, unposted replies, an open merge, or queued re-requests. A failed or cancelled last turn doesn't count.
+   * A worktree session is checked against its worktree as it is now, and removed only once Rally has removed any worktree it added.
    */
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
       if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
+      if (isWorktree(session.clone)) {
+        void this.pruneWorktreeSession(session.id)
+        continue
+      }
       this.cloneFolderGone(session.id)
-      const hasWork = hasUnsharedWork(this.byId(session.id)) || session.mergeConflicts.length > 0
-      if (hasWork || session.reviewersToReRequest.length > 0) continue
+      if (hasWorkToKeep(this.byId(session.id))) continue
       console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId: session.id })
-      this.forget(session, false)
+      this.remove(session)
     }
   }
 
-  discard(sessionId: string): void {
-    const session = this.byId(sessionId)
-    if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish pushing or posting before discarding this session')
-    this.forget(session, true)
+  private async pruneWorktreeSession(sessionId: string): Promise<void> {
+    await this.whilePublishing(sessionId, async () => {
+      await this.refreshClone(sessionId)
+      const session = this.find(sessionId)
+      if (!session || hasWorkToKeep(session)) return
+      try {
+        if (session.clone) await removeRallyWorktree(session.clone, { dropWork: false })
+      } catch (error) {
+        console.info('Keeping the author session of a PR whose worktree Rally could not remove', { pr: session.pr.url, path: session.clone?.path, error })
+        return
+      }
+      console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId })
+      this.remove(session)
+    })
   }
 
-  /** Removes the session and a worktree Rally added for it; force also drops that worktree's uncommitted edits and unpushed commits. */
-  private forget(session: AuthorSession, force: boolean): void {
-    this.remove(session)
-    if (!session.clone) return
-    removeRallyWorktree(session.clone, force).catch((error: unknown) => {
-      console.error('Removing the worktree Rally added failed', { pr: session.pr.url, path: session.clone?.path, error })
+  /** Discards the session, its unposted replies, and any worktree Rally added for it with that worktree's edits and unpushed commits. */
+  async discard(sessionId: string): Promise<void> {
+    const session = this.byId(sessionId)
+    if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish pushing or posting before discarding this session')
+    await this.whilePublishing(sessionId, async () => {
+      this.cancel(sessionId)
+      if (!session.clone) return
+      await removeRallyWorktree(session.clone, { dropWork: true }).catch((error: unknown) => {
+        console.error('Removing the worktree Rally added failed', { pr: session.pr.url, path: session.clone?.path, error })
+        throw new Error(`Rally couldn't remove the worktree at ${session.clone?.path}: ${errorMessage(error)} Remove it with \`git worktree remove --force\`, then start over again.`)
+      })
     })
+    this.remove(session)
   }
 
   protected turnSetup(sessionId: string): TurnSetup {

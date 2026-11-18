@@ -59,12 +59,7 @@ export function PrHeader({ list, pr, title, repo, number, url }: Props) {
             </div>
           </div>
         </div>
-        {pr?.summary && (
-          <p className="mt-4 rounded-lg bg-secondary-500/5 px-4 py-3 text-sm text-ink-300 ring-1 ring-secondary-500/20">
-            <span className="mr-2 text-secondary-400">✦</span>
-            {pr.summary}
-          </p>
-        )}
+        {pr && <PrSummary pr={pr} className="mt-4 rounded-lg bg-secondary-500/5 px-4 py-3 ring-1 ring-secondary-500/20" />}
       </div>
 
       {pr && <DescriptionAndFiles pr={pr} />}

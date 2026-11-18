@@ -90,7 +90,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
     const blocked = submitBlockedReason(changes.instructions)
     if (blocked) throw new Error(blocked)
     if (isEmptyCommentReview(event, drafts, changes)) throw new Error(EMPTY_COMMENT_REVIEW_ERROR)
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       this.patch(sessionId, () => ({ status: 'submitting', error: null, threadsToResolveOnSubmit: resolveThreadIds }), true)
       await this.post(sessionId, pr, event, finalReview(drafts, changes), submitAttemptReviewId ?? null)
     })
@@ -139,7 +139,7 @@ class ReviewSessions extends ClaudeSessions<ReviewSession> {
   discard(sessionId: string): void {
     const session = this.byId(sessionId)
     if (session.resolvingThreads) throw new Error('Wait for Rally to finish resolving threads before discarding this review')
-    if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
+    if (this.busy.has(sessionId)) throw new Error('Wait for Rally to finish submitting this review before discarding it')
     this.remove(session)
   }
 

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   actionableItems,
   canPush,
+  checkoutNoun,
   cloneChangeCount,
   committableFiles,
+  discardQuestion,
   handledFindingIds,
   hasPendingWork,
   hasUnsharedWork,
@@ -11,6 +13,7 @@ import {
   pendingChangeCount,
   pendingReplies,
   sameDescription,
+  startOverQuestion,
 } from './authorSession'
 import { descriptionDraft, feedbackItem, itemResponse } from './authorSession.fixture'
 import type { AuthorSession, FeedbackItem } from './types'
@@ -146,5 +149,40 @@ describe('cloneChangeCount', () => {
     const commits = [{ oid: 'a', subject: 'fix' }]
     expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'b.ts'], mergeConflicts: [] })).toBe(3)
     expect(cloneChangeCount({ commits, uncommitted: ['a.ts', 'merged.ts'], mergeConflicts: ['a.ts'] })).toBe(1)
+  })
+})
+
+describe('discardQuestion', () => {
+  const clone = { path: '/w/api', branch: 'feature', baseRef: 'origin/main' }
+
+  it('counts the files for the temp clone', () => {
+    expect(discardQuestion(clone, ['a.ts', 'b.ts'])).toBe('Discard 2 uncommitted files in the clone?')
+  })
+
+  it('names the worktree folder and lists the files, up to ten', () => {
+    const files = Array.from({ length: 12 }, (_, i) => `f${i}.ts`)
+    const question = discardQuestion({ ...clone, kind: 'local_worktree' }, files)
+    expect(question).toContain('Discard 12 uncommitted files in the worktree at /w/api?')
+    expect(question).toContain('  f9.ts')
+    expect(question).not.toContain('f10.ts')
+    expect(question).toContain('and 2 more')
+  })
+})
+
+describe('startOverQuestion', () => {
+  const clone = { path: '/w/api', branch: 'feature', baseRef: 'origin/main' }
+
+  it('names what discarding deletes for each kind of checkout', () => {
+    expect(startOverQuestion(null)).toBe('Discard this session, its unposted replies, and description update?')
+    expect(startOverQuestion(clone)).toContain('its clone, unpushed commits')
+    expect(startOverQuestion({ ...clone, kind: 'local_worktree' })).toContain('Your worktree at /w/api keeps its edits and commits')
+    expect(startOverQuestion({ ...clone, kind: 'rally_worktree', createdBranch: true })).toContain('with its edits and unpushed commits')
+    expect(startOverQuestion({ ...clone, kind: 'rally_worktree', createdBranch: false })).toContain('Commits stay on feature')
+  })
+
+  it('calls a worktree a worktree and anything else the clone', () => {
+    expect(checkoutNoun({ ...clone, kind: 'rally_worktree' })).toBe('worktree')
+    expect(checkoutNoun(clone)).toBe('clone')
+    expect(checkoutNoun(null)).toBe('clone')
   })
 })

@@ -1,16 +1,20 @@
-import { existsSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { basename, isAbsolute, join, resolve, sep } from 'node:path'
+import { realPath } from '../realPath'
 import { RALLY_TOOL_PREFIX } from './rallyTools'
 import { topLevelMutationFields } from './graphqlMutations'
 import { parseShellWords, splitShellCommand, type Redirect } from './shellCommand'
+import { GITHUB_URL_PREFIXES, githubRepoOf, NO_GITHUB_REMOTES, type GithubRemotes } from '../git/githubRemotes'
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string }
 
+/** sandboxed limits writes to the temp directory and blocks infrastructure, remote, and system commands; open allows everything except pushes and GitHub writes. */
+export type ToolAccess = 'sandboxed' | 'open'
+
 export interface PolicyContext {
   cwd: string
-  /** Repos where Rally owns commits and merges, so only git commands that read are allowed. */
-  readOnlyGitRepos?: string[]
+  /** Absent means sandboxed. */
+  access?: ToolAccess
 }
 
 interface ShellState {
@@ -94,19 +98,14 @@ const GIT_REPO_FLAGS = new Set(['-C', '--git-dir', '--work-tree'])
 
 const GIT_VALUE_FLAGS = new Set(['-c', '--config-env', '--namespace', '--super-prefix'])
 
+const GIT_CONFIG_FLAGS = new Set(['-c', '--config-env'])
+
+const GITHUB_HOST = /(?:^|[/@.])github\.com(?:[/:]|$)/i
+
 const GIT_WORKTREE_COMMANDS = new Set([
   'add', 'am', 'apply', 'checkout', 'cherry-pick', 'clean', 'commit', 'merge', 'mv', 'pull', 'rebase', 'reset', 'restore',
   'revert', 'rm', 'stash', 'switch',
 ])
-
-const READ_ONLY_GIT_COMMANDS = new Set([
-  'status', 'diff', 'log', 'show', 'blame', 'annotate', 'grep', 'ls-files', 'ls-tree', 'rev-parse', 'rev-list', 'merge-base',
-  'cat-file', 'describe', 'shortlog', 'diff-tree', 'range-diff', 'name-rev', 'for-each-ref', 'show-ref', 'check-ignore', 'help',
-  'version',
-])
-
-const READ_ONLY_REPO_REASON =
-  'Rally commits and merges in this clone itself. For a fix item, list the files you changed with a commit message in publish_responses; otherwise say which files you changed, and the user commits them from the Changes tab.'
 
 const GH_API_VALUE_FLAGS = new Set([
   '-X', '--method', '-H', '--header', '-f', '-F', '--field', '--raw-field', '--input', '-q', '--jq', '-t', '--template',
@@ -126,12 +125,59 @@ const READ_METHODS = new Set(['GET', 'HEAD'])
 
 const GITHUB_WRITE_REASON = 'Rally blocks GitHub writes. It posts reviews and replies itself when the user asks.'
 
+const GIT_PUSH_REASON = 'git push is not permitted in Rally. Rally pushes once the user approves the diff.'
+
+const GIT_CONFIG_REASON = 'Rally blocks setting git aliases, URL rewrite rules, and push URLs, setting remote URLs through git config, and remotes pointed at GitHub URLs its push rewrite misses.'
+
+const GIT_CONFIG_ENV_REASON = "Rally blocks changing the GIT_CONFIG_* environment, which carries its push URL rewrite."
+
+const GIT_CONFIG_WRITE_FLAGS = new Set([
+  '--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section', '--edit', '-e',
+])
+
+const GIT_CONFIG_WRITE_SUBCOMMANDS = new Set(['set', 'unset', 'rename-section', 'remove-section', 'edit'])
+
+const GIT_CONFIG_READ_SUBCOMMANDS = new Set(['get', 'list'])
+
+const GIT_CONFIG_SUBCOMMANDS = new Set([...GIT_CONFIG_WRITE_SUBCOMMANDS, ...GIT_CONFIG_READ_SUBCOMMANDS])
+
+const GIT_CONFIG_VALUE_FLAGS = new Set(['--file', '-f', '--blob', '--type', '--default', '--comment'])
+
+const ENV_VALUE_FLAGS = new Set(['u', 'C', 'P'])
+
+const GIT_CONFIG_ENV = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)(?:\+?=|$)/
+
+const GIT_PUSH_PROGRAMS = new Set(['git-push', 'git-send-pack', 'git-receive-pack'])
+
 const TEMP_ROOTS = [...new Set([tmpdir(), '/tmp'].map((root) => realPath(toNativePath(root))))]
 
 const WORK_STAND_IN = join(realPath(tmpdir()), 'rally-work')
 
+const BLOCKED_PUSH_URL = 'rally-blocked-push://'
+
+/**
+ * Returns git config entries for the environment of a turn with open access, added after any the environment already sets, that rewrite
+ * every common GitHub URL form, and each GitHub URL the checkout's remotes use, to one git can't push to, whatever command runs git.
+ * pushInsteadOf covers remote URLs; insteadOf covers explicit push URLs, which pushInsteadOf skips, unless the push URL prefixes a fetch URL.
+ */
+export function pushBlockingGitEnv(env: NodeJS.ProcessEnv, remotes: GithubRemotes = NO_GITHUB_REMOTES): Record<string, string> {
+  const rules = [
+    ...[...GITHUB_URL_PREFIXES, ...remotes.urls].map((url) => ['pushInsteadOf', url]),
+    ...remotes.pushUrls.filter((url) => !remotes.urls.some((fetchUrl) => fetchUrl.startsWith(url))).map((url) => ['insteadOf', url]),
+  ]
+  const start = Number(env.GIT_CONFIG_COUNT) || 0
+  const entries: Record<string, string> = { GIT_CONFIG_COUNT: String(start + rules.length) }
+  rules.forEach(([rule, url], i) => {
+    entries[`GIT_CONFIG_KEY_${start + i}`] = `url.${BLOCKED_PUSH_URL}.${rule}`
+    entries[`GIT_CONFIG_VALUE_${start + i}`] = url
+  })
+  return entries
+}
+
 const deny = (reason: string): ToolDecision => ({ allow: false, reason })
 const ALLOW: ToolDecision = { allow: true }
+
+const isOpen = (context: PolicyContext) => context.access === 'open'
 
 export function decideToolUse(toolName: string, input: Record<string, unknown>, context: PolicyContext): ToolDecision {
   if (ALWAYS_ALLOWED_TOOLS.has(toolName) || toolName.startsWith(RALLY_TOOL_PREFIX) || isReadOnlyMcpTool(toolName)) {
@@ -140,18 +186,30 @@ export function decideToolUse(toolName: string, input: Record<string, unknown>, 
   if (toolName === 'AskUserQuestion') {
     return deny('AskUserQuestion is unavailable in Rally. Ask the question in plain text and end your turn.')
   }
-  if (FILE_EDIT_TOOLS.has(toolName)) return decideFileEdit(String(input.file_path ?? input.notebook_path ?? ''), context)
   if (toolName === 'Bash') return decideBash(String(input.command ?? ''), context)
+  if (isOpen(context)) return isGithubMcpWrite(toolName) ? deny(GITHUB_WRITE_REASON) : ALLOW
+  if (FILE_EDIT_TOOLS.has(toolName)) return decideFileEdit(String(input.file_path ?? input.notebook_path ?? ''), context)
   return deny(`${toolName} is not permitted in Rally review sessions.`)
 }
 
-function isReadOnlyMcpTool(toolName: string): boolean {
+function mcpToolWords(toolName: string): { server: string; words: string[] } | null {
   const match = toolName.match(/^mcp__(.+?)__(.+)$/)
-  if (!match) return false
+  if (!match) return null
   const [, server, action] = match
-  const words = action.split(/[-_]|(?=[A-Z])/).map((w) => w.toLowerCase())
-  const verb = server.toLowerCase().endsWith(words[0]) ? words[1] : words[0]
+  return { server: server.toLowerCase(), words: action.split(/[-_]|(?=[A-Z])/).map((w) => w.toLowerCase()) }
+}
+
+function isReadOnlyMcpTool(toolName: string): boolean {
+  const tool = mcpToolWords(toolName)
+  if (!tool) return false
+  const verb = tool.server.endsWith(tool.words[0]) ? tool.words[1] : tool.words[0]
   return READ_ONLY_MCP_VERBS.has(verb)
+}
+
+/** Treats a GitHub MCP tool as a write unless any word of its name is a read verb, as in pull_request_read. */
+function isGithubMcpWrite(toolName: string): boolean {
+  const tool = mcpToolWords(toolName)
+  return tool !== null && tool.server.includes('github') && !tool.words.some((word) => READ_ONLY_MCP_VERBS.has(word))
 }
 
 function decideFileEdit(path: string, context: PolicyContext): ToolDecision {
@@ -160,7 +218,7 @@ function decideFileEdit(path: string, context: PolicyContext): ToolDecision {
 }
 
 function decideBash(command: string, context: PolicyContext): ToolDecision {
-  return decideScript(command, { cwd: context.cwd, workTrusted: workIsTemp(command, context) }, context)
+  return decideScript(command, { cwd: context.cwd, workTrusted: !isOpen(context) && workIsTemp(command, context) }, context)
 }
 
 function decideScript(script: string, state: ShellState, context: PolicyContext): ToolDecision {
@@ -182,7 +240,7 @@ function workIsTemp(command: string, context: PolicyContext): boolean {
 
 function decideSegment(segment: string, state: ShellState, context: PolicyContext): ToolDecision {
   const { words, redirects } = parseShellWords(segment)
-  const unsafeRedirect = redirects.find((r) => r.operator.startsWith('>') && !isWritableTarget(r, state))
+  const unsafeRedirect = !isOpen(context) && redirects.find((r) => r.operator.startsWith('>') && !isWritableTarget(r, state))
   if (unsafeRedirect) {
     return deny(`Rally only redirects output into the temp directory, not \`${unsafeRedirect.target}\`.`)
   }
@@ -192,6 +250,7 @@ function decideSegment(segment: string, state: ShellState, context: PolicyContex
     start < words.length &&
     (SHELL_KEYWORDS.has(words[start]) || words[start].endsWith('()') || ASSIGNMENT.test(words[start]))
   ) {
+    if (isOpen(context) && GIT_CONFIG_ENV.test(words[start])) return deny(GIT_CONFIG_ENV_REASON)
     start++
   }
   if (start === words.length) return ALLOW
@@ -203,6 +262,7 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   const programPath = /[$`]/.test(word) ? expandPath(word, state) : word
   if (!programPath) return deny(`Rally needs to see which program \`${word}\` runs. Call it by name or path.`)
   const program = programName(programPath)
+  if (isOpen(context)) return decideOpenCommand(program, args, segment, state, context)
 
   if (REMOTE_SHELL_COMMANDS.has(program)) return deny(`\`${program}\` reaches other machines, so Rally blocks it.`)
   if (INFRASTRUCTURE_COMMANDS.has(program)) return deny(`\`${program}\` acts on live infrastructure, so Rally blocks it.`)
@@ -214,9 +274,9 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
   const operands = args.filter((a) => !a.startsWith('-'))
   switch (program) {
     case 'gh':
-      return decideGh(args, state, context)
+      return decideGh(args, state)
     case 'git':
-      return decideGit(args, state, context)
+      return decideGit(args, state)
     case 'curl':
       return decideRequest(program, args, CURL_METHOD_FLAGS, CURL_BODY_FLAGS)
     case 'wget':
@@ -248,6 +308,31 @@ function decideCommand(words: string[], segment: string, state: ShellState, cont
       return requireTemp(program, args.filter((a) => a.startsWith('of=')).map((a) => a.slice(3)), state)
     case 'sed':
       return decideSed(args, state)
+    case 'find':
+      return decideFind(args, segment, state, context)
+    default:
+      return ALLOW
+  }
+}
+
+/** Under open access, checks only commands that could push or write to GitHub, following them into nested shells and wrappers. */
+function decideOpenCommand(program: string, args: string[], segment: string, state: ShellState, context: PolicyContext): ToolDecision {
+  if (GIT_PUSH_PROGRAMS.has(program)) return deny(GIT_PUSH_REASON)
+  if (touchesGitConfigEnv(program, args)) return deny(GIT_CONFIG_ENV_REASON)
+  if (SHELLS.has(program)) return decideShell(args, state, context)
+  if (WRAPPER_COMMANDS.has(program)) return decideWrapped(args, segment, state, context)
+  if (INPUT_ARGUMENT_COMMANDS.has(program)) return decideXargs(args, segment, state, context)
+  switch (program) {
+    case 'gh':
+      return decideGhWrite(args)
+    case 'git':
+      return decideOpenGit(args, state)
+    case 'curl':
+      return decideOpenRequest(args, CURL_METHOD_FLAGS, CURL_BODY_FLAGS)
+    case 'wget':
+      return decideOpenRequest(args, WGET_METHOD_FLAGS, WGET_BODY_FLAGS)
+    case 'eval':
+      return decideScript(args.join(' '), { ...state }, context)
     case 'find':
       return decideFind(args, segment, state, context)
     default:
@@ -310,7 +395,7 @@ function decideFind(args: string[], segment: string, state: ShellState, context:
   const firstExpression = args.findIndex((a) => a.startsWith('-') || a === '(' || a === '!')
   const roots = args.slice(0, firstExpression < 0 ? args.length : firstExpression)
   const searchRoots = roots.length ? roots : ['.']
-  if (args.includes('-delete')) {
+  if (args.includes('-delete') && !isOpen(context)) {
     const decision = requireTemp('find -delete', searchRoots, state)
     if (!decision.allow) return decision
   }
@@ -386,11 +471,6 @@ function isRemotePath(path: string): boolean {
   return REMOTE_PATH.test(path) && !(IS_WINDOWS && WINDOWS_DRIVE_PATH.test(path))
 }
 
-function realPath(path: string): string {
-  if (existsSync(path)) return realpathSync.native(path)
-  const parent = dirname(path)
-  return parent === path ? path : join(realPath(parent), basename(path))
-}
 
 function isTempPath(word: string, state: ShellState): boolean {
   const path = expandPath(word, state)
@@ -399,30 +479,35 @@ function isTempPath(word: string, state: ShellState): boolean {
   return TEMP_ROOTS.some((root) => real.startsWith(root + sep))
 }
 
-function isInReadOnlyRepo(dir: string | null, context: PolicyContext): boolean {
-  if (!dir) return false
-  const real = realPath(dir)
-  return (context.readOnlyGitRepos ?? []).some((repo) => {
-    const root = realPath(repo)
-    return real === root || real.startsWith(root + sep)
-  })
+interface GitInvocation {
+  repoDir: string | null
+  /** The values of `-c` and `--config-env` flags before the subcommand. */
+  configs: string[]
+  subcommand: string
+  rest: string[]
 }
 
-function decideGit(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
+/** Splits git's arguments into the repo it runs in, the subcommand, and the subcommand's arguments. */
+function parseGit(args: string[], state: ShellState): GitInvocation {
   let repoDir = state.cwd
+  const configs: string[] = []
   let index = 0
   while (index < args.length && args[index].startsWith('-')) {
     const [flag, inline] = args[index].split(/=(.*)/s)
-    if (GIT_REPO_FLAGS.has(flag)) {
-      repoDir = expandPath(inline ?? args[index + 1] ?? '', { ...state, cwd: repoDir })
-    }
+    const value = inline ?? args[index + 1] ?? ''
+    if (GIT_REPO_FLAGS.has(flag)) repoDir = expandPath(value, { ...state, cwd: repoDir })
+    if (GIT_CONFIG_FLAGS.has(flag)) configs.push(value)
     index += inline === undefined && (GIT_REPO_FLAGS.has(flag) || GIT_VALUE_FLAGS.has(flag)) ? 2 : 1
   }
-  const [subcommand, ...rest] = args.slice(index)
-  if (subcommand === 'push') return deny('git push is not permitted in Rally.')
-  if (isInReadOnlyRepo(repoDir, context) && !READ_ONLY_GIT_COMMANDS.has(subcommand)) return deny(READ_ONLY_REPO_REASON)
+  const [subcommand = '', ...rest] = args.slice(index)
+  return { repoDir, configs, subcommand, rest }
+}
+
+function decideGit(args: string[], state: ShellState): ToolDecision {
+  const { repoDir, subcommand, rest } = parseGit(args, state)
+  if (subcommand === 'push') return deny(GIT_PUSH_REASON)
   if (subcommand === 'config' && rest.some((a) => a === '--global' || a === '--system')) {
-    if (!rest.some((a) => READ_ONLY_GIT_CONFIG_FLAGS.has(a))) return deny('Rally does not change your global git config.')
+    if (isGitConfigWrite(rest.filter((a) => a !== '--global' && a !== '--system'))) return deny('Rally does not change your global git config.')
   }
   if (GIT_WORKTREE_COMMANDS.has(subcommand) && !(repoDir && isTempPath(repoDir, state))) {
     return deny(`Rally only runs \`git ${subcommand}\` in repos under the temp directory.`)
@@ -430,12 +515,123 @@ function decideGit(args: string[], state: ShellState, context: PolicyContext): T
   return ALLOW
 }
 
-function decideGh(args: string[], state: ShellState, context: PolicyContext): ToolDecision {
-  if (args[0] === 'api') return decideGhApi(args.slice(1))
-  if (args[1] === 'checkout' && isInReadOnlyRepo(state.cwd, context)) return deny(READ_ONLY_REPO_REASON)
+/**
+ * Under open access, blocks git push and send-pack, and git config that could push under another name or around Rally's push URL rewrite:
+ * setting aliases, URL rewrite rules, remote URLs, or push URLs, and pointing a remote at a GitHub URL the rewrite doesn't cover.
+ */
+function decideOpenGit(args: string[], state: ShellState): ToolDecision {
+  const { configs, subcommand, rest } = parseGit(args, state)
+  if (subcommand === 'push' || subcommand === 'send-pack') return deny(GIT_PUSH_REASON)
+  const setsGuardedKey = subcommand === 'config' && rest.some(isGuardedGitKey) && isGitConfigWrite(rest)
+  const operands = rest.filter((a) => !a.startsWith('-'))
+  const remoteUrlChange = subcommand === 'remote' && ['add', 'set-url'].includes(operands[0])
+  const pointsRemoteAtUncoveredUrl = remoteUrlChange && (rest.includes('--push') || operands.slice(1).some(isUncoveredGithubUrl))
+  if (configs.some(isGuardedGitKey) || setsGuardedKey || pointsRemoteAtUncoveredUrl) return deny(GIT_CONFIG_REASON)
+  return ALLOW
+}
+
+const isGuardedGitKey = (word: string) => /^(?:alias\.|url\.|remote\..+\.(?:push)?url(?:=|$))/i.test(word)
+
+const isUncoveredGithubUrl = (url: string) => githubRepoOf(url) !== null && !GITHUB_URL_PREFIXES.some((prefix) => url.startsWith(prefix))
+
+/**
+ * Returns whether `git config` arguments change a value rather than read one: a write flag or subcommand, or a key followed by a value.
+ * In the form without a subcommand, every argument after the key is a value, even one starting with a dash.
+ */
+function isGitConfigWrite(args: string[]): boolean {
+  const flags: string[] = []
+  const operands: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    if (operands.length > 0 && !GIT_CONFIG_SUBCOMMANDS.has(operands[0])) operands.push(args[i])
+    else if (!args[i].startsWith('-')) operands.push(args[i])
+    else {
+      flags.push(args[i])
+      if (GIT_CONFIG_VALUE_FLAGS.has(args[i])) i++
+    }
+  }
+  if (flags.some((flag) => READ_ONLY_GIT_CONFIG_FLAGS.has(flag))) return false
+  if (flags.some((flag) => GIT_CONFIG_WRITE_FLAGS.has(flag.split('=')[0]))) return true
+  if (GIT_CONFIG_WRITE_SUBCOMMANDS.has(operands[0])) return true
+  if (GIT_CONFIG_READ_SUBCOMMANDS.has(operands[0])) return false
+  return operands.length >= 2
+}
+
+/** Under open access, blocks commands that set, clear, or drop the git config environment carrying Rally's push URL rewrite. */
+function touchesGitConfigEnv(program: string, args: string[]): boolean {
+  switch (program) {
+    case 'unset':
+    case 'export':
+    case 'declare':
+    case 'typeset':
+    case 'local':
+    case 'readonly':
+      return args.some((a) => GIT_CONFIG_ENV.test(a))
+    case 'env':
+      return envClearsGitConfig(args)
+    case 'exec':
+      return execClearsEnvironment(args)
+    default:
+      return false
+  }
+}
+
+/** Reads env's own options and assignments, up to the program it runs, for any that clear the environment or a GIT_CONFIG_* variable. */
+function envClearsGitConfig(args: string[]): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (ASSIGNMENT.test(arg)) {
+      if (GIT_CONFIG_ENV.test(arg)) return true
+      continue
+    }
+    if (arg === '-') return true
+    if (!arg.startsWith('-')) return false
+    if (arg.startsWith('--')) {
+      const [name, inline] = arg.split(/=(.*)/s)
+      const isLong = (option: string, shortest: number) => name.length >= shortest && option.startsWith(name)
+      if (isLong('--ignore-environment', 3) || isLong('--split-string', 3)) return true
+      if (isLong('--unset', 3)) {
+        if (GIT_CONFIG_ENV.test(inline ?? args[++i] ?? '')) return true
+      } else if (inline === undefined && isLong('--chdir', 3)) {
+        i++
+      }
+      continue
+    }
+    for (let j = 1; j < arg.length; j++) {
+      if (arg[j] === 'i' || arg[j] === 'S') return true
+      if (!ENV_VALUE_FLAGS.has(arg[j])) continue
+      const value = arg.slice(j + 1) || args[++i] || ''
+      if (arg[j] === 'u' && GIT_CONFIG_ENV.test(value)) return true
+      break
+    }
+  }
+  return false
+}
+
+/** Reads exec's own options, up to the program it runs, for -c, which clears the environment. */
+function execClearsEnvironment(args: string[]): boolean {
+  for (let i = 0; i < args.length && args[i].startsWith('-'); i++) {
+    if (args[i].includes('c')) return true
+    if (args[i].endsWith('a')) i++
+  }
+  return false
+}
+
+/** Under open access, blocks curl and wget requests to GitHub other than reads. */
+function decideOpenRequest(args: string[], methodFlags: string[], bodyFlags: string[]): ToolDecision {
+  if (!args.some((a) => GITHUB_HOST.test(a))) return ALLOW
+  return READ_METHODS.has(requestMethod(args, methodFlags, bodyFlags)) ? ALLOW : deny(GITHUB_WRITE_REASON)
+}
+
+function decideGh(args: string[], state: ShellState): ToolDecision {
   if (args[1] === 'checkout' && !(state.cwd && isTempPath(state.cwd, state))) {
     return deny('Rally only runs `gh pr checkout` in repos under the temp directory.')
   }
+  return decideGhWrite(args)
+}
+
+/** Blocks gh commands that write to GitHub. */
+function decideGhWrite(args: string[]): ToolDecision {
+  if (args[0] === 'api') return decideGhApi(args.slice(1))
   if (args[0] === 'search' || READ_ONLY_GH_VERBS.has(args[1])) return ALLOW
   return deny(`\`gh ${args.slice(0, 2).join(' ')}\` is not permitted in Rally.`)
 }

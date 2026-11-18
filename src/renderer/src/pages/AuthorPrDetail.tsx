@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
-import { canPush, committableFiles, handledFindingIds, pendingChangeCount, PUSH_BEFORE_POSTING_ERROR, sameDescription } from '@shared/authorSession'
+import {
+  canPush,
+  committableFiles,
+  discardQuestion,
+  handledFindingIds,
+  pendingChangeCount,
+  PUSH_BEFORE_POSTING_ERROR,
+  sameDescription,
+  startOverQuestion,
+} from '@shared/authorSession'
 import { prKey, type AuthorSession, type PrDescription, type PrRef } from '@shared/types'
 import { BusyDot } from '../components/BusyDot'
 import { ChangesPanel } from '../components/ChangesPanel'
@@ -113,7 +122,7 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
       feedback.reload()
     })
   const startOver = () => {
-    if (!session || !window.confirm('Discard this session, its clone, unpushed commits, unposted replies, and description update?')) return
+    if (!session || !window.confirm(startOverQuestion(session.clone))) return
     void run(async () => {
       await window.rally.discardAuthorSession(session.id)
       onSession(null)
@@ -240,7 +249,8 @@ function RespondPanel({ prRef, session, onSession }: RespondPanelProps) {
             onResolveConflicts={() => run(() => window.rally.resolveMergeConflicts(session.id))}
             onAbortMerge={() => window.confirm('Abort the merge and drop Claude\'s conflict edits?') && run(() => window.rally.abortMerge(session.id))}
             onDiscardUncommitted={() =>
-              window.confirm(`Discard ${plural(leftBehind, 'uncommitted file')} in the clone?`) && run(() => window.rally.discardUncommitted(session.id))
+              window.confirm(discardQuestion(session.clone, committableFiles(session))) &&
+              run(() => window.rally.discardUncommitted(session.id, committableFiles(session)))
             }
             onCommitUncommitted={(message) => run(() => window.rally.commitUncommitted(session.id, message))}
           />

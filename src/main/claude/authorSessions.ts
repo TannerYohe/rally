@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import {
   actionableItems,
   canReplyTo,
+  checkoutKind,
+  checkoutNoun,
   COMMIT_PLACEHOLDER,
   hasPendingWork,
   hasUnsharedWork,
+  isWorktree,
   newAuthorSession,
   normalizedDescription,
   PUSH_BEFORE_POSTING_ERROR,
@@ -34,33 +36,36 @@ import {
 import { errorMessage } from '@shared/errors'
 import {
   abortMerge,
-  CLONE_DIR_NAME,
-  cloneBranch,
   cloneDiff,
   commitAll,
   commitFiles,
   concludeMerge,
   discardUncommitted,
+  headOf,
+  latestCommitTouching,
   localCommits,
   MergeConflictError,
   integrateRemote,
   pushClone,
-  syncClone,
   UncommittedChangesError,
   uncommittedDiff,
   uncommittedPaths,
 } from '../git/prClone'
+import { removeRallyWorktree } from '../git/localWorktree'
+import { githubRemotes } from '../git/githubRemotes'
 import { acknowledgeFeedbackItem, fetchFeedbackItems } from '../github/authorFeedback'
 import { github } from '../github/client'
 import { uniqueLogins } from '../github/logins'
 import { fetchApprovers, isRejectedRequest, repliedReviewers, requestReview, reviewersReady } from '../github/reviewRequests'
-import { fetchCloneSource, postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
+import { postAuthorReply, resolveFeedbackThread } from '../github/authorReplies'
 import { fetchDescription, updateDescription } from '../github/prDescription'
 import { authoredPrList, type SessionState } from '../prList'
 import { authorSessionsDir, configFile } from '../store'
 import { createAuthorServer, type PublishedResponse } from './authorTools'
+import type { SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeSessions, now, sessionDir, type TurnSetup } from './claudeSessions'
 import { AUTHOR_PROTOCOL, authorActionsPrompt, descriptionPrompt, mergeConflictPrompt, reviewPrompt } from './prompts'
+import { assertOnPrBranch, CHECKOUT_REASONS, chooseCheckout, offBranchError, type Checkout } from './authorCheckout'
 
 const INTERRUPTED_TURN_ERROR = 'Interrupted when Rally closed. Send a message or run actions to resume.'
 const INTERRUPTED_PUBLISH_ERROR = 'Rally closed while pushing or posting. Check the PR on GitHub before trying again.'
@@ -69,6 +74,10 @@ const NOTHING_TO_COMMIT_ERROR = 'Claude listed files for this fix, but they had 
 const TURN_DID_NOT_FINISH_ERROR = `The turn didn't finish, so Rally didn't commit these files. Run Fix again.`
 const CLONE_LOST_ERROR = `Rally's clone of this PR is gone, probably cleared from the temp folder, and its unpushed commits with it. Start over to clone again.`
 const CLONE_CLEARED_ERROR = "Rally's clone of this PR was cleared from the temp folder, and its uncommitted edits with it."
+const WORKTREE_GONE_ERROR = 'The worktree for this PR is gone. Send a message or run actions to check the branch out again; commits on the branch are kept.'
+const WORKTREE_CLEARED_ERROR = 'The worktree for this PR was removed, and its uncommitted edits with it.'
+const DISCARD_CHANGED_ERROR = 'The uncommitted files changed since Rally last read them. Check the list in the Changes tab and discard again.'
+const PROJECT_SETTINGS: SettingSource[] = ['user', 'project', 'local']
 const STALE_ITEMS_ERROR = 'Some of these comments were resolved or removed on GitHub. Refresh and pick again.'
 const NOTHING_TO_PUSH_ERROR = 'There are no commits or description update to push.'
 const EMPTY_TITLE_ERROR = "The PR title can't be empty."
@@ -86,12 +95,14 @@ function withoutItems(session: AuthorSession, drop: (itemId: string) => boolean)
   }
 }
 
-/** Marks fixes waiting on a commit as not committed, for a turn that didn't finish. */
-function withoutPendingCommits(responses: Record<string, ItemResponse>): Record<string, ItemResponse> {
-  return Object.fromEntries(
-    Object.entries(responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError: TURN_DID_NOT_FINISH_ERROR } : r]),
-  )
+/** Marks fixes waiting on a commit as not committed, with the reason. */
+function withoutPendingCommits(responses: Record<string, ItemResponse>, commitError = TURN_DID_NOT_FINISH_ERROR): Record<string, ItemResponse> {
+  return Object.fromEntries(Object.entries(responses).map(([id, r]) => [id, r.pendingCommit ? { ...r, pendingCommit: false, commitError } : r]))
 }
+
+const hasWorkToKeep = (session: AuthorSession) => hasUnsharedWork(session) || session.mergeConflicts.length > 0 || session.reviewersToReRequest.length > 0
+
+const sameFiles = (a: string[], b: string[]) => a.length === b.length && new Set([...a, ...b]).size === a.length
 
 /** Returns whether `error` is one failDescription records. */
 function isDescriptionError(error: string | null): boolean {
@@ -170,6 +181,9 @@ function rewriteCommits(responses: Record<string, ItemResponse>, rewritten: Reco
 const knownItemIds = (session: AuthorSession) => new Set([...session.items, ...(session.selfReview?.findings ?? [])].map((i) => i.id))
 
 class AuthorSessions extends ClaudeSessions<AuthorSession> {
+  /** The checkout's HEAD when each running turn started, so a fix is credited only to a commit made during its turn. */
+  private readonly turnStartHeads = new Map<string, string>()
+
   constructor() {
     super(authorSessionsDir, restoreAuthorSession)
   }
@@ -204,18 +218,20 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   }
 
   /**
-   * Runs `prepare`, clones or updates the PR branch, then starts a turn with the prompt `prepare` builds for the clone.
-   * A failure before the turn starts is recorded on the session and rethrown.
+   * Runs `prepare`, checks out the PR branch, then starts a turn there with the prompt `prepare` builds, holding the session busy meanwhile.
+   * A failure in `prepare` leaves the session as it was; a failure checking out lands on the session as its error.
    */
   private async startCloneTurn(sessionId: string, mode: TurnMode, prepare: () => Promise<(clone: CloneInfo) => string>): Promise<void> {
     this.assertCanStartTurn(sessionId)
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
+      const prompt = await prepare()
       try {
-        const prompt = await prepare()
         this.patch(sessionId, () => ({ status: 'running', error: null }), true)
-        const clone = await this.prepareClone(sessionId)
+        const clone = await this.prepareCheckout(sessionId)
+        this.turnStartHeads.set(sessionId, await headOf(clone))
         void this.runTurn(sessionId, prompt(clone), mode)
       } catch (error) {
+        console.error('Checking out the PR branch for a turn failed', { pr: this.byId(sessionId).pr.url, sessionId, error })
         if (this.byId(sessionId).status === 'running') this.patch(sessionId, () => ({ status: 'error', error: errorMessage(error) }), true)
         throw error
       }
@@ -224,15 +240,19 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
   async selfReview(pr: PrRef): Promise<AuthorSession> {
     const session = this.ensure(pr)
-    this.assertCanStartTurn(session.id)
-    void this.runTurn(session.id, reviewPrompt(pr, configFile.get().reviewSkill), 'self_review')
+    await this.startCloneTurn(session.id, 'self_review', async () => () => reviewPrompt(pr, configFile.get().reviewSkill))
     return this.byId(session.id)
+  }
+
+  async feedback(sessionId: string, message: string): Promise<void> {
+    await this.startCloneTurn(sessionId, 'refine', async () => () => message)
   }
 
   async diff(sessionId: string): Promise<DiffResult> {
     const { clone } = this.byId(sessionId)
     if (!clone) return EMPTY_DIFF
     this.assertCloneFolder(sessionId)
+    await assertOnPrBranch(clone)
     return cloneDiff(clone)
   }
 
@@ -240,6 +260,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const { clone } = this.byId(sessionId)
     if (!clone) return EMPTY_DIFF
     this.assertCloneFolder(sessionId)
+    await assertOnPrBranch(clone)
     return uncommittedDiff(clone)
   }
 
@@ -255,7 +276,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
       if (!clone) throw new Error(CLONE_LOST_ERROR)
       this.assertCloneFolder(sessionId)
     }
-    const conflicts = await this.whilePublishing(sessionId, async () => {
+    const conflicts = await this.whileBusy(sessionId, async () => {
+      if (clone && commits.length > 0) await assertOnPrBranch(clone)
       this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
       const conflicts = clone && commits.length > 0 ? await this.pushCommits(sessionId, clone) : []
       if (conflicts.length > 0) {
@@ -361,7 +383,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (!session?.clone || existsSync(session.clone.path)) return false
     if (session.uncommitted.length > 0) {
       console.warn('Forgetting the uncommitted edits of a cleared clone', { pr: session.pr.url, sessionId, files: session.uncommitted })
-      this.append(sessionId, { kind: 'warning', id: randomUUID(), label: CLONE_CLEARED_ERROR, detail: session.uncommitted.join(', '), at: now() })
+      const label = isWorktree(session.clone) ? WORKTREE_CLEARED_ERROR : CLONE_CLEARED_ERROR
+      this.append(sessionId, { kind: 'warning', id: randomUUID(), label, detail: session.uncommitted.join(', '), at: now() })
       this.patch(sessionId, () => ({ uncommitted: [] }), true)
     }
     return true
@@ -370,7 +393,8 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /** Throws, and records on the session, when the clone's folder is gone, naming its unpushed commits or else its uncommitted edits as lost. */
   private assertCloneFolder(sessionId: string): void {
     if (!this.cloneFolderGone(sessionId)) return
-    const error = this.byId(sessionId).commits.length > 0 ? CLONE_LOST_ERROR : CLONE_CLEARED_ERROR
+    const { clone, commits } = this.byId(sessionId)
+    const error = isWorktree(clone) ? WORKTREE_GONE_ERROR : commits.length > 0 ? CLONE_LOST_ERROR : CLONE_CLEARED_ERROR
     this.patch(sessionId, () => ({ status: 'error', error }), true)
     throw new Error(error)
   }
@@ -385,10 +409,15 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     return clone
   }
 
-  /** Throws away edits in the clone that no fix committed, such as those left by a cancelled turn. */
-  async discardUncommitted(sessionId: string): Promise<void> {
+  /** Throws away edits in the clone that no fix committed, refusing when its uncommitted files are no longer the ones the user confirmed. */
+  async discardUncommitted(sessionId: string, confirmedFiles: string[]): Promise<void> {
     const clone = this.assertCanTouchUncommitted(sessionId, 'There is nothing to discard.')
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
+      await assertOnPrBranch(clone)
+      if (!sameFiles(await uncommittedPaths(clone), confirmedFiles)) {
+        await this.refreshClone(sessionId)
+        throw new Error(DISCARD_CHANGED_ERROR)
+      }
       await discardUncommitted(clone)
       await this.refreshClone(sessionId)
     })
@@ -399,13 +428,14 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     const clone = this.assertCanTouchUncommitted(sessionId, 'There is nothing to commit.')
     const { pr } = this.byId(sessionId)
     if (!message.trim()) throw new Error('Write a commit message first.')
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
+      await assertOnPrBranch(clone)
       try {
         const oid = await commitAll(clone, message.trim()).catch((error: unknown) => {
           console.error('Committing uncommitted changes failed', { pr: pr.url, sessionId, error })
           throw error
         })
-        if (!oid) throw new Error('The clone has no changes to commit.')
+        if (!oid) throw new Error(`The ${checkoutNoun(clone)} has no changes to commit.`)
       } finally {
         await this.refreshClone(sessionId)
       }
@@ -424,7 +454,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.assertIdle(sessionId)
     const { clone } = this.byId(sessionId)
     if (!clone) throw new Error('There is no merge to abort.')
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       await abortMerge(clone)
       this.patch(sessionId, () => ({ mergeConflicts: [], error: null, status: 'awaiting_feedback' }), true)
       await this.refreshClone(sessionId)
@@ -446,7 +476,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
 
     let failures = 0
     const answered: FeedbackItem[] = []
-    await this.whilePublishing(sessionId, async () => {
+    await this.whileBusy(sessionId, async () => {
       this.patch(sessionId, () => ({ status: 'submitting', error: null }), true)
       try {
         for (const post of replies) {
@@ -469,7 +499,7 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   async acknowledge(pr: PrRef, itemId: string): Promise<void> {
     await acknowledgeFeedbackItem(pr, itemId)
     const session = this.getByPr(prKey(pr.owner, pr.repo, pr.number))
-    if (session && !this.isTurnRunning(session.id) && !this.publishing.has(session.id)) await this.settleReRequests(session.id)
+    if (session && !this.isTurnRunning(session.id) && !this.busy.has(session.id)) await this.settleReRequests(session.id)
     this.refreshPr(pr)
   }
 
@@ -495,25 +525,54 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
   /**
    * Removes sessions, and their clones, for PRs that left the list, keeping any that still have work: a running turn, uncommitted edits,
    * unpushed commits, unposted replies, a description update, an open merge, or queued re-requests. A failed or cancelled last turn doesn't count.
+   * A worktree session is checked against its worktree as it is now, and removed only once Rally has removed any worktree it added.
    */
   pruneUnlisted(listed: Set<string>): void {
     for (const session of [...this.sessions.values()]) {
-      if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.publishing.has(session.id)) continue
+      if (listed.has(session.prKey) || this.isTurnRunning(session.id) || this.busy.has(session.id)) continue
+      if (isWorktree(session.clone)) {
+        void this.pruneWorktreeSession(session.id)
+        continue
+      }
       this.cloneFolderGone(session.id)
-      const hasWork = hasUnsharedWork(this.byId(session.id)) || session.mergeConflicts.length > 0
-      if (hasWork || session.reviewersToReRequest.length > 0) continue
+      if (hasWorkToKeep(this.byId(session.id))) continue
       console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId: session.id })
       this.remove(session)
     }
   }
 
-  discard(sessionId: string): void {
+  private async pruneWorktreeSession(sessionId: string): Promise<void> {
+    await this.whileBusy(sessionId, async () => {
+      await this.refreshClone(sessionId)
+      const session = this.find(sessionId)
+      if (!session || hasWorkToKeep(session)) return
+      try {
+        if (session.clone) await removeRallyWorktree(session.clone, { dropWork: false })
+      } catch (error) {
+        console.info('Keeping the author session of a PR whose worktree Rally could not remove', { pr: session.pr.url, path: session.clone?.path, error })
+        return
+      }
+      console.info('Pruning the author session of a PR that left My PRs', { pr: session.pr.url, sessionId })
+      this.remove(session)
+    })
+  }
+
+  /** Discards the session, its unposted replies, and any worktree Rally added for it with that worktree's edits and unpushed commits. */
+  async discard(sessionId: string): Promise<void> {
     const session = this.byId(sessionId)
-    if (this.publishing.has(sessionId)) throw new Error('Wait for Rally to finish pushing or posting before discarding this session')
+    if (this.busy.has(sessionId)) throw new Error('Wait for Rally to finish its current step before discarding this session')
+    await this.whileBusy(sessionId, async () => {
+      this.cancel(sessionId)
+      if (!session.clone) return
+      await removeRallyWorktree(session.clone, { dropWork: true }).catch((error: unknown) => {
+        console.error('Removing the worktree Rally added failed', { pr: session.pr.url, path: session.clone?.path, error })
+        throw new Error(`Rally couldn't remove the worktree at ${session.clone?.path}. Remove that folder, then start over again. ${errorMessage(error)}`)
+      })
+    })
     this.remove(session)
   }
 
-  protected turnSetup(sessionId: string): TurnSetup {
+  protected async turnSetup(sessionId: string): Promise<TurnSetup> {
     const mcpServer = createAuthorServer({
       onResponses: (responses) => {
         const at = now()
@@ -539,7 +598,10 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
         )
       },
     })
-    return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer, readOnlyGitRepos: [join(sessionDir(sessionId), CLONE_DIR_NAME)] }
+    const clone = this.find(sessionId)?.clone
+    const cwd = clone && existsSync(clone.path) ? clone.path : undefined
+    const remotes = cwd ? await githubRemotes(cwd) : undefined
+    return { systemPromptAppend: AUTHOR_PROTOCOL, mcpServer, toolAccess: 'open', cwd, settingSources: PROJECT_SETTINGS, githubRemotes: remotes }
   }
 
   /**
@@ -548,16 +610,24 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
    */
   protected async turnEnded(sessionId: string, succeeded: boolean, mode: TurnMode): Promise<void> {
     const session = this.find(sessionId)
+    const turnStart = this.turnStartHeads.get(sessionId)
+    this.turnStartHeads.delete(sessionId)
     if (!session) return
     if (!succeeded) this.dropPendingCommits(sessionId)
     const clone = session.clone
     if (!clone || this.cloneFolderGone(sessionId)) return
+    const offBranch = await offBranchError(clone)
+    if (offBranch) {
+      console.warn('Leaving fixes uncommitted in a checkout on another branch', { pr: session.pr.url, sessionId, path: clone.path, reason: offBranch })
+      this.patch(sessionId, (s) => ({ responses: withoutPendingCommits(s.responses, offBranch) }), true)
+      return
+    }
     try {
       if (succeeded && mode === 'resolve_merge') {
         const merged = await concludeMerge(clone, session.mergeConflicts)
         this.patch(sessionId, () => ({ mergeConflicts: [], clone: merged }), true)
       } else if (succeeded) {
-        await this.commitPublishedFixes(sessionId, clone)
+        await this.commitPublishedFixes(sessionId, clone, turnStart)
       }
     } finally {
       await this.refreshClone(sessionId)
@@ -568,17 +638,24 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     this.patch(sessionId, (s) => ({ responses: withoutPendingCommits(s.responses) }), true)
   }
 
-  /** Commits each fix's listed files in its own commit and puts the short sha into its reply; one fix failing to commit doesn't stop the rest. */
-  private async commitPublishedFixes(sessionId: string, clone: CloneInfo): Promise<void> {
+  /**
+   * Commits each fix's listed files in its own commit and puts the short sha into its reply; one fix failing to commit doesn't stop the rest.
+   * A fix Claude committed itself is credited to the newest unpushed commit made during the turn that touches its files.
+   */
+  private async commitPublishedFixes(sessionId: string, clone: CloneInfo, turnStart: string | undefined): Promise<void> {
     const committedFile = new Map<string, string>()
     for (const response of Object.values(this.byId(sessionId).responses).filter((r) => r.pendingCommit)) {
       let update: ItemResponse
       try {
         const oid = await commitFiles(clone, response.files, response.commitMessage.trim() || `Address review comment ${response.itemId}`)
         if (oid) for (const file of response.files) committedFile.set(file, oid)
-        const covering = oid ?? response.files.map((file) => committedFile.get(file)).find(Boolean) ?? response.commits.at(-1) ?? null
+        const sharedCommit = response.files.map((file) => committedFile.get(file)).find(Boolean)
+        const claudeCommit = oid || sharedCommit || !turnStart ? null : await latestCommitTouching(clone, response.files, turnStart)
+        const ownCommit = oid ?? claudeCommit
+        const covering = ownCommit ?? sharedCommit ?? response.commits.at(-1) ?? null
+        const commits = ownCommit && !response.commits.includes(ownCommit) ? [...response.commits, ownCommit] : response.commits
         update = covering
-          ? { ...response, pendingCommit: false, commits: oid ? [...response.commits, oid] : response.commits, reply: fillCommit(response.reply, covering) }
+          ? { ...response, pendingCommit: false, commits, reply: fillCommit(response.reply, covering) }
           : { ...response, pendingCommit: false, commitError: NOTHING_TO_COMMIT_ERROR }
       } catch (error) {
         console.error('Committing a fix failed', { sessionId, itemId: response.itemId, files: response.files, error })
@@ -598,33 +675,43 @@ class AuthorSessions extends ClaudeSessions<AuthorSession> {
     if (this.byId(sessionId).mergeConflicts.length > 0) throw new Error(MERGE_IN_PROGRESS_ERROR)
   }
 
-  private async prepareClone(sessionId: string): Promise<CloneInfo> {
+  private async prepareCheckout(sessionId: string): Promise<CloneInfo> {
     const { clone, pr } = this.byId(sessionId)
     const stepId = randomUUID()
-    const label = clone ? 'Updating the PR branch' : 'Cloning the PR branch'
+    const label = clone ? 'Updating the PR branch' : 'Checking out the PR branch'
     this.append(sessionId, { kind: 'step', id: stepId, label, detail: '', done: false, at: now() })
-    const finishStep = () =>
-      this.patch(sessionId, (s) => ({ timeline: s.timeline.map((e) => (e.id === stepId && e.kind === 'step' ? { ...e, done: true } : e)) }))
+    let detail = ''
     try {
-      if (clone && existsSync(clone.path)) {
-        const synced = await syncClone(clone)
-        this.patch(sessionId, () => ({ clone: synced }), true)
-        return synced
-      }
-      if (this.byId(sessionId).commits.length > 0) this.assertCloneFolder(sessionId)
-      else this.cloneFolderGone(sessionId)
-      const fresh = await cloneBranch(sessionDir(sessionId), await fetchCloneSource(pr))
-      this.patch(sessionId, () => ({ clone: fresh }), true)
-      return fresh
+      const checkout = await this.checkOut(sessionId)
+      const next = checkout.clone
+      console.info('Checked out the PR branch for a turn', { pr: pr.url, sessionId, kind: checkoutKind(next), path: next.path, reason: checkout.reason })
+      this.patch(sessionId, () => ({ clone: next }), true)
+      detail = `${CHECKOUT_REASONS[checkout.reason]}: ${next.path}`
+      if (checkout.warning) this.append(sessionId, { kind: 'warning', id: randomUUID(), label: checkout.warning, detail: next.path, at: now() })
+      return next
     } finally {
-      finishStep()
+      this.patch(sessionId, (s) => ({ timeline: s.timeline.map((e) => (e.id === stepId && e.kind === 'step' ? { ...e, detail, done: true } : e)) }))
     }
+  }
+
+  /** Returns the checkout a turn runs in, first noting a checkout whose folder is gone. */
+  private async checkOut(sessionId: string): Promise<Checkout> {
+    const { clone, pr, commits } = this.byId(sessionId)
+    const held = clone && existsSync(clone.path) ? clone : null
+    if (!held && clone && !isWorktree(clone) && commits.length > 0) this.assertCloneFolder(sessionId)
+    else if (!held && clone) this.cloneFolderGone(sessionId)
+    return chooseCheckout({ pr, clone, held, folders: configFile.get().localRepoFolders, cloneDir: sessionDir(sessionId) })
   }
 
   private async refreshClone(sessionId: string): Promise<void> {
     const clone = this.find(sessionId)?.clone
     if (!clone || this.cloneFolderGone(sessionId)) return
     try {
+      const offBranch = await offBranchError(clone)
+      if (offBranch) {
+        console.warn('Skipping the read of a checkout on another branch', { pr: this.find(sessionId)?.pr.url, sessionId, path: clone.path, reason: offBranch })
+        return
+      }
       const [commits, uncommitted] = await Promise.all([localCommits(clone), uncommittedPaths(clone)])
       this.patch(sessionId, () => ({ commits, uncommitted }), true)
     } catch (error) {

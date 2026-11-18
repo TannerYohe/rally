@@ -1,9 +1,47 @@
-import type { AuthorSession, FeedbackItem, ItemResponse, PostedReply, PrDescription, SessionCore } from './types'
+import { plural } from './format'
+import type { AuthorSession, CheckoutKind, CloneInfo, FeedbackItem, ItemResponse, PostedReply, PrDescription, SessionCore } from './types'
 
 /** Where a fix reply names its commit; Rally replaces it with the short sha once it commits. */
 export const COMMIT_PLACEHOLDER = '{commit}'
 
 export const shortSha = (oid: string) => oid.slice(0, 7)
+
+/** Where Rally adds worktrees for PR branches. */
+export const RALLY_WORKTREES_FOLDER = '~/rally-worktrees'
+
+/** Returns the checkout kind of a clone, treating a clone without one as a temp clone. */
+export const checkoutKind = (clone: CloneInfo): CheckoutKind => clone.kind ?? 'temp_clone'
+
+/** Returns whether the checkout is a worktree of a local clone rather than Rally's temp clone. */
+export const isWorktree = (clone: CloneInfo | null): boolean => !!clone && checkoutKind(clone) !== 'temp_clone'
+
+/** Names the checkout in UI text: a worktree, or Rally's clone. */
+export const checkoutNoun = (clone: CloneInfo | null): string => (isWorktree(clone) ? 'worktree' : 'clone')
+
+const DISCARD_LISTED_FILES = 10
+
+/** Returns the Discard confirmation; for a worktree it names the folder and the files, since Discard resets and cleans that whole worktree. */
+export function discardQuestion(clone: CloneInfo | null, files: string[]): string {
+  if (!isWorktree(clone)) return `Discard ${plural(files.length, 'uncommitted file')} in the clone?`
+  const listed = files.slice(0, DISCARD_LISTED_FILES).map((file) => `  ${file}`)
+  const more = files.length > DISCARD_LISTED_FILES ? [`  and ${files.length - DISCARD_LISTED_FILES} more`] : []
+  return [`Discard ${plural(files.length, 'uncommitted file')} in the worktree at ${clone!.path}? Git can't bring them back.`, '', ...listed, ...more].join('\n')
+}
+
+/** Returns the Start over confirmation, naming what discarding the session deletes and what it keeps. */
+export function startOverQuestion(clone: CloneInfo | null): string {
+  if (!clone) return 'Discard this session, its unposted replies, and description update?'
+  switch (checkoutKind(clone)) {
+    case 'temp_clone':
+      return 'Discard this session, its clone, unpushed commits, unposted replies, and description update?'
+    case 'local_worktree':
+      return `Discard this session, its unposted replies, and description update? Your worktree at ${clone.path} keeps its edits and commits.`
+    case 'rally_worktree':
+      return clone.createdBranch
+        ? `Discard this session, its unposted replies and description update, and the worktree Rally added at ${clone.path} with its edits and unpushed commits?`
+        : `Discard this session, its unposted replies and description update, and the worktree Rally added at ${clone.path} with its edits? Commits stay on ${clone.branch}.`
+  }
+}
 
 /** Returns a new author session with nothing cloned, answered, or queued yet. */
 export function newAuthorSession(core: SessionCore): AuthorSession {

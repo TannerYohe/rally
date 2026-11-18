@@ -147,6 +147,8 @@ export interface Config {
   includeReviewRequests: boolean
   pollIntervalMinutes: number
   reviewSkill: string
+  /** Folders whose git repos, and the repos one level down, Rally searches for a local clone of a My PRs repo. */
+  localRepoFolders: string[]
   reviewModel: ModelChoice | null
   reviewEffort: EffortChoice | null
   subagentModel: ModelChoice | null
@@ -167,6 +169,7 @@ export const DEFAULT_CONFIG: Config = {
   includeReviewRequests: true,
   pollIntervalMinutes: 5,
   reviewSkill: 'review-pr',
+  localRepoFolders: ['~/src'],
   reviewModel: null,
   reviewEffort: null,
   subagentModel: null,
@@ -352,6 +355,8 @@ export interface SessionCore {
   pr: PrRef
   prKey: string
   sdkSessionId: string | null
+  /** The folder the Claude conversation runs in; absent means the session's temp folder. */
+  sdkCwd?: string
   status: SessionStatus
   error: string | null
   timeline: TimelineEntry[]
@@ -439,12 +444,21 @@ export interface LocalCommit {
   subject: string
 }
 
+/** Where the PR branch is checked out: Rally's temp clone, a worktree the user already had, or a worktree Rally added. */
+export type CheckoutKind = 'temp_clone' | 'local_worktree' | 'rally_worktree'
+
 export interface CloneInfo {
   path: string
   branch: string
   baseRef: string
-  /** The branch head on GitHub when Rally last synced, merged, or pushed; commits after it are Rally's own. */
+  /** The GitHub head the checkout last matched when Rally synced, merged, or pushed; commits after it are the PR's unpushed local commits. */
   syncedHead?: string
+  /** Absent means a temp clone. */
+  kind?: CheckoutKind
+  /** Whether Rally created the local branch when it added the worktree, so removing the worktree deletes the branch too. */
+  createdBranch?: boolean
+  /** The local clone a Rally worktree belongs to, so Rally can remove the worktree and its branch after its folder is gone. */
+  cloneRoot?: string
 }
 
 export interface PushRecord {

@@ -200,7 +200,7 @@ async function isAncestor(clone: CloneInfo, ancestor: string, descendant = 'HEAD
 /** Commits the listed files, including deletions, and returns the new commit's sha, or null when they have no changes. */
 export async function commitFiles(clone: CloneInfo, files: string[], message: string): Promise<string | null> {
   await git(clone.path, ['add', '-A', '--', ...files])
-  const staged = await git(clone.path, ['diff', '--cached', '--name-only'])
+  const staged = await git(clone.path, ['diff', '--cached', '--name-only', '--', ...files])
   if (!staged.trim()) return null
   await git(clone.path, ['commit', '-m', message, '--', ...files])
   return (await git(clone.path, ['rev-parse', 'HEAD'])).trim()

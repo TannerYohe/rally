@@ -132,6 +132,14 @@ describe('prClone', () => {
     expect(await commitFiles(clone, ['fix.txt'], 'Nothing new')).toBeNull()
   })
 
+  it('returns null for listed files with no changes while another file is staged, and leaves that file staged', async () => {
+    const clone = await cloneBranch(join(root, 'session-staged'), source)
+    writeFileSync(join(clone.path, 'other.txt'), 'other\n')
+    git(clone.path, 'add', 'other.txt')
+    expect(await commitFiles(clone, ['a.txt'], 'Nothing here')).toBeNull()
+    expect(git(clone.path, 'diff', '--cached', '--name-only').trim()).toBe('other.txt')
+  })
+
   it('commits every edit, including new and deleted files, and returns null when there are none', async () => {
     const clone = await cloneBranch(join(root, 'session16'), source)
     writeFileSync(join(clone.path, 'new.txt'), 'new\n')

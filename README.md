@@ -70,7 +70,15 @@ Hovering a row shows **Snooze** and **Hide**, which are also on the PR page:
 - **Snooze** hides the PR until its head commit changes or the author requests your review again. A request that was already open when you snoozed doesn't count; a new one after it clears does. Use it for a PR you know needs more work before your next round.
 - **Hide** keeps the PR hidden until you unhide it. Use it for a PR you'll never review.
 
-Hidden PRs leave the main list and the phase counts and collect in a collapsed **hidden** section at the bottom, which respects the author, repo, and draft filters. Each shows how it was hidden and an **Unhide** button. A PR with a review in progress always shows in the main list and hides again once the review is submitted or discarded. Hides are stored in `hidden-prs.json`. A snooze is dropped when its PR no longer appears in the list; a hide is kept for 30 days after its PR was last listed, so narrowing the repo or author lists doesn't lose it.
+Snooze and Hide on a unit apply to every PR in it, and the unit shows again as soon as any of its PRs does. Hidden PRs leave the main list and the phase counts and collect in a collapsed **hidden** section at the bottom, which respects the author, repo, and draft filters. Each shows how it was hidden and an **Unhide** button. A PR with a review in progress always shows in the main list and hides again once the review is submitted or discarded. Hides are stored in `hidden-prs.json`. A snooze is dropped when its PR no longer appears in the list; a hide is kept for 30 days after its PR was last listed, so narrowing the repo or author lists doesn't lose it.
+
+#### Linked PRs
+
+A change that spans repos usually ships as one PR per repo, each linking the others. Rally groups such PRs into a **unit**, shown as one card. Two PRs are linked when each one's description lists the other under a marker: a heading or a `Label:` line whose text includes one of the markers in Settings → Pull requests, such as `## Related PRs` or `Depends on:`. Markers match case-insensitively, and "PRs" and "pull requests" match "PR". PR URLs and `owner/repo#N` references on the marker's line, or in the block below it up to the next heading or blank line, count; HTML comments and code don't, so template placeholders are ignored, and so are references to the PR's own repo. Rally reads at most five references per description. The default markers include both halves of directional pairs, such as **Depends on** and **Required by**, so those links are mutual.
+
+Links join transitively, so A↔B and B↔C make one unit, up to five PRs. When a listed PR links a PR outside your queue, Rally fetches that PR, following links for up to three rounds, and lists it as a full member of the unit. A linked PR that is closed, merged, yours, or not found isn't grouped. If a lookup fails, Rally keeps the copy it had. A link only one side makes doesn't group the PRs. My PRs doesn't group PRs.
+
+A unit's card shows a line per PR with its repo, title, size, and summary, the unit's phase, and how many repos it spans. Phase counts, filters, and the header count units. A unit matches a filter when any of its PRs does, and it sorts by its earliest opened date, its latest update, and its total size.
 
 ### Phases
 
@@ -83,6 +91,8 @@ In progress comes from Rally's own review sessions and takes precedence. The oth
 | Awaiting re-review | The author re-requested your review, or the head SHA differs from the commit your latest review was on and that head appeared after you submitted. The head's time is the force-push time when there is one, else when Rally first saw it. |
 | Approved | Your latest approval or change request is an approval, and nothing changed since. Comment-only reviews don't change it. |
 | Pending changes | Anything else: you reviewed and nothing new has happened. |
+
+A unit of linked PRs takes the most urgent phase among its PRs, in the order In progress, Awaiting re-review, Unreviewed, Pending changes, Approved, so a unit is Approved only when every PR in it is.
 
 Phase rules live in `src/main/github/phase.ts`, and which of your reviews Rally fetches lives in `src/main/github/queries.ts`.
 

@@ -1,5 +1,13 @@
 export type DiffLineKind = 'hunk' | 'add' | 'remove' | 'context'
 
+export interface DiffLine {
+  kind: DiffLineKind
+  text: string
+}
+
+/** The character a unified diff puts before an added, removed, or context line. */
+export const DIFF_LINE_PREFIX = { add: '+', remove: '-', context: ' ' } as const
+
 export interface DiffFile {
   path: string
   lines: string[]

@@ -1,18 +1,25 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import { COMMIT_PLACEHOLDER } from '@shared/authorSession'
-import { RESPONSE_ACTIONS, RESPONSE_VERDICTS, type Drafts, type ItemResponse } from '@shared/types'
+import { errorMessage } from '@shared/errors'
+import { RESPONSE_ACTIONS, RESPONSE_VERDICTS, type Drafts, type ItemResponse, type PrDescription } from '@shared/types'
 import { ok, publishDraftsTool, RALLY_SERVER, RALLY_TOOL_PREFIX } from './rallyTools'
 
 const PUBLISH_RESPONSES = 'publish_responses'
 
+const PUBLISH_DESCRIPTION = 'publish_description'
+
 export const PUBLISH_RESPONSES_TOOL = `${RALLY_TOOL_PREFIX}${PUBLISH_RESPONSES}`
+
+export const PUBLISH_DESCRIPTION_TOOL = `${RALLY_TOOL_PREFIX}${PUBLISH_DESCRIPTION}`
 
 export type PublishedResponse = Pick<ItemResponse, 'itemId' | 'action' | 'verdict' | 'summary' | 'reply' | 'files' | 'commitMessage'>
 
 export interface AuthorToolHandlers {
   onResponses(responses: PublishedResponse[]): void
   onSelfReview(drafts: Drafts): void
+  /** Saves a proposed title and description and returns what Rally tells Claude about it. */
+  onDescription(description: PrDescription): Promise<string>
 }
 
 const responseSchema = z.object({
@@ -50,9 +57,24 @@ export function createAuthorServer(handlers: AuthorToolHandlers) {
       return ok(`Rally received ${args.responses.length} responses.`)
     },
   )
+  const publishDescription = tool(
+    PUBLISH_DESCRIPTION,
+    'Propose a new PR title and description to the Rally app. Rally shows the user the change and updates GitHub when they push. Send the complete title and description, not a diff.',
+    {
+      title: z.string().describe('The full PR title; repeat the current one when it still fits'),
+      body: z.string().describe('The full PR description in markdown'),
+    },
+    async (args) => {
+      try {
+        return ok(await handlers.onDescription({ title: args.title, body: args.body }))
+      } catch (error) {
+        return { ...ok(`Rally couldn't save the description: ${errorMessage(error)}`), isError: true }
+      }
+    },
+  )
   return createSdkMcpServer({
     name: RALLY_SERVER,
     version: '1.0.0',
-    tools: [publishResponses, publishDraftsTool({ onDrafts: handlers.onSelfReview })],
+    tools: [publishResponses, publishDescription, publishDraftsTool({ onDrafts: handlers.onSelfReview })],
   })
 }

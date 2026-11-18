@@ -32,10 +32,15 @@ function isApproved(feedback: PrFeedback): boolean {
   return feedback.approvedBy.length > 0
 }
 
-/** Returns the author-side phase; an unacknowledged comment, or more activity than one query reads, outranks an approval. */
-export function computeAuthorPhase(feedback: PrFeedback, sessionActive: boolean): AuthorPhase {
-  if (sessionActive) return 'in_progress'
-  if (feedback.unacknowledged > 0 || feedback.truncated) return 'needs_response'
-  if (isApproved(feedback)) return 'approved'
+export interface AuthorSessionPhaseInput {
+  active: boolean
+  openFindings: number
+}
+
+/** Returns the author-side phase; an unacknowledged comment, an open self-review finding, or more activity than one query reads outranks an approval. */
+export function computeAuthorPhase(feedback: PrFeedback | null, session: AuthorSessionPhaseInput | null): AuthorPhase {
+  if (session?.active) return 'in_progress'
+  if ((session?.openFindings ?? 0) > 0 || feedback?.unacknowledged || feedback?.truncated) return 'needs_response'
+  if (feedback && isApproved(feedback)) return 'approved'
   return 'awaiting_reviews'
 }

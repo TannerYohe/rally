@@ -1,5 +1,5 @@
 import { newAuthorSession } from './authorSession'
-import type { AuthorSession, FeedbackItem, ItemResponse, PrRef } from './types'
+import type { AuthorSession, DescriptionDraft, FeedbackItem, ItemResponse, PrRef } from './types'
 
 export const fixturePr = (number: number): PrRef => ({ owner: 'acme', repo: 'api', number, url: `https://github.com/acme/api/pull/${number}` })
 
@@ -38,6 +38,10 @@ export function itemResponse(itemId: string, reply: string, overrides: Partial<I
     at: '2026-11-02T00:00:00Z',
     ...overrides,
   }
+}
+
+export function descriptionDraft(overrides: Partial<DescriptionDraft> = {}): DescriptionDraft {
+  return { title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body' }, at: '2026-11-02T00:00:00Z', ...overrides }
 }
 
 /** Returns a stored author session for PR `number`, with id `author-<number>`. */

@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { DraftChanges } from '@shared/feedback'
 import { IPC } from '@shared/ipc'
-import type { ActionRequest, Config, Health, HideMode, PrListKind, PrRef, ReplyPost, ReviewEvent } from '@shared/types'
+import type { ActionRequest, Config, Health, HideMode, PrDescription, PrListKind, PrRef, ReplyPost, ReviewEvent } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { readClaudeDefaults } from './claude/claudeDefaults'
 import { authorSessions } from './claude/authorSessions'
@@ -58,11 +58,13 @@ export function registerIpc(): void {
     authorSessions.runActions(pr, requests, note),
   )
   ipcMain.handle(IPC.startSelfReview, (_event, pr: PrRef) => authorSessions.selfReview(pr))
+  ipcMain.handle(IPC.draftDescription, (_event, pr: PrRef) => authorSessions.draftDescription(pr))
+  ipcMain.handle(IPC.discardDescription, (_event, id: string) => authorSessions.discardDescription(id))
   ipcMain.handle(IPC.sendAuthorFeedback, (_event, id: string, message: string) => authorSessions.feedback(id, message))
   ipcMain.handle(IPC.cancelAuthorTurn, (_event, id: string) => authorSessions.cancel(id))
   ipcMain.handle(IPC.getAuthorDiff, (_event, id: string) => authorSessions.diff(id))
   ipcMain.handle(IPC.getUncommittedDiff, (_event, id: string) => authorSessions.uncommittedDiff(id))
-  ipcMain.handle(IPC.pushAuthorCommits, (_event, id: string) => authorSessions.push(id))
+  ipcMain.handle(IPC.pushAuthorChanges, (_event, id: string, descriptionEdit: PrDescription | null) => authorSessions.push(id, descriptionEdit))
   ipcMain.handle(IPC.resolveMergeConflicts, (_event, id: string) => authorSessions.resolveConflicts(id))
   ipcMain.handle(IPC.abortMerge, (_event, id: string) => authorSessions.abortMerge(id))
   ipcMain.handle(IPC.discardUncommitted, (_event, id: string, confirmedFiles: string[]) => authorSessions.discardUncommitted(id, confirmedFiles))
@@ -71,7 +73,7 @@ export function registerIpc(): void {
     authorSessions.postReplies(id, replies, reRequestReviews),
   )
   ipcMain.handle(IPC.discardAuthorReply, (_event, id: string, itemId: string) => authorSessions.discardReply(id, itemId))
-  ipcMain.handle(IPC.dismissFinding, (_event, id: string, itemId: string) => authorSessions.dismissFinding(id, itemId))
+  ipcMain.handle(IPC.clearFindings, (_event, id: string, itemIds: string[]) => authorSessions.clearFindings(id, itemIds))
   ipcMain.handle(IPC.discardAuthorSession, (_event, id: string) => authorSessions.discard(id))
   ipcMain.handle(IPC.getAppInfo, () => appInfo())
   ipcMain.handle(IPC.getUpdateState, () => updater.get())

@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { canPush, cloneChangeCount, committableFiles, isWorktree, shortSha } from '@shared/authorSession'
 import { EMPTY_DIFF, MAX_DIFF_CHARS } from '@shared/diff'
-import type { AuthorSession, DiffResult } from '@shared/types'
+import type { AuthorSession, DiffResult, PrDescription } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { NO_CHANGES_MESSAGE } from '../lib/authorView'
 import { age, fullTime, plural } from '../lib/format'
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../lib/theme'
+import { DescriptionUpdate } from './DescriptionUpdate'
 import { DiffView } from './DiffView'
 
 const TRUNCATED_NOTE = `This diff is cut off at ${MAX_DIFF_CHARS.toLocaleString('en-US')} characters, so it leaves out some changes.`
@@ -15,6 +16,9 @@ const MERGE_BUTTON_CLASS = 'rounded-md bg-amber-500/15 px-2 py-0.5 ring-1 ring-a
 interface Props {
   session: AuthorSession
   disabled: boolean
+  descriptionEdit: PrDescription | null
+  onDescriptionEdit(edit: PrDescription | null): void
+  onDiscardDescription(): void
   onPush(): void
   onResolveConflicts(): void
   onAbortMerge(): void
@@ -133,7 +137,7 @@ function ChangesAction({ session, committable, uncommittedWarning, commitsWarnin
           </button>
         </form>
       )}
-      {canPush(session) && (
+      {session.commits.length > 0 && canPush(session) && (
         <button
           className={committable.length > 0 ? SECONDARY_BUTTON_CLASS : `${PRIMARY_BUTTON_CLASS} px-3 py-1.5 text-sm`}
           disabled={busy}
@@ -149,8 +153,19 @@ function ChangesAction({ session, committable, uncommittedWarning, commitsWarnin
 const loadCommitsDiff = (sessionId: string) => window.rally.getAuthorDiff(sessionId)
 const loadUncommittedDiff = (sessionId: string) => window.rally.getUncommittedDiff(sessionId)
 
-export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, onAbortMerge, onDiscardUncommitted, onCommitUncommitted }: Props) {
-  const { commits, lastPush, mergeConflicts } = session
+export function ChangesPanel({
+  session,
+  disabled,
+  descriptionEdit,
+  onDescriptionEdit,
+  onDiscardDescription,
+  onPush,
+  onResolveConflicts,
+  onAbortMerge,
+  onDiscardUncommitted,
+  onCommitUncommitted,
+}: Props) {
+  const { commits, lastPush, mergeConflicts, description, descriptionUpdatedAt } = session
   const committable = committableFiles(session)
   const commitsReloadKey = commits.map((c) => c.oid).join(',')
   const uncommittedReloadKey = committable.length > 0 ? `${session.status}:${committable.join('\n')}` : ''
@@ -216,12 +231,30 @@ export function ChangesPanel({ session, disabled, onPush, onResolveConflicts, on
           )}
         </div>
       ) : (
-        <p className="py-6 text-center text-sm text-ink-500">{NO_CHANGES_MESSAGE}</p>
+        !description && <p className="py-6 text-center text-sm text-ink-500">{NO_CHANGES_MESSAGE}</p>
+      )}
+
+      {description && (
+        <DescriptionUpdate
+          draft={description}
+          edit={descriptionEdit}
+          disabled={disabled}
+          pushAllowed={canPush(session)}
+          pushesWithCommits={commits.length > 0}
+          onEdit={onDescriptionEdit}
+          onDiscard={onDiscardDescription}
+          onPush={onPush}
+        />
       )}
 
       {lastPush && (
         <p className="text-xs text-ink-500" title={fullTime(lastPush.at)}>
           Last pushed {plural(lastPush.commits.length, 'commit')} {age(lastPush.at)} ago, head <span className="font-mono">{shortSha(lastPush.oid)}</span>.
+        </p>
+      )}
+      {descriptionUpdatedAt && (
+        <p className="text-xs text-ink-500" title={fullTime(descriptionUpdatedAt)}>
+          Last updated the PR description {age(descriptionUpdatedAt)} ago.
         </p>
       )}
     </div>

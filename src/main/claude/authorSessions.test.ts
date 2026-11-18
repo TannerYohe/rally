@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PUSH_BEFORE_POSTING_ERROR } from '@shared/authorSession'
-import { authorSession as stored, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
+import { authorSession as stored, descriptionDraft, feedbackItem as thread, fixturePr as pr, itemResponse as response } from '@shared/authorSession.fixture'
 import type { AuthorSession, Drafts, FeedbackItem } from '@shared/types'
 import type { AuthorToolHandlers } from './authorTools'
 import { UncommittedChangesError } from '../git/prClone'
@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   fetchCloneSource: vi.fn(),
   postAuthorReply: vi.fn(),
   resolveFeedbackThread: vi.fn(),
+  fetchDescription: vi.fn(),
+  updateDescription: vi.fn(),
   cloneBranch: vi.fn(),
   syncClone: vi.fn(),
   syncWorktree: vi.fn(),
@@ -65,6 +67,7 @@ vi.mock('../github/authorReplies', () => ({
   postAuthorReply: mocks.postAuthorReply,
   resolveFeedbackThread: mocks.resolveFeedbackThread,
 }))
+vi.mock('../github/prDescription', () => ({ fetchDescription: mocks.fetchDescription, updateDescription: mocks.updateDescription }))
 vi.mock('../git/prClone', async (importOriginal) => ({
   MergeConflictError: (await importOriginal<typeof import('../git/prClone')>()).MergeConflictError,
   UncommittedChangesError: (await importOriginal<typeof import('../git/prClone')>()).UncommittedChangesError,
@@ -98,11 +101,18 @@ vi.mock('./modelOptions', () => ({ reviewModelOptions: (_config: unknown, env: R
 vi.mock('./timeline', () => ({ reduceTimeline: (timeline: unknown) => timeline, closeOpenEntries: (timeline: unknown) => timeline }))
 vi.mock('./authorTools', () => ({
   PUBLISH_RESPONSES_TOOL: 'mcp__rally__publish_responses',
+  PUBLISH_DESCRIPTION_TOOL: 'mcp__rally__publish_description',
   createAuthorServer: (handlers: AuthorToolHandlers) => {
     mocks.handlers = handlers
     return {}
   },
 }))
+
+/** Returns a stored session saved before sessions had description fields. */
+function legacySession(number: number): AuthorSession {
+  const { description: _description, descriptionUpdatedAt: _updatedAt, ...rest } = stored(number)
+  return rest as AuthorSession
+}
 
 mocks.stored = [
   stored(1, { status: 'running' }),
@@ -137,27 +147,27 @@ mocks.stored = [
     },
   }),
   stored(18, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
-  stored(60),
-  stored(61, { sdkSessionId: 'temp-conversation' }),
-  stored(62, { clone: OLD_TEMP_CLONE }),
-  stored(63, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
-  stored(64, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, path: join(tmpdir(), 'rally-author-test-rally-worktree') } }),
-  stored(65),
-  stored(66, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
-  stored(67, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
-  stored(68, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
-  stored(69),
-  stored(70),
-  stored(72, { sdkSessionId: 'temp-conversation' }),
-  stored(73, { clone: WORKTREE, sdkSessionId: 'worktree-conversation', sdkCwd: WORKTREE.path }),
-  stored(74, { clone: { ...WORKTREE, path: join(tmpdir(), 'rally-author-test-missing-worktree') }, commits: [{ oid: 'abc', subject: 'fix' }], uncommitted: ['a.ts'] }),
-  stored(75, { clone: WORKTREE, commits: [{ oid: 'abc', subject: 'fix' }] }),
-  stored(76, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
-  stored(77, { clone: WORKTREE }),
-  stored(78, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-edits-clone') } }),
-  stored(79, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['a.ts'] }) } }),
-  stored(71, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, syncedHead: 'prev' } }),
-  stored(54, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
+  stored(160),
+  stored(161, { sdkSessionId: 'temp-conversation' }),
+  stored(162, { clone: OLD_TEMP_CLONE }),
+  stored(163, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(164, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, path: join(tmpdir(), 'rally-author-test-rally-worktree') } }),
+  stored(165),
+  stored(166, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
+  stored(167, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true } }),
+  stored(168, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
+  stored(169),
+  stored(170),
+  stored(172, { sdkSessionId: 'temp-conversation' }),
+  stored(173, { clone: WORKTREE, sdkSessionId: 'worktree-conversation', sdkCwd: WORKTREE.path }),
+  stored(174, { clone: { ...WORKTREE, path: join(tmpdir(), 'rally-author-test-missing-worktree') }, commits: [{ oid: 'abc', subject: 'fix' }], uncommitted: ['a.ts'] }),
+  stored(175, { clone: WORKTREE, commits: [{ oid: 'abc', subject: 'fix' }] }),
+  stored(176, { clone: { ...WORKTREE, kind: 'rally_worktree' } }),
+  stored(177, { clone: WORKTREE }),
+  stored(178, { clone: { ...CLONE, path: join(tmpdir(), 'rally-author-test-edits-clone') } }),
+  stored(179, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['a.ts'] }) } }),
+  stored(171, { clone: { ...WORKTREE, kind: 'rally_worktree', createdBranch: true, syncedHead: 'prev' } }),
+  stored(154, { clone: CLONE, items: [thread('T1')], responses: { T1: response('T1', 'Fixed in {commit}', { action: 'fix', pendingCommit: true, files: ['b.ts'] }) } }),
   stored(19, {
     clone: { ...CLONE, syncedHead: 'old-head' },
     commits: [{ oid: 'aaaaaaa111', subject: 'fix' }],
@@ -189,7 +199,40 @@ mocks.stored = [
     responses: { T1: response('T1', 'Done'), 'self-1': { ...response('self-1', ''), action: 'fix' } },
     selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }] },
   }),
+  stored(32, {
+    items: [thread('T1'), { ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }],
+    responses: { T1: response('T1', 'Done'), 'self-1': response('self-1', '', { action: 'push_back', summary: 'Intended' }) },
+    selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-1'), kind: 'finding' }, { ...thread('self-2'), kind: 'finding' }] },
+  }),
+  stored(60, { description: descriptionDraft() }),
+  stored(61, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: descriptionDraft(),
+  }),
+  stored(62, { description: descriptionDraft() }),
+  stored(66, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: descriptionDraft(),
+  }),
+  stored(67, {
+    clone: CLONE,
+    commits: [{ oid: 'abc', subject: 'fix' }],
+    description: descriptionDraft(),
+  }),
+  stored(68, { description: descriptionDraft(), status: 'error', error: 'Rally couldn\'t update the PR description: timeout' }),
+  stored(69, { description: descriptionDraft(), status: 'error', error: 'The Claude turn ended with an error.' }),
+  stored(72, { description: descriptionDraft(), status: 'error', error: "The commits are pushed. Rally couldn't update the PR description: Not Found" }),
+  legacySession(70),
+  stored(71),
+  stored(63),
+  stored(64),
+  stored(65),
   stored(6, { clone: CLONE, commits: [{ oid: 'abc', subject: 'fix' }], items: [thread('T1')], responses: { T1: response('T1', 'Done') } }),
+  stored(54, {
+    selfReview: { verdict: 'Minor', reportMarkdown: '', findings: [{ ...thread('self-r-1'), kind: 'finding' }, { ...thread('self-r-2'), kind: 'finding' }] },
+  }),
 ]
 
 const { authorSessions, findingsFromDrafts } = await import('./authorSessions')
@@ -226,6 +269,8 @@ beforeEach(() => {
     mocks.checkedOutBranch,
     mocks.latestCommitTouching,
     mocks.headOf,
+    mocks.fetchDescription,
+    mocks.updateDescription,
   ])
     mock.mockReset()
   mocks.checkedOutBranch.mockImplementation(async (clone: { branch: string }) => clone.branch)
@@ -286,7 +331,7 @@ describe('runActions', () => {
     expect(mocks.commitFiles).toHaveBeenCalledWith(CLONE, ['a.ts'], 'Rename the helper')
     expect(session(20).responses.T1).toMatchObject({ pendingCommit: false, commits: ['def4567890'], reply: 'Renamed in def4567.', commitError: null })
     expect(session(20).commits).toEqual([{ oid: 'def4567890', subject: 'Rename the helper' }])
-    expect(authorSessions.sessionState('acme/api#20')).toEqual({ status: 'awaiting_feedback', active: true })
+    expect(authorSessions.sessionState('acme/api#20')).toEqual({ status: 'awaiting_feedback', active: true, openFindings: 0 })
   })
 
   it('refuses items that are no longer open on GitHub without starting a turn', async () => {
@@ -294,6 +339,18 @@ describe('runActions', () => {
     await expect(authorSessions.runActions(pr(21), [{ itemId: 'gone', action: 'fix', note: '' }], '')).rejects.toThrow('resolved or removed')
     expect(mocks.query).not.toHaveBeenCalled()
     expect(session(21).status).toBe('awaiting_feedback')
+  })
+
+  it('accepts listed findings and refuses dismissed ones', async () => {
+    mocks.fetchFeedbackItems.mockResolvedValue([thread('T1')])
+    authorSessions.clearFindings(session(54).id, ['self-r-2'])
+    await expect(authorSessions.runActions(pr(54), [{ itemId: 'self-r-2', action: 'fix', note: '' }], '')).rejects.toThrow('resolved or removed')
+    expect(mocks.query).not.toHaveBeenCalled()
+
+    finishTurn()
+    await authorSessions.runActions(pr(54), [{ itemId: 'self-r-1', action: 'investigate', note: '' }], '')
+    await vi.waitFor(() => expect(session(54).status).toBe('awaiting_feedback'))
+    expect(mocks.query.mock.calls[0][0].prompt).toContain('## Item self-r-1')
   })
 
   it('records a clone failure on the session', async () => {
@@ -410,11 +467,11 @@ describe('push', () => {
   })
 
   it('says a missing worktree keeps its commits on the branch, and forgets its uncommitted edits', async () => {
-    await expect(authorSessions.push('author-74')).rejects.toThrow('The worktree for this PR is gone')
-    expect(session(74).timeline.at(-1)).toMatchObject({ kind: 'warning', label: expect.stringContaining('worktree for this PR was removed'), detail: 'a.ts' })
-    await expect(authorSessions.commitUncommitted('author-74', 'Tidy')).rejects.toThrow('commits on the branch are kept')
-    await expect(authorSessions.diff('author-74')).rejects.toThrow('The worktree for this PR is gone')
-    expect(session(74)).toMatchObject({ uncommitted: [], status: 'error' })
+    await expect(authorSessions.push('author-174')).rejects.toThrow('The worktree for this PR is gone')
+    expect(session(174).timeline.at(-1)).toMatchObject({ kind: 'warning', label: expect.stringContaining('worktree for this PR was removed'), detail: 'a.ts' })
+    await expect(authorSessions.commitUncommitted('author-174', 'Tidy')).rejects.toThrow('commits on the branch are kept')
+    await expect(authorSessions.diff('author-174')).rejects.toThrow('The worktree for this PR is gone')
+    expect(session(174)).toMatchObject({ uncommitted: [], status: 'error' })
   })
 
   it('commits uncommitted edits with the given message', async () => {
@@ -532,10 +589,10 @@ describe('turn exits', () => {
     mocks.latestCommitTouching.mockResolvedValueOnce('bbbbbbb123')
     mocks.headOf.mockResolvedValue('before-turn')
     finishTurn(() => mocks.headOf.mockResolvedValue('after-turn'))
-    await authorSessions.feedback('author-54', 'fix it')
-    await vi.waitFor(() => expect(session(54).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-154', 'fix it')
+    await vi.waitFor(() => expect(session(154).status).toBe('awaiting_feedback'))
     expect(mocks.latestCommitTouching).toHaveBeenCalledWith(expect.anything(), ['b.ts'], 'before-turn')
-    expect(session(54).responses.T1).toMatchObject({ pendingCommit: false, commits: ['bbbbbbb123'], reply: 'Fixed in bbbbbbb', commitError: null })
+    expect(session(154).responses.T1).toMatchObject({ pendingCommit: false, commits: ['bbbbbbb123'], reply: 'Fixed in bbbbbbb', commitError: null })
   })
 })
 
@@ -655,29 +712,164 @@ describe('self-review', () => {
     comments: [{ id: '1', kind: 'inline', path: 'a.ts', line: 4, startLine: null, side: 'RIGHT', severity: 'high', body: 'Null check', replyToCommentId: null }],
   }
 
-  it('turns published drafts into private findings that can be dismissed', async () => {
+  it('turns published drafts into private findings that can be cleared', async () => {
     finishTurn(() => mocks.handlers!.onSelfReview(drafts))
     await authorSessions.selfReview(pr(30))
     await vi.waitFor(() => expect(session(30).status).toBe('awaiting_feedback'))
     expect(mocks.query.mock.calls[0][0].prompt).toBe('/review-pr https://github.com/acme/api/pull/30')
-    expect(session(30).selfReview).toMatchObject({ verdict: 'Minor changes', findings: [{ id: 'self-1', kind: 'finding', severity: 'high' }] })
+    expect(session(30).selfReview).toMatchObject({ verdict: 'Minor changes', findings: [{ kind: 'finding', severity: 'high' }] })
+    const findingId = session(30).selfReview!.findings[0].id
+    expect(findingId).toMatch(/^self-.+-1$/)
 
-    authorSessions.dismissFinding(session(30).id, 'self-1')
+    expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ active: false, openFindings: 1 })
+
+    authorSessions.clearFindings(session(30).id, [findingId])
     expect(session(30).selfReview?.findings).toEqual([])
+    expect(authorSessions.sessionState('acme/api#30')).toMatchObject({ openFindings: 0 })
   })
 
-  it('drops the earlier self-review findings and their responses when a new one publishes', async () => {
+  it('resolves handled findings with their responses, leaving reviewer comments alone', () => {
+    authorSessions.clearFindings(session(32).id, ['self-1', 'T1'])
+    expect(session(32).items.map((i) => i.id)).toEqual(['T1', 'self-2'])
+    expect(Object.keys(session(32).responses)).toEqual(['T1'])
+    expect(session(32).selfReview?.findings.map((f) => f.id)).toEqual(['self-2'])
+  })
+
+  it('drops the earlier self-review findings and their responses, and gives the new findings new ids, when a new one publishes', async () => {
     const sessionId = session(31).id
     finishTurn(() => mocks.handlers!.onSelfReview({ ...drafts, comments: [{ ...drafts.comments[0], body: 'Different problem' }] }))
     await authorSessions.feedback(sessionId, 'review again')
     await vi.waitFor(() => expect(session(31).status).toBe('awaiting_feedback'))
     expect(session(31).items.map((i) => i.id)).toEqual(['T1'])
     expect(Object.keys(session(31).responses)).toEqual(['T1'])
-    expect(session(31).selfReview?.findings[0]).toMatchObject({ id: 'self-1', comments: [{ body: 'Different problem' }] })
+    expect(session(31).selfReview?.findings[0]).toMatchObject({ comments: [{ body: 'Different problem' }] })
+    const firstId = session(31).selfReview!.findings[0].id
+
+    finishTurn(() => mocks.handlers!.onSelfReview({ ...drafts, comments: [{ ...drafts.comments[0], body: 'Different problem' }] }))
+    await authorSessions.feedback(sessionId, 'review again')
+    await vi.waitFor(() => expect(session(31).status).toBe('awaiting_feedback'))
+    expect(session(31).selfReview?.findings[0].id).not.toBe(firstId)
   })
 
-  it('maps draft comments to findings', () => {
-    expect(findingsFromDrafts(drafts, 'now')[0]).toMatchObject({ path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
+  it('maps draft comments to findings with ids scoped to the review', () => {
+    expect(findingsFromDrafts(drafts, 'r1', 'now')[0]).toMatchObject({ id: 'self-r1-1', path: 'a.ts', line: 4, comments: [{ body: 'Null check', createdAt: 'now' }] })
+  })
+})
+
+describe('description updates', () => {
+  it('saves a proposed description with GitHub\'s current one as its base', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body\r\n' })
+    finishTurn()
+    await authorSessions.feedback(session(63).id, 'update the description')
+    await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
+
+    expect(await mocks.handlers!.onDescription({ title: ' Fix the bug ', body: 'New body\n' })).toContain('saved')
+    expect(session(63).description).toMatchObject({ title: 'Fix the bug', body: 'New body', base: { title: 'Fix', body: 'Old body\r\n' } })
+    expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: true })
+    expect(await mocks.handlers!.onDescription({ title: 'Fix', body: 'Old body\n' })).toContain('nothing to update')
+    expect(session(63).description).toBeNull()
+    expect(authorSessions.sessionState('acme/api#63')).toMatchObject({ active: false })
+  })
+
+  it('logs and reports a proposal Rally couldn\'t compare with GitHub', async () => {
+    mocks.fetchDescription.mockRejectedValue(new Error('Not Found'))
+    finishTurn()
+    await authorSessions.feedback(session(71).id, 'update the description')
+    await vi.waitFor(() => expect(session(71).status).toBe('awaiting_feedback'))
+    await expect(mocks.handlers!.onDescription({ title: 'Fix the bug', body: 'New body' })).rejects.toThrow('Not Found')
+    expect(console.error).toHaveBeenCalledWith('Reading the PR description for a proposed update failed', expect.objectContaining({ pr: pr(71).url }))
+    expect(session(71).description).toBeNull()
+  })
+
+  it('asks Claude to update the description from the clone, quoting the current one', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body\nSecond line' })
+    finishTurn()
+    await authorSessions.draftDescription(pr(64))
+    await vi.waitFor(() => expect(session(64).status).toBe('awaiting_feedback'))
+    const prompt = mocks.query.mock.calls[0][0].prompt as string
+    expect(prompt).toContain('Current title: Fix')
+    expect(prompt).toContain('> Old body\n> Second line')
+    expect(prompt).toContain(`checked out at ${CLONE.path}`)
+  })
+
+  it("doesn't start a turn when reading the current description fails", async () => {
+    mocks.fetchDescription.mockRejectedValue(new Error('Not Found'))
+    await expect(authorSessions.draftDescription(pr(65))).rejects.toThrow('Not Found')
+    expect(mocks.query).not.toHaveBeenCalled()
+  })
+
+  it('updates GitHub with the author\'s edit and clears the draft', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    await authorSessions.push('author-60', { title: 'Fix the bug ', body: 'Edited body' })
+    expect(mocks.updateDescription).toHaveBeenCalledWith(pr(60), { title: 'Fix the bug', body: 'Edited body' })
+    expect(session(60)).toMatchObject({ status: 'awaiting_feedback', description: null, descriptionUpdatedAt: expect.any(String) })
+    expect(mocks.pushClone).not.toHaveBeenCalled()
+    expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 60)
+  })
+
+  it('pushes commits before updating the description', async () => {
+    const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: CLONE })
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    mocks.updateDescription.mockImplementation(async () => expect(mocks.pushClone).toHaveBeenCalled())
+    await authorSessions.push('author-61')
+    expect(mocks.updateDescription).toHaveBeenCalledWith(pr(61), { title: 'Fix the bug', body: 'New body' })
+    expect(session(61)).toMatchObject({ status: 'awaiting_feedback', commits: [], description: null })
+  })
+
+  it('keeps pushed commits and the draft when the description update fails after them', async () => {
+    const lastPush = { at: '2026-11-16T00:00:00Z', oid: 'abc', commits: [{ oid: 'abc', subject: 'fix' }] }
+    mocks.pushClone.mockResolvedValue({ push: lastPush, clone: CLONE })
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Old body' })
+    mocks.updateDescription.mockRejectedValue(new Error('Not Found'))
+    await expect(authorSessions.push('author-66')).rejects.toThrow("The commits are pushed. Rally couldn't update the PR description: Not Found")
+    expect(session(66)).toMatchObject({ status: 'error', commits: [], lastPush, description: { title: 'Fix the bug' } })
+    expect(mocks.refreshOne).toHaveBeenCalledWith('acme', 'api', 66)
+  })
+
+  it('leaves the description update for later when the merge conflicts', async () => {
+    mocks.integrateRemote.mockRejectedValue(new MergeConflictError('feature', ['a.ts']))
+    mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
+    finishTurn()
+    await authorSessions.push('author-67')
+    expect(session(67)).toMatchObject({ mergeConflicts: ['a.ts'], description: { title: 'Fix the bug' } })
+    expect(mocks.fetchDescription).not.toHaveBeenCalled()
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(mocks.refreshOne).not.toHaveBeenCalled()
+  })
+
+  it('restores a session saved before description updates with none pending', () => {
+    expect(session(70)).toMatchObject({ description: null, descriptionUpdatedAt: null })
+    expect(authorSessions.sessionState('acme/api#70')).toMatchObject({ active: false })
+  })
+
+  it('clears a draft GitHub already has without updating it again', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix the bug', body: 'New body\r\n' })
+    await authorSessions.push('author-68')
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(session(68)).toMatchObject({ status: 'awaiting_feedback', error: null, description: null, descriptionUpdatedAt: expect.any(String) })
+  })
+
+  it('refuses to overwrite a description that changed on GitHub, keeping the draft', async () => {
+    mocks.fetchDescription.mockResolvedValue({ title: 'Fix', body: 'Someone edited this' })
+    await expect(authorSessions.push('author-62')).rejects.toThrow('changed on GitHub')
+    expect(mocks.updateDescription).not.toHaveBeenCalled()
+    expect(session(62)).toMatchObject({ status: 'error', description: { title: 'Fix the bug' } })
+
+    await expect(authorSessions.push('author-62', { title: ' ', body: 'x' })).rejects.toThrow("title can't be empty")
+    authorSessions.discardDescription('author-62')
+    expect(session(62)).toMatchObject({ description: null, status: 'awaiting_feedback', error: null })
+    await expect(authorSessions.push('author-62')).rejects.toThrow('no commits or description update')
+  })
+
+  it('keeps an error the description update didn\'t cause when discarding it', () => {
+    authorSessions.discardDescription('author-69')
+    expect(session(69)).toMatchObject({ description: null, status: 'error', error: 'The Claude turn ended with an error.' })
+  })
+
+  it('clears a failed description request\'s error, after commits, when discarding it', () => {
+    authorSessions.discardDescription('author-72')
+    expect(session(72)).toMatchObject({ description: null, status: 'awaiting_feedback', error: null })
   })
 })
 
@@ -713,7 +905,7 @@ describe('pruneUnlisted', () => {
   })
 
   it('re-reads a worktree before pruning, removes the worktree without dropping work, and keeps the session when that fails', async () => {
-    const listed = new Set(mocks.stored.map((st) => st.prKey).filter((key) => key !== 'acme/api#66' && key !== 'acme/api#67'))
+    const listed = new Set(mocks.stored.map((st) => st.prKey).filter((key) => key !== 'acme/api#166' && key !== 'acme/api#167'))
     mocks.removeRallyWorktree.mockImplementation(async () => {
       if (mocks.removeRallyWorktree.mock.calls.length > 1) throw new Error("The branch feature has commits GitHub doesn't.")
     })
@@ -722,14 +914,14 @@ describe('pruneUnlisted', () => {
     await vi.waitFor(() => expect(mocks.removeRallyWorktree).toHaveBeenCalledTimes(2))
     expect(mocks.removeRallyWorktree).toHaveBeenCalledWith(expect.objectContaining({ kind: 'rally_worktree' }), { dropWork: false })
     expect(mocks.uncommittedPaths).toHaveBeenCalledWith(expect.objectContaining({ path: WORKTREE.path }))
-    await vi.waitFor(() => expect([authorSessions.getByPr('acme/api#66'), authorSessions.getByPr('acme/api#67')].filter(Boolean)).toHaveLength(1))
+    await vi.waitFor(() => expect([authorSessions.getByPr('acme/api#166'), authorSessions.getByPr('acme/api#167')].filter(Boolean)).toHaveLength(1))
   })
 
   it('keeps a worktree session whose worktree has commits Rally hasn\'t seen yet', async () => {
     mocks.localCommits.mockResolvedValue([{ oid: 'new', subject: 'made by hand' }])
-    const listed = new Set(mocks.stored.map((st) => st.prKey).filter((key) => key !== 'acme/api#68'))
+    const listed = new Set(mocks.stored.map((st) => st.prKey).filter((key) => key !== 'acme/api#168'))
     authorSessions.pruneUnlisted(listed)
-    await vi.waitFor(() => expect(session(68).commits).toEqual([{ oid: 'new', subject: 'made by hand' }]))
+    await vi.waitFor(() => expect(session(168).commits).toEqual([{ oid: 'new', subject: 'made by hand' }]))
     expect(mocks.removeRallyWorktree).not.toHaveBeenCalled()
   })
 })
@@ -740,30 +932,30 @@ describe('checking out the PR branch', () => {
   it('runs a self-review in the local worktree with the repo settings and CLAUDE.md loaded', async () => {
     mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
     finishTurn()
-    await authorSessions.selfReview(pr(60))
-    await vi.waitFor(() => expect(session(60).status).toBe('awaiting_feedback'))
+    await authorSessions.selfReview(pr(160))
+    await vi.waitFor(() => expect(session(160).status).toBe('awaiting_feedback'))
 
     expect(mocks.checkoutWorktree).toHaveBeenCalledWith(['~/src'], { repo: 'acme/api', branch: 'feature', baseBranch: 'main' }, undefined)
     expect(mocks.cloneBranch).not.toHaveBeenCalled()
-    expect(session(60).clone).toEqual({ ...WORKTREE, syncedHead: 'synced', createdBranch: undefined })
+    expect(session(160).clone).toEqual({ ...WORKTREE, syncedHead: 'synced', createdBranch: undefined })
     expect(turnOptions()).toMatchObject({ cwd: WORKTREE.path, settingSources: ['user', 'project', 'local'] })
   })
 
   it('starts a new conversation when the turn moves to a different folder', async () => {
     mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
     finishTurn()
-    await authorSessions.feedback('author-61', 'carry on')
-    await vi.waitFor(() => expect(session(61).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-161', 'carry on')
+    await vi.waitFor(() => expect(session(161).status).toBe('awaiting_feedback'))
     expect(turnOptions().resume).toBeUndefined()
-    expect(session(61).timeline).toContainEqual(expect.objectContaining({ kind: 'warning', detail: WORKTREE.path }))
+    expect(session(161).timeline).toContainEqual(expect.objectContaining({ kind: 'warning', detail: WORKTREE.path }))
   })
 
   it('moves a temp clone with no work of its own to the worktree and deletes the clone', async () => {
     mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
     finishTurn()
-    await authorSessions.feedback('author-62', 'go')
-    await vi.waitFor(() => expect(session(62).status).toBe('awaiting_feedback'))
-    expect(session(62).clone?.path).toBe(WORKTREE.path)
+    await authorSessions.feedback('author-162', 'go')
+    await vi.waitFor(() => expect(session(162).status).toBe('awaiting_feedback'))
+    expect(session(162).clone?.path).toBe(WORKTREE.path)
     expect(existsSync(OLD_TEMP_CLONE.path)).toBe(false)
   })
 
@@ -771,8 +963,8 @@ describe('checking out the PR branch', () => {
     mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
     mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
     finishTurn()
-    await authorSessions.feedback('author-63', 'go')
-    await vi.waitFor(() => expect(session(63).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-163', 'go')
+    await vi.waitFor(() => expect(session(163).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
     expect(turnOptions().cwd).toBe(CLONE.path)
   })
@@ -783,20 +975,20 @@ describe('checking out the PR branch', () => {
       yield { type: 'system', subtype: 'init', session_id: 'next-conversation' }
       yield { type: 'result', subtype: 'success', is_error: false }
     })
-    await authorSessions.feedback('author-73', 'carry on')
-    await vi.waitFor(() => expect(session(73).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-173', 'carry on')
+    await vi.waitFor(() => expect(session(173).status).toBe('awaiting_feedback'))
     expect(turnOptions().resume).toBe('worktree-conversation')
-    expect(session(73)).toMatchObject({ sdkSessionId: 'next-conversation', sdkCwd: WORKTREE.path })
-    expect(session(73).timeline).not.toContainEqual(expect.objectContaining({ kind: 'warning' }))
+    expect(session(173)).toMatchObject({ sdkSessionId: 'next-conversation', sdkCwd: WORKTREE.path })
+    expect(session(173).timeline).not.toContainEqual(expect.objectContaining({ kind: 'warning' }))
   })
 
   it('resumes a conversation saved before sdkCwd existed when the turn runs in the session folder', async () => {
     mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'fork', branch: 'feature', baseBranch: 'main', baseUrl: 'upstream' })
-    mocks.cloneBranch.mockResolvedValue({ ...CLONE, path: join(tmpdir(), 'rally', 'author-72') })
-    mkdirSync(join(tmpdir(), 'rally', 'author-72'), { recursive: true })
+    mocks.cloneBranch.mockResolvedValue({ ...CLONE, path: join(tmpdir(), 'rally', 'author-172') })
+    mkdirSync(join(tmpdir(), 'rally', 'author-172'), { recursive: true })
     finishTurn()
-    await authorSessions.feedback('author-72', 'carry on')
-    await vi.waitFor(() => expect(session(72).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-172', 'carry on')
+    await vi.waitFor(() => expect(session(172).status).toBe('awaiting_feedback'))
     expect(turnOptions().resume).toBe('temp-conversation')
   })
 
@@ -804,48 +996,48 @@ describe('checking out the PR branch', () => {
     mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
     mocks.syncWorktree.mockImplementation(async (clone) => ({ clone: { ...clone, syncedHead: 'base' }, state: 'diverged' }))
     finishTurn()
-    await authorSessions.feedback('author-69', 'go')
-    await vi.waitFor(() => expect(session(69).status).toBe('awaiting_feedback'))
-    expect(session(69).timeline).toContainEqual(expect.objectContaining({ kind: 'warning', label: expect.stringContaining('Rally left it as is'), detail: WORKTREE.path }))
-    expect(session(69).timeline).toContainEqual(expect.objectContaining({ kind: 'step', detail: `Worktree: ${WORKTREE.path}` }))
+    await authorSessions.feedback('author-169', 'go')
+    await vi.waitFor(() => expect(session(169).status).toBe('awaiting_feedback'))
+    expect(session(169).timeline).toContainEqual(expect.objectContaining({ kind: 'warning', label: expect.stringContaining('Rally left it as is'), detail: WORKTREE.path }))
+    expect(session(169).timeline).toContainEqual(expect.objectContaining({ kind: 'step', detail: `Worktree: ${WORKTREE.path}` }))
   })
 
   it('names the clone and how to fall back to temp clones when the local clone fails to check out', async () => {
     const { LocalCloneError } = await import('../git/localWorktree')
     mocks.checkoutWorktree.mockRejectedValue(new LocalCloneError('/home/me/src/api', new Error('git fetch failed: Permission denied (publickey).')))
-    await expect(authorSessions.feedback('author-70', 'go')).rejects.toThrow('in your clone at /home/me/src/api. Fix that clone, or remove the folder holding it')
-    expect(session(70)).toMatchObject({ status: 'error', error: expect.stringContaining('Permission denied (publickey)') })
+    await expect(authorSessions.feedback('author-170', 'go')).rejects.toThrow('in your clone at /home/me/src/api. Fix that clone, or remove the folder holding it')
+    expect(session(170)).toMatchObject({ status: 'error', error: expect.stringContaining('Permission denied (publickey)') })
   })
 
   it('keeps the branch Rally created and the synced head across turns in its worktree, however git spells its path', async () => {
     mocks.checkoutWorktree.mockResolvedValue({ ...WORKTREE, path: `${realpathSync.native(WORKTREE.path)}${sep}`, kind: 'rally_worktree' })
     finishTurn()
-    await authorSessions.feedback('author-71', 'go')
-    await vi.waitFor(() => expect(session(71).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-171', 'go')
+    await vi.waitFor(() => expect(session(171).status).toBe('awaiting_feedback'))
     expect(mocks.syncWorktree).toHaveBeenCalledWith(expect.objectContaining({ createdBranch: true, syncedHead: 'prev' }))
   })
 
   it('keeps using a worktree that holds unpushed commits even when no local repo folder finds it', async () => {
     mocks.localCommits.mockResolvedValue([{ oid: 'abc', subject: 'fix' }])
     finishTurn()
-    await authorSessions.feedback('author-75', 'go')
-    await vi.waitFor(() => expect(session(75).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-175', 'go')
+    await vi.waitFor(() => expect(session(175).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
     expect(mocks.cloneBranch).not.toHaveBeenCalled()
     expect(turnOptions().cwd).toBe(WORKTREE.path)
-    expect(session(75).timeline).toContainEqual(expect.objectContaining({ kind: 'step', detail: `Worktree, which holds unpushed work: ${WORKTREE.path}` }))
+    expect(session(175).timeline).toContainEqual(expect.objectContaining({ kind: 'step', detail: `Worktree, which holds unpushed work: ${WORKTREE.path}` }))
   })
 
   it('stops the turn when a Rally worktree has another branch checked out, saying to switch it back', async () => {
     mocks.checkedOutBranch.mockResolvedValueOnce('spike')
-    await expect(authorSessions.feedback('author-76', 'go')).rejects.toThrow('has `spike` checked out, not the PR branch `feature`. Switch it back, finishing or aborting')
+    await expect(authorSessions.feedback('author-176', 'go')).rejects.toThrow('has `spike` checked out, not the PR branch `feature`. Switch it back, finishing or aborting')
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
     expect(mocks.query).not.toHaveBeenCalled()
   })
 
   it('stops the turn when your own worktree has a detached HEAD, such as mid-rebase', async () => {
     mocks.checkedOutBranch.mockResolvedValue(null)
-    await expect(authorSessions.feedback('author-77', 'go')).rejects.toThrow('has a detached HEAD checked out, not the PR branch `feature`. Switch it back, finishing or aborting')
+    await expect(authorSessions.feedback('author-177', 'go')).rejects.toThrow('has a detached HEAD checked out, not the PR branch `feature`. Switch it back, finishing or aborting')
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
   })
 
@@ -853,10 +1045,10 @@ describe('checking out the PR branch', () => {
     mocks.checkedOutBranch.mockResolvedValueOnce('main')
     mocks.checkoutWorktree.mockResolvedValue({ ...WORKTREE, path: OLD_TEMP_CLONE.path, kind: 'rally_worktree' })
     finishTurn()
-    await authorSessions.feedback('author-77', 'go')
-    await vi.waitFor(() => expect(session(77).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-177', 'go')
+    await vi.waitFor(() => expect(session(177).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).toHaveBeenCalledWith(['~/src'], expect.anything(), WORKTREE.path)
-    expect(session(77).clone).toMatchObject({ kind: 'rally_worktree' })
+    expect(session(177).clone).toMatchObject({ kind: 'rally_worktree' })
   })
 
   it('keeps using a temp clone that holds only uncommitted edits', async () => {
@@ -865,8 +1057,8 @@ describe('checking out the PR branch', () => {
     mocks.checkoutWorktree.mockResolvedValue(WORKTREE)
     mocks.uncommittedPaths.mockResolvedValue(['a.ts'])
     finishTurn()
-    await authorSessions.feedback('author-78', 'go')
-    await vi.waitFor(() => expect(session(78).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-178', 'go')
+    await vi.waitFor(() => expect(session(178).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
     expect(turnOptions().cwd).toBe(path)
     expect(existsSync(path)).toBe(true)
@@ -875,32 +1067,32 @@ describe('checking out the PR branch', () => {
 
   it('leaves a turn\'s fixes uncommitted, and refuses the diff, when the turn ends on another branch', async () => {
     finishTurn(() => mocks.checkedOutBranch.mockResolvedValue('spike'))
-    await authorSessions.feedback('author-79', 'fix it')
-    await vi.waitFor(() => expect(session(79).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-179', 'fix it')
+    await vi.waitFor(() => expect(session(179).status).toBe('awaiting_feedback'))
     expect(mocks.commitFiles).not.toHaveBeenCalled()
-    expect(session(79).responses.T1).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('has `spike` checked out') })
-    await expect(authorSessions.diff('author-79')).rejects.toThrow('has `spike` checked out')
+    expect(session(179).responses.T1).toMatchObject({ pendingCommit: false, commitError: expect.stringContaining('has `spike` checked out') })
+    await expect(authorSessions.diff('author-179')).rejects.toThrow('has `spike` checked out')
   })
 
   it('clones into the temp folder for a PR from a fork', async () => {
     mocks.fetchCloneSource.mockResolvedValue({ headUrl: 'fork', branch: 'feature', baseUrl: 'upstream', baseBranch: 'main' })
     finishTurn()
-    await authorSessions.feedback('author-65', 'go')
-    await vi.waitFor(() => expect(session(65).status).toBe('awaiting_feedback'))
+    await authorSessions.feedback('author-165', 'go')
+    await vi.waitFor(() => expect(session(165).status).toBe('awaiting_feedback'))
     expect(mocks.checkoutWorktree).not.toHaveBeenCalled()
-    expect(mocks.cloneBranch).toHaveBeenCalledWith(join(tmpdir(), 'rally', 'author-65'), expect.objectContaining({ headUrl: 'fork' }))
+    expect(mocks.cloneBranch).toHaveBeenCalledWith(join(tmpdir(), 'rally', 'author-165'), expect.objectContaining({ headUrl: 'fork' }))
   })
 
   it('removes the worktree Rally added, with its edits, on start over', async () => {
-    const { clone } = session(64)
-    await authorSessions.discard('author-64')
+    const { clone } = session(164)
+    await authorSessions.discard('author-164')
     expect(mocks.removeRallyWorktree).toHaveBeenCalledWith(clone, { dropWork: true })
-    expect(authorSessions.getByPr('acme/api#64')).toBeNull()
+    expect(authorSessions.getByPr('acme/api#164')).toBeNull()
   })
 
   it('keeps the session and names the folder when start over cannot remove the worktree', async () => {
     mocks.removeRallyWorktree.mockRejectedValue(new Error('git worktree remove failed: locked'))
-    await expect(authorSessions.discard('author-68')).rejects.toThrow(`Rally couldn't remove the worktree at ${WORKTREE.path}`)
-    expect(authorSessions.getByPr('acme/api#68')).not.toBeNull()
+    await expect(authorSessions.discard('author-168')).rejects.toThrow(`Rally couldn't remove the worktree at ${WORKTREE.path}`)
+    expect(authorSessions.getByPr('acme/api#168')).not.toBeNull()
   })
 })

@@ -319,7 +319,7 @@ describe('fetchPrs', () => {
     expect(lookups).toEqual([{ status: 'gone' }, { status: 'gone' }])
   })
 
-  it('tells gone PRs from lookups that failed for another reason, warning only about the others', async () => {
+  it('tells gone PRs from lookups that failed for another reason, warning about all but missing PRs', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const data = { p0: open(1), p1: { pullRequest: null }, p2: null, p3: null }
     graphql.mockRejectedValueOnce(
@@ -333,10 +333,12 @@ describe('fetchPrs', () => {
     const { lookups } = await fetchPrs([1, 2, 3, 4].map(coord), 'reviewing')
 
     expect(lookups.map((l) => l.status)).toEqual(['found', 'gone', 'gone', 'unknown'])
-    expect(warn).toHaveBeenCalledWith('GitHub PR lookup returned partial errors', { errors: [expect.objectContaining({ type: 'SERVICE_UNAVAILABLE' })] })
+    expect(warn).toHaveBeenCalledWith('GitHub PR lookup returned partial errors', {
+      errors: [expect.objectContaining({ type: 'FORBIDDEN' }), expect.objectContaining({ type: 'SERVICE_UNAVAILABLE' })],
+    })
   })
 
-  it('does not warn when every failed lookup is a gone PR', async () => {
+  it('does not warn when every failed lookup is a missing PR', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     graphql.mockRejectedValueOnce(lookupError({ p0: { pullRequest: null } }, [{ type: 'NOT_FOUND', path: ['p0', 'pullRequest'] }]))
     const { lookups } = await fetchPrs([coord(1)], 'reviewing')

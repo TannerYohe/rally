@@ -1,5 +1,10 @@
 import { actionableItems, canReplyTo, isFindingId, isReplyPending, pendingReplies } from '@shared/authorSession'
-import type { ActionRequest, AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, SessionStatus } from '@shared/types'
+import type { ActionRequest, AuthorSession, FeedbackItem, ItemResponse, PostedReply, ReplyPost, ResponseAction, SessionStatus } from '@shared/types'
+
+export interface ActionPick {
+  action: ResponseAction
+  note: string
+}
 
 export interface FeedbackRow {
   item: FeedbackItem
@@ -28,7 +33,7 @@ export function feedbackRows(open: FeedbackItem[], session: SessionView | null):
 }
 
 /** Returns the picked actions Run sends, skipping picks on items that are closed on GitHub or no longer listed. */
-export function actionRequests(picks: Record<string, Omit<ActionRequest, 'itemId'>>, open: FeedbackItem[], session: SessionView | null): ActionRequest[] {
+export function actionRequests(picks: Record<string, ActionPick>, open: FeedbackItem[], session: SessionView | null): ActionRequest[] {
   const actionable = new Set(actionableItems(open, session).map((item) => item.id))
   return Object.entries(picks)
     .filter(([itemId]) => actionable.has(itemId))

@@ -7,11 +7,14 @@ import {
   type Phase,
   type Pr,
   type PrListKind,
+  type PrLinks,
   type PrListState,
+  type PrRef,
   type SessionStatus,
   type StoredHide,
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
+import { keyOf, linkNode, linkUnits, oneSidedLinks, toPrRef, unitHide, type LinkNode } from '@shared/prUnit'
 import { summarizePr } from './claude/summarize'
 import { computeAuthorPhase } from './github/authorPhase'
 import { computePhase } from './github/phase'
@@ -28,6 +31,7 @@ import {
   headsSeenFile,
   hiddenPrsFile,
   prCacheFile,
+  prLinksFile,
   rallyReviewsFile,
   summariesFile,
   type PrCache,
@@ -54,11 +58,35 @@ interface PrListFiles {
   hidden: JsonFile<Record<string, StoredHide>>
 }
 
+interface PrLinkSource {
+  file: JsonFile<PrLinks>
+  markers(): string[]
+}
+
 interface PrListSource {
   kind: PrListKind
   files: PrListFiles
+  /** Present for a list that groups linked PRs into units. */
+  links?: PrLinkSource
   searchQueries(): string[]
   phase(pr: PhaseInput, sessionActive: boolean): Phase
+}
+
+/** A PR outside the list that a listed PR links one-sidedly. */
+interface LinkTarget {
+  node: LinkNode
+  ref: PrRef
+}
+
+function unreciprocatedTargets(prs: Pr[]): Map<string, LinkTarget> {
+  const refs = prs.flatMap((pr) => pr.unreciprocatedLinks ?? [])
+  return new Map(refs.map((ref) => [keyOf(ref), { node: { key: keyOf(ref), coords: ref, targets: [] }, ref }]))
+}
+
+/** Shows every member of a unit while any member shows, so a unit hides only while all its members do. */
+function withUnitHides(prs: Pr[]): Pr[] {
+  const byKey = new Map(prs.map((pr) => [keyOf(pr), pr]))
+  return prs.map((pr) => (pr.linkedPrs ? { ...pr, hidden: unitHide([pr, ...pr.linkedPrs.flatMap((key) => byKey.get(key) ?? [])]) } : pr))
 }
 
 function withRallyRepliesCounted(reviews: MyReview[], rallyReviewIds: number[]): MyReview[] {
@@ -74,13 +102,15 @@ class PrList extends EventEmitter {
   private refreshGeneration = 0
   private fetchedDuringRefresh = new Map<string, GithubPr>()
   private pruners: Pruner[] = []
+  private linkTargets = new Map<string, LinkTarget>()
   private readonly files: PrListFiles
 
   constructor(private readonly source: PrListSource) {
     super()
     this.files = source.files
     const cache = this.files.cache.get()
-    this.state = { prs: this.withHidden(cache.prs), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
+    this.linkTargets = unreciprocatedTargets(cache.prs)
+    this.state = { prs: this.settle(this.withHidden(cache.prs)), viewer: cache.viewer, refreshedAt: cache.refreshedAt, refreshing: false, error: null }
   }
 
   get kind(): PrListKind {
@@ -112,13 +142,18 @@ class PrList extends EventEmitter {
   }
 
   reapplyPhases(): void {
-    const prs = this.withHidden(this.withPhases(this.state.prs))
-    const changed = prs.some(
-      (pr, i) =>
-        pr.phase !== this.state.prs[i].phase ||
-        pr.reviewStatus !== this.state.prs[i].reviewStatus ||
-        pr.hidden?.mode !== this.state.prs[i].hidden?.mode,
-    )
+    const prs = this.settle(this.withHidden(this.withPhases(this.state.prs)))
+    const changed =
+      prs.length !== this.state.prs.length ||
+      prs.some(
+        (pr, i) =>
+          pr.id !== this.state.prs[i].id ||
+          pr.phase !== this.state.prs[i].phase ||
+          pr.reviewStatus !== this.state.prs[i].reviewStatus ||
+          pr.hidden?.mode !== this.state.prs[i].hidden?.mode ||
+          JSON.stringify(pr.linkedPrs) !== JSON.stringify(this.state.prs[i].linkedPrs) ||
+          JSON.stringify(pr.unreciprocatedLinks) !== JSON.stringify(this.state.prs[i].unreciprocatedLinks),
+      )
     if (changed) this.update({ prs })
   }
 
@@ -133,7 +168,7 @@ class PrList extends EventEmitter {
       const refreshedAt = new Date().toISOString()
       const listed = new Set(prs.map((pr) => prKey(pr.owner, pr.repo, pr.number)))
       for (const prune of this.pruners) prune(listed)
-      this.update({ prs: this.decorate(prs, true), viewer, refreshedAt, refreshing: false })
+      this.update({ prs: this.settle(this.decorate(prs, true)), viewer, refreshedAt, refreshing: false })
       this.files.cache.set({ viewer, refreshedAt, prs: this.state.prs })
       void this.fillSummaries()
     } catch (error) {
@@ -147,33 +182,60 @@ class PrList extends EventEmitter {
     const fetched = await fetchPr(owner, repo, number, this.kind)
     if (this.state.refreshing && this.refreshGeneration === startedDuringRefresh) this.fetchedDuringRefresh.set(fetched.id, fetched)
     const [fresh] = this.decorate([fetched], false)
-    const prs = this.state.prs.some((p) => p.id === fresh.id)
-      ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p))
-      : [...this.state.prs, fresh]
+    const prs = this.settle(
+      this.state.prs.some((p) => p.id === fresh.id) ? this.state.prs.map((p) => (p.id === fresh.id ? fresh : p)) : [...this.state.prs, fresh],
+    )
     this.update({ prs })
     this.files.cache.set({ viewer: this.state.viewer, refreshedAt: this.state.refreshedAt, prs })
   }
 
-  hide(id: string, mode: HideMode): void {
-    const pr = this.state.prs.find((p) => p.id === id)
-    if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
-    this.files.hidden.set({ ...this.files.hidden.get(), [id]: newHide(pr, mode, new Date().toISOString()) })
+  /** Hides every PR in a unit together. */
+  hide(ids: string[], mode: HideMode): void {
+    const at = new Date().toISOString()
+    const hides = ids.map((id) => {
+      const pr = this.state.prs.find((p) => p.id === id)
+      if (!pr) throw new Error('This PR is no longer in the list. Refresh and try again.')
+      return [id, newHide(pr, mode, at)] as const
+    })
+    this.files.hidden.set({ ...this.files.hidden.get(), ...Object.fromEntries(hides) })
     this.reapplyHidden()
   }
 
-  unhide(id: string): void {
-    const { [id]: _removed, ...rest } = this.files.hidden.get()
-    this.files.hidden.set(rest)
+  unhide(ids: string[]): void {
+    this.files.hidden.set(Object.fromEntries(Object.entries(this.files.hidden.get()).filter(([id]) => !ids.includes(id))))
     this.reapplyHidden()
   }
 
   private reapplyHidden(): void {
-    this.update({ prs: this.withHidden(this.state.prs) })
+    this.update({ prs: this.settle(this.withHidden(this.state.prs)) })
   }
 
   private decorate(prs: GithubPr[], prune: boolean): Pr[] {
     this.syncHides(prs, prune)
     return this.withHidden(this.withPhases(this.withSummaries(this.withHeadTimes(prs, prune), prune)))
+  }
+
+  /** Relinks the list from PR descriptions and hand links, drops companions no listed PR links with, and lines up unit hides. */
+  private settle(prs: Pr[]): Pr[] {
+    const links = this.source.links
+    if (!links) return prs
+    const handLinks = links.file.get()
+    const nodes = prs.map((pr) => linkNode(pr, links.markers()))
+    const units = linkUnits(nodes, handLinks)
+    const unitOf = new Map(units.flatMap((unit) => unit.map((key) => [key, unit] as const)))
+    const listedKeys = new Set(prs.filter((pr) => !pr.companion).map(keyOf))
+    const kept = prs.filter((pr) => !pr.companion || unitOf.get(keyOf(pr))?.some((key) => listedKeys.has(key)))
+    const outside = [...this.linkTargets.values()].filter((target) => !unitOf.has(target.node.key) && !nodes.some((n) => n.key === target.node.key))
+    const oneSided = oneSidedLinks([...nodes, ...outside.map((target) => target.node)], handLinks, units)
+    const refs = new Map<string, PrRef>([...prs.map((pr) => [keyOf(pr), toPrRef(pr)] as const), ...outside.map((t) => [t.node.key, t.ref] as const)])
+    const linked = kept.map((pr) => {
+      const key = keyOf(pr)
+      const { linkedPrs: _linked, unreciprocatedLinks: _unreciprocated, ...rest } = pr
+      const others = unitOf.get(key)?.filter((member) => member !== key)
+      const unreciprocated = oneSided.get(key)?.map((target) => refs.get(target)!)
+      return { ...rest, ...(others && { linkedPrs: others }), ...(unreciprocated && { unreciprocatedLinks: unreciprocated }) }
+    })
+    return withUnitHides(linked)
   }
 
   private syncHides(prs: GithubPr[], prune: boolean): void {
@@ -298,6 +360,7 @@ function authorPhase(pr: PhaseInput, sessionActive: boolean): Phase {
 export const prList = new ReviewPrList({
   kind: 'reviewing',
   files: { cache: prCacheFile, summaries: summariesFile, headsSeen: headsSeenFile, hidden: hiddenPrsFile },
+  links: { file: prLinksFile, markers: () => configFile.get().linkMarkers },
   searchQueries: () => buildSearchQueries(configFile.get()),
   phase: reviewPhase,
 })

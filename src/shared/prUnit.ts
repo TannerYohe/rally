@@ -1,5 +1,5 @@
 import { parseLinkedPrs, type PrCoords } from './linkedPrs'
-import { isSamePr, prKey, type Phase, type Pr, type PrHide, type PrLinks } from './types'
+import { isSamePr, prKey, type Phase, type Pr, type PrHide, type PrLinks, type PrRef } from './types'
 
 export const MAX_UNIT_SIZE = 5
 
@@ -12,6 +12,10 @@ export interface LinkNode {
 
 export function keyOf(pr: PrCoords): string {
   return prKey(pr.owner, pr.repo, pr.number)
+}
+
+export function toPrRef(pr: PrRef): PrRef {
+  return { owner: pr.owner, repo: pr.repo, number: pr.number, url: pr.url }
 }
 
 export function linkNode(pr: PrCoords & Pick<Pr, 'body'>, markers: string[]): LinkNode {
@@ -68,7 +72,8 @@ export function oneSidedLinks(nodes: LinkNode[], links: PrLinks, units: string[]
         lists(node, other) &&
         !lists(other, node) &&
         !unitOf.get(node.key)?.includes(other.key) &&
-        !hasPair(links.unlinked, node.key, other.key),
+        !hasPair(links.unlinked, node.key, other.key) &&
+        !hasPair(links.linked, node.key, other.key),
     )
     if (oneSided.length > 0) result.set(node.key, oneSided.map((other) => other.key))
   }

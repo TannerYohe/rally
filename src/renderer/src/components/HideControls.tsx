@@ -34,7 +34,7 @@ export function HideControls({ list, pr, className = '' }: { list: PrListKind; p
         <span className="text-xs text-ink-500" title={fullTime(pr.hidden.at)}>
           {HIDE_MODE_LABELS[pr.hidden.mode]} · {age(pr.hidden.at)} ago
         </span>
-        <button className={BUTTON_CLASS} onClick={() => run(() => window.rally.unhidePr(list, pr.id))}>
+        <button className={BUTTON_CLASS} onClick={() => run(() => window.rally.unhidePr(list, [pr.id]))}>
           Unhide
         </button>
       </div>
@@ -46,11 +46,11 @@ export function HideControls({ list, pr, className = '' }: { list: PrListKind; p
       <button
         className={BUTTON_CLASS}
         title={SNOOZE_TITLES[list]}
-        onClick={() => run(() => window.rally.hidePr(list, pr.id, 'snooze'))}
+        onClick={() => run(() => window.rally.hidePr(list, [pr.id], 'snooze'))}
       >
         Snooze
       </button>
-      <button className={BUTTON_CLASS} title="Hide until you unhide it" onClick={() => run(() => window.rally.hidePr(list, pr.id, 'indefinite'))}>
+      <button className={BUTTON_CLASS} title="Hide until you unhide it" onClick={() => run(() => window.rally.hidePr(list, [pr.id], 'indefinite'))}>
         Hide
       </button>
     </div>

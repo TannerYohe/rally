@@ -297,7 +297,7 @@ function decideOpenCommand(program: string, args: string[], segment: string, sta
   if (INPUT_ARGUMENT_COMMANDS.has(program)) return decideXargs(args, segment, state, context)
   switch (program) {
     case 'gh':
-      return decideOpenGh(args)
+      return decideGhWrite(args)
     case 'git':
       return decideOpenGit(args, state)
     case 'curl':
@@ -514,11 +514,11 @@ function decideGh(args: string[], state: ShellState): ToolDecision {
   if (args[1] === 'checkout' && !(state.cwd && isTempPath(state.cwd, state))) {
     return deny('Rally only runs `gh pr checkout` in repos under the temp directory.')
   }
-  return decideOpenGh(args)
+  return decideGhWrite(args)
 }
 
-/** Under open access, blocks gh commands that write to GitHub. */
-function decideOpenGh(args: string[]): ToolDecision {
+/** Blocks gh commands that write to GitHub. */
+function decideGhWrite(args: string[]): ToolDecision {
   if (args[0] === 'api') return decideGhApi(args.slice(1))
   if (args[0] === 'search' || READ_ONLY_GH_VERBS.has(args[1])) return ALLOW
   return deny(`\`gh ${args.slice(0, 2).join(' ')}\` is not permitted in Rally.`)

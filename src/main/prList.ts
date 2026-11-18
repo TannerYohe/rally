@@ -45,6 +45,7 @@ import {
 
 const SUMMARY_CONCURRENCY = 3
 const MAX_LINK_ROUNDS = 3
+const LISTED_STAMP_REFRESH_MS = 24 * 60 * 60_000
 
 export interface SessionState {
   status: SessionStatus
@@ -499,7 +500,11 @@ class ReviewPrList extends PrList {
 function prunePrLinks(listed: Set<string>): void {
   const now = new Date().toISOString()
   const stored = prLinksFile.get()
-  const listedAt = (key: string) => (listed.has(key) ? now : (stored.lastListedAt?.[key] ?? now))
+  const listedAt = (key: string) => {
+    const previous = stored.lastListedAt?.[key]
+    if (!listed.has(key)) return previous ?? now
+    return previous && Date.parse(now) - Date.parse(previous) < LISTED_STAMP_REFRESH_MS ? previous : now
+  }
   const recent = ([a, b]: [string, string]) => withinUnlistedRetention(listedAt(a), now) || withinUnlistedRetention(listedAt(b), now)
   const linked = stored.linked.filter(recent)
   const unlinked = stored.unlinked.filter(recent)

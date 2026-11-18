@@ -567,6 +567,16 @@ describe('prList', () => {
         expect(mocks.store.prLinksFile.get().lastListedAt?.['acme/api#1']).toBeDefined()
       })
 
+      it('does not rewrite hand links when a listed PR was stamped within the last day', async () => {
+        const recently = new Date().toISOString()
+        mocks.store.prLinksFile.set({ linked: [['acme/api#1', 'acme/gone#9']], unlinked: [], lastListedAt: { 'acme/api#1': recently, 'acme/gone#9': recently } })
+        const stored = mocks.store.prLinksFile.get()
+        mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ body: '' })] })
+        mocks.fetchPrs.mockResolvedValue({ viewer: 'me', lookups: [{ status: 'gone' }] })
+        await prList.refresh()
+        expect(mocks.store.prLinksFile.get()).toBe(stored)
+      })
+
       it('never fetches companions for the authored list', async () => {
         mocks.searchPrs.mockResolvedValue({ viewer: 'me', prs: [api({ author: 'me' })] })
         await authoredPrList.refresh()

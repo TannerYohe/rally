@@ -91,6 +91,7 @@ describe('computeAuthorPhase', () => {
 
   it('awaits reviews when GitHub feedback is missing and nothing is open', () => {
     expect(computeAuthorPhase(null, IDLE)).toBe('awaiting_reviews')
+    expect(computeAuthorPhase(null, null)).toBe('awaiting_reviews')
   })
 
   it('is approved when GitHub says so', () => {

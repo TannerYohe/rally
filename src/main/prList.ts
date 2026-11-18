@@ -13,7 +13,7 @@ import {
 } from '@shared/types'
 import { errorMessage } from '@shared/errors'
 import { summarizePr } from './claude/summarize'
-import { computeAuthorPhase } from './github/authorPhase'
+import { computeAuthorPhase, type AuthorSessionPhaseInput } from './github/authorPhase'
 import { computePhase } from './github/phase'
 import { fetchPr, searchPrs, type GithubPr } from './github/queries'
 import { AUTHORED_SEARCH_QUERIES, buildSearchQueries } from './github/search'
@@ -35,10 +35,8 @@ import {
 
 const SUMMARY_CONCURRENCY = 3
 
-export interface SessionState {
+export interface SessionState extends AuthorSessionPhaseInput {
   status: SessionStatus
-  active: boolean
-  openFindings: number
 }
 
 /** Drops state kept for PRs that a full refresh no longer lists, given the keys of the PRs it did list. */
@@ -293,7 +291,7 @@ function reviewPhase(pr: PhaseInput, session: SessionState | null): Phase {
 }
 
 function authorPhase(pr: PhaseInput, session: SessionState | null): Phase {
-  return computeAuthorPhase(pr.feedback, { active: session?.active ?? false, openFindings: session?.openFindings ?? 0 })
+  return computeAuthorPhase(pr.feedback, session)
 }
 
 export const prList = new ReviewPrList({

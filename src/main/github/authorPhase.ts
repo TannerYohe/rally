@@ -38,9 +38,9 @@ export interface AuthorSessionPhaseInput {
 }
 
 /** Returns the author-side phase; an unacknowledged comment, an open self-review finding, or more activity than one query reads outranks an approval. */
-export function computeAuthorPhase(feedback: PrFeedback | null, session: AuthorSessionPhaseInput): AuthorPhase {
-  if (session.active) return 'in_progress'
-  if (session.openFindings > 0 || feedback?.unacknowledged || feedback?.truncated) return 'needs_response'
+export function computeAuthorPhase(feedback: PrFeedback | null, session: AuthorSessionPhaseInput | null): AuthorPhase {
+  if (session?.active) return 'in_progress'
+  if ((session?.openFindings ?? 0) > 0 || feedback?.unacknowledged || feedback?.truncated) return 'needs_response'
   if (feedback && isApproved(feedback)) return 'approved'
   return 'awaiting_reviews'
 }

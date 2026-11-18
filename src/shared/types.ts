@@ -145,6 +145,8 @@ export interface Config {
   includeReviewRequests: boolean
   pollIntervalMinutes: number
   reviewSkill: string
+  /** Folders whose git repos, and the repos one level down, Rally searches for a local clone of a My PRs repo. */
+  localRepoFolders: string[]
   reviewModel: ModelChoice | null
   reviewEffort: EffortChoice | null
   subagentModel: ModelChoice | null
@@ -165,6 +167,7 @@ export const DEFAULT_CONFIG: Config = {
   includeReviewRequests: true,
   pollIntervalMinutes: 5,
   reviewSkill: 'review-pr',
+  localRepoFolders: ['~/src'],
   reviewModel: null,
   reviewEffort: null,
   subagentModel: null,

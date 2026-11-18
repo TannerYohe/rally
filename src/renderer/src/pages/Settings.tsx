@@ -210,6 +210,20 @@ function PullRequestsSection({ config, onChange }: SectionProps) {
           </span>
         </Row>
       </Card>
+      <Card title="My PRs">
+        <StackedRow
+          label="Local repo folders"
+          description={
+            <>
+              Folders that hold your clones, such as <code className="text-ink-300">~/src</code>. Rally looks for the PR's repo in each folder
+              and one level down, then works in the worktree that has the PR branch checked out, or adds one under{' '}
+              <code className="text-ink-300">~/rally-worktrees</code>. Without a match, Rally clones the branch into a temp folder.
+            </>
+          }
+        >
+          <TagInput values={config.localRepoFolders} placeholder="Add a folder" onChange={(localRepoFolders) => onChange({ ...config, localRepoFolders })} />
+        </StackedRow>
+      </Card>
     </>
   )
 }
